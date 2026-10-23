@@ -1,10 +1,7 @@
 name: "CLA Assistant"
 
 on:
-  issue_comment:
-    types: [created]
-  pull_request_target:
-    types: [opened, reopened, closed, synchronize]
+  workflow_dispatch:
 
 permissions:
   actions: write
@@ -16,6 +13,14 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  manual-notice:
+    name: CLA 已停用（仅说明）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 说明 CLA 停用状态
+        run: |
+          printf '%s\n' 'CLA 自动检查已停用。本次仅显示说明，未检查签署状态，也不会评论、锁定 PR 或更新签署记录。原处理逻辑保留供以后恢复。' | tee -a "$GITHUB_STEP_SUMMARY"
+
   cla-check:
     if: |
       github.repository == 'Wei-Shaw/sub2api' &&
