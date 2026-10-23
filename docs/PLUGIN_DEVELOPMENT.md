@@ -118,6 +118,12 @@ Bridge 2 配置页与业务页先建立文档专属端口：SDK 自身 load 前�
 
 详细握手与信封见 [UI Bridge](../backend/pkg/pluginapi/docs/ui-bridge.md)，示例共用封装位于 [`examples/common/bridge.js`](../backend/pkg/pluginapi/examples/common/bridge.js)。Bridge 2 早期初始化请求在握手 ACK 后正常执行，不要求 load 前派发；业务页也可在收到首次端口 `context.changed` 后初始化。路由更新取消旧请求、保留端口并推新 context；身份/入口/代次变化、失败或卸载使端口和挑战一同失效。
 
+辅助面板在不同的已登录 AppLayout 页面之间保留原 iframe 和连接；公开及无 AppLayout 页面不加载。主站登录令牌续期会重新加载业务页面和辅助面板，schema 2 管理配置页会关闭；未保存的内容可能丢失。已经发出的写操作可能完成，请重新读取实际结果，勿自动重试。schema 1 管理配置保持原续期行为。
+
+Bridge 1 配置请求的30秒计时只让回复过期：TOTP对话框保持，已发出的保存/测试继续，之后验证成功仍可操作，但过期结果不再回包；关闭、重载、卸载使旧文档操作失效。Bridge 2 超时仍取消请求和二次验证。取消HTTP请求不能证明保存没有发生，应先重新读取配置确认。
+
+原HTTP客户端的每次请求30秒超时保持不变；Bridge回复计时包含等待二次验证的时间，HTTP计时则从实际派发时开始。
+
 ## 6. 编写包清单
 
 自建打包流程可维护 `manifest.source.json`，由工具生成最终清单与哈希；现有示例打包器直接生成清单，不读取这个源文件。下面是 schema 1 模板，版本范围与已测试版本仅用于说明格式，发布时必须按实测填写：

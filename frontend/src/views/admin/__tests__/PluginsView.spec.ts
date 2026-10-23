@@ -504,4 +504,40 @@ describe('管理员插件页二次验证', () => {
       wrapper.unmount(); wrapper.element.remove()
     } finally { vi.useRealTimers() }
   })
+
+  it('still cancels a Bridge2 write waiting for step-up after its 30-second timeout', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let approve!: () => void
+      stepUpRun.mockImplementationOnce(action => new Promise((resolve, reject) => { approve = () => { try { resolve(action()) } catch (error) { reject(error) } } }))
+      const { wrapper, iframe, driver } = await mountBridge2()
+      await iframe.trigger('load')
+      driver!.message('config.save', 'expired-proof', { config: { forbidden: true } })
+      stepUpCancel.mockClear()
+      await vi.advanceTimersByTimeAsync(30_001)
+      expect(stepUpCancel).toHaveBeenCalled()
+      approve(); await flushPromises()
+      expect(savePluginConfig).not.toHaveBeenCalled()
+      expect(driver!.post.mock.calls.some(([data]) => data.request_id === 'expired-proof')).toBe(false)
+      wrapper.unmount(); wrapper.element.remove()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('still aborts an already dispatched Bridge2 configuration save at 30 seconds', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let finish!: (value: unknown) => void
+      savePluginConfig.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+      const { wrapper, iframe, driver } = await mountBridge2()
+      await iframe.trigger('load')
+      driver!.message('config.save', 'expired-save', { config: { changed: true } })
+      await flushPromises()
+      const signal = savePluginConfig.mock.calls[0][2] as AbortSignal
+      await vi.advanceTimersByTimeAsync(30_001)
+      expect(signal.aborted).toBe(true)
+      finish({ changed: true }); await flushPromises()
+      expect(driver!.post.mock.calls.some(([data]) => data.request_id === 'expired-save')).toBe(false)
+      wrapper.unmount(); wrapper.element.remove()
+    } finally { vi.useRealTimers() }
+  })
 })

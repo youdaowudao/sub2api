@@ -685,11 +685,12 @@ function configurationFrameFailed(): void {
 async function handleBridgeMessage(message: PluginBridgeMessage, request: PluginBridgeRequest): Promise<void> {
   const pluginID = configPlugin.value?.id;
   if (!pluginID) return;
+  const legacy = uiSession.value?.ui_bridge_version === 1;
   const sensitive = <T,>(action: () => Promise<T>) => {
     const cancelStepUp = () => pluginStepUp.onCancel?.();
     request.signal.addEventListener("abort", cancelStepUp, { once: true });
     return pluginStepUp.run(() => {
-      if (!request.active()) throw new Error("Request expired");
+      if (request.signal.aborted) throw new Error("Request expired");
       return action();
     }).finally(() => request.signal.removeEventListener("abort", cancelStepUp));
   };
@@ -708,12 +709,13 @@ async function handleBridgeMessage(message: PluginBridgeMessage, request: Plugin
           throw new Error(t("admin.plugins.bridgeRejected"));
         }
         const config = await sensitive(() => adminAPI.plugins.saveConfig(pluginID, message.config as Record<string, unknown>, request.signal));
-        if (request.reply({ ok: true, config })) appStore.showSuccess(t("common.saved"));
+        if (request.reply({ ok: true, config }) || (legacy && !request.signal.aborted)) appStore.showSuccess(t("common.saved"));
         break;
       }
       case "config.test": {
         const result = await sensitive(() => adminAPI.plugins.test(pluginID, request.signal));
-        if (request.reply({ ok: result.success, result }) && !result.success) appStore.showError(result.message || t("common.error"));
+        const notify = request.reply({ ok: result.success, result }) || (legacy && !request.signal.aborted);
+        if (notify && !result.success) appStore.showError(result.message || t("common.error"));
         break;
       }
       case "plugin.status": {
@@ -736,7 +738,7 @@ async function handleBridgeMessage(message: PluginBridgeMessage, request: Plugin
       }
     }
   } catch (error: unknown) {
-    if (!request.active()) return;
+    if (request.signal.aborted) return;
     if (isStepUpBlocked(error)) reportSensitiveActionError(error);
     request.reply({ ok: false, error: isStepUpCancelled(error) ? t("common.cancel") : errorMessage(error) });
   }

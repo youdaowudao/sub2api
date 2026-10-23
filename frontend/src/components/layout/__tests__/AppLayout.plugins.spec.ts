@@ -1,8 +1,9 @@
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { reactive } from 'vue'
+import { defineComponent, reactive } from 'vue'
 import AppLayout from '../AppLayout.vue'
+import PluginHost from '@/components/plugins/PluginHost.vue'
 
 enableAutoUnmount(afterEach)
 const mocks = vi.hoisted(() => ({ list: vi.fn(), replay: vi.fn(), setReplay: vi.fn() }))
@@ -25,10 +26,11 @@ describe('AppLayout plugin lifecycle', () => {
   it('keeps public pages free of plugin loading, keeps the existing tour, and cleans the authenticated poller', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     try {
-      const wrapper = mount(AppLayout, { global: { stubs: {
+      const root = defineComponent({ components: { PluginHost, AppLayout }, template: '<PluginHost><AppLayout><p>Page content</p></AppLayout></PluginHost>' })
+      const wrapper = mount(root, { global: { stubs: {
         AppSidebar: { template: '<aside />' }, AppHeader: true,
         PluginShell: { props: ['anchors'], template: '<section data-plugin-shell />' },
-      } }, slots: { default: '<p>Page content</p>' } })
+      } } })
       await flushPromises()
       expect(mocks.list).not.toHaveBeenCalled()
       expect(wrapper.find('[data-plugin-shell]').exists()).toBe(false)

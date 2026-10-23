@@ -166,7 +166,7 @@ async function handleMessage(message: PluginBridgeMessage, request: PluginBridge
           const y = Math.max(0, Math.min(window.innerHeight, rect.y))
           anchorRect.value = { x, y, width: Math.max(0, Math.min(window.innerWidth, rect.right) - x), height: Math.max(0, Math.min(window.innerHeight, rect.bottom) - y) }
         }
-        request.reply({ ok: true, rect: anchorRect.value })
+        request.reply({ ok: true, rect: anchorRect.value ? { ...anchorRect.value } : null })
         break
       }
     }

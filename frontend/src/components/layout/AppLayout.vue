@@ -19,39 +19,32 @@
         <slot />
       </main>
     </div>
-    <PluginShell v-if="pluginsEnabled" :anchors="anchors" />
   </div>
 </template>
 
 <script setup lang="ts">
 import '@/styles/onboarding.css'
-import { computed, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, inject, onBeforeUnmount, onMounted, ref, type ComponentPublicInstance } from 'vue'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingTour } from '@/composables/useOnboardingTour'
 import { useOnboardingStore } from '@/stores/onboarding'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
-import PluginShell from '@/components/plugins/PluginShell.vue'
-import { usePluginEntriesStore } from '@/stores/pluginEntries'
+import { pluginLayoutKey } from '@/components/plugins/layoutContext'
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const isAdmin = computed(() => authStore.user?.role === 'admin')
-const route = useRoute()
-const pluginEntries = usePluginEntriesStore()
 const sidebarRef = ref<ComponentPublicInstance | null>(null)
 const contentRef = ref<HTMLElement | null>(null)
 const anchors = computed(() => ({ navigation: (sidebarRef.value?.$el as HTMLElement) || null, content: contentRef.value }))
-const pluginsEnabled = computed(() => authStore.isAuthenticated && authStore.user?.status === 'active' && route.meta.requiresAuth === true)
-let releasePluginEntries: (() => void) | undefined
-watch(pluginsEnabled, enabled => {
-  releasePluginEntries?.()
-  releasePluginEntries = enabled ? pluginEntries.acquire() : undefined
-}, { immediate: true })
-onBeforeUnmount(() => { releasePluginEntries?.() })
+const pluginLayout = inject(pluginLayoutKey, null)
+if (pluginLayout) pluginLayout.value = anchors
+onBeforeUnmount(() => {
+  if (pluginLayout && Object.is(pluginLayout.value, anchors)) pluginLayout.value = null
+})
 
 const { replayTour } = useOnboardingTour({
   storageKey: isAdmin.value ? 'admin_guide' : 'user_guide',

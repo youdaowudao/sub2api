@@ -39,11 +39,16 @@ export function createPluginBridge(options: BridgeOptions) {
   let listening = false
   let challenge: string | undefined
   let connection: BridgeConnection | undefined
+  // Bridge1's 30-second timer expires only the reply. Its operations share the
+  // document lifetime so even an expired request is cancelled on close/reload.
+  let legacyController = new AbortController()
 
   const usesPort = () => options.version?.() === 2
 
   function reset(): void {
     generation++
+    legacyController.abort()
+    legacyController = new AbortController()
     for (const request of pending.values()) {
       window.clearTimeout(request.timeout)
       request.controller.abort()
@@ -102,7 +107,7 @@ export function createPluginBridge(options: BridgeOptions) {
     if (expectsResponse && (!requestID || pending.has(requestID) || pending.size >= 32)) return
 
     const currentGeneration = generation
-    const controller = new AbortController()
+    const controller = target ? new AbortController() : legacyController
     const current: PendingRequest = { controller, timeout: 0 }
     const active = () => generation === currentGeneration && !controller.signal.aborted &&
       (!target || connection === target) && options.token() === token &&
@@ -121,7 +126,7 @@ export function createPluginBridge(options: BridgeOptions) {
       current.timeout = window.setTimeout(() => {
         if (options.timeoutPayload) reply(options.timeoutPayload)
         if (pending.get(requestID) === current) pending.delete(requestID)
-        controller.abort()
+        if (target) controller.abort()
       }, 30_000)
     }
     // Handlers own user-visible error messages. Keep the event listener free of

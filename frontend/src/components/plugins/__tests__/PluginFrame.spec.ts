@@ -219,6 +219,22 @@ describe('business plugin frame', () => {
     expect(post).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'ui.close.result', ok: true }))
   })
 
+  it('returns a plain anchor rectangle that the real MessagePort can clone', async () => {
+    const element = document.createElement('main')
+    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({ x: 10, y: 20, right: 210, bottom: 320 } as DOMRect)
+    const { message, post } = await mountFrame('shell', { navigation: element, content: element })
+    const delivered: unknown[] = []
+    // Native MessagePort.postMessage performs structured cloning; a reactive
+    // rectangle can draw the outline while its reply still fails to cross it.
+    post.mockImplementation(data => { delivered.push(structuredClone(data)) })
+    message('ui.anchor', 'cloneable-anchor', { target: 'content' })
+    await flushPromises()
+    expect(delivered).toContainEqual(expect.objectContaining({ request_id: 'cloneable-anchor', ok: true, rect: { x: 10, y: 20, width: 200, height: 300 } }))
+    message('ui.anchor', 'clear-anchor', { target: null })
+    await flushPromises()
+    expect(delivered).toContainEqual(expect.objectContaining({ request_id: 'clear-anchor', rect: null }))
+  })
+
   it('does not expose shell messages on an ordinary business page and clamps height', async () => {
     const { wrapper, message, post } = await mountFrame()
     message('ui.close', 'close')

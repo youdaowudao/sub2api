@@ -51,6 +51,10 @@ Bridge2先建立文档专属MessagePort：SDK自身load前排队，load后发无
 
 管理配置仍使用原config.load/save/test、plugin.status和二次验证。schema2配置页面协商Bridge2，只开放该配置子集；业务页面不能读写宿主管理配置。无效/停用/越权、RPC超时和写结果未知使用明确reason与request_id元数据。审计保留操作摘要，不保存任意payload或配置body。
 
+辅助面板在不同的已登录AppLayout页面之间保留原iframe和port，路由变化仍取消旧请求/二次验证/轮廓并推送新context；公开及无AppLayout页面不加载。主站登录令牌续期会重新加载业务页面和辅助面板，schema2管理配置页会关闭；未保存的内容可能丢失。已经发出的写操作可能完成，请重新读取实际结果，勿自动重试。schema1配置保持原续期及30秒仅回复过期的行为，详见[UI Bridge](ui-bridge.md#管理配置方法)。
+
+宿主HTTP客户端仍保留原来的每次请求30秒超时；它与包含TOTP等待时间的Bridge回复期限分别计时。
+
 ## 生命周期、恢复与安全限制
 
 每副本可有本地运行时，后台只由宿主每5秒驱动RunOnce；期限5秒，独立LeaderLockCache锁TTL30秒，无协调或锁故障就跳过。超时撤权并杀死、等待进程退出后释放锁；进程启动/Health/配置页不驱动业务。插件仍应对外部副作用幂等。
