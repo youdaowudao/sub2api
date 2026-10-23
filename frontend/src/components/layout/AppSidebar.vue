@@ -189,6 +189,8 @@
 
 <script setup lang="ts">
 import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { usePluginEntriesStore } from '@/stores/pluginEntries'
+import { pluginEntryPath } from '@/api/plugins'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
@@ -242,6 +244,7 @@ const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const pluginEntries = usePluginEntriesStore()
 const onboardingStore = useOnboardingStore()
 const adminSettingsStore = useAdminSettingsStore()
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
@@ -740,6 +743,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
       icon: null,
       iconSvg: item.icon_svg,
     })),
+    ...pluginEntries.forMount('user').map((entry): NavItem => ({ path: pluginEntryPath(entry), label: entry.label, icon: PluginIcon })),
   )
   return items
 }
@@ -836,7 +840,8 @@ const adminNavItems = computed((): NavItem[] => {
       ],
     },
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
-    { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
+    { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true },
+    ...pluginEntries.forMount('admin').map((entry): NavItem => ({ path: pluginEntryPath(entry), label: entry.label, icon: PluginIcon }))
   ]
 
   const visible = applyFeatureFlags(baseItems)

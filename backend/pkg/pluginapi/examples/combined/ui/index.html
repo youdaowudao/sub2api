@@ -1,0 +1,8 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>组合插件示例</title>
+<style>body{font:16px system-ui;margin:24px;color:#334155}button,input{padding:8px 12px;margin:4px;border:1px solid #94a3b8;border-radius:6px;background:white}pre{white-space:pre-wrap;background:#f1f5f9;padding:12px}</style>
+<h1>组合插件</h1><p>页面通过宿主授权调用本插件后台；记录按当前用户隔离。</p>
+<input id="value" aria-label="测试内容" value="独立插件已连接"><button id="echo">查看调用身份</button><button id="read">读取我的记录</button><button id="save">保存我的记录</button><button id="events">查看已完成建号（管理员）</button>
+<pre id="result" role="status">请选择操作。</pre><script src="bridge.js" data-bridge-version="2"></script><script>
+const output=document.getElementById('result');
+for(const [id,method] of [['echo','echo'],['read','read_note'],['save','write_note'],['events','event_list']])document.getElementById(id).onclick=()=>{output.textContent='正在执行…';bridge.request('plugin.call',{method,payload:{value:document.getElementById('value').value}}).then(message=>output.textContent=JSON.stringify(message.result,null,2)).catch(error=>output.textContent=error.message)};
+</script></html>

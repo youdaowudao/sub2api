@@ -144,7 +144,9 @@ type pluginHostServiceServer struct {
 	store     PluginKVStore
 	directory PluginAccountDirectory
 	// scope 是宿主授予本插件的账号可见范围。账号目录的两个 RPC 都以它为权限边界。
-	scope PluginAccountScope
+	scope     PluginAccountScope
+	access    *pluginRuntimeAccess
+	creations PluginUserCreationStore
 }
 
 func newPluginHostServiceServer(pluginKey string, store PluginKVStore, directory PluginAccountDirectory, scope PluginAccountScope) *pluginHostServiceServer {
@@ -165,12 +167,24 @@ func (s *pluginHostServiceServer) KVGet(ctx context.Context, req *pluginv1.KVGet
 	if err := validatePluginKVNamespace(req.Namespace); err != nil {
 		return nil, err
 	}
+	callCtx, namespace, cleanup, err := s.authorizeKV(ctx, req.AccessToken, req.Namespace, false)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
 	if err := validatePluginKVKey(req.Key); err != nil {
 		return nil, err
 	}
-	value, found, err := s.store.Get(ctx, s.pluginKey, req.Namespace, req.Key)
+	value, found, err := s.store.Get(callCtx, s.pluginKey, namespace, req.Key)
 	if err != nil {
+		if s.access != nil {
+			return nil, status.Error(codes.Unavailable, "读取键值失败，宿主存储暂不可用")
+		}
 		return nil, status.Errorf(codes.Internal, "读取键值失败: %v", err)
+	}
+	if s.access != nil && len(value) > pluginKVMaxValueBytes {
+		return nil, status.Error(codes.ResourceExhausted, "键值数据超过插件读取上限")
 	}
 	if !found {
 		return &pluginv1.KVGetResponse{Found: false}, nil
@@ -188,6 +202,12 @@ func (s *pluginHostServiceServer) KVSet(ctx context.Context, req *pluginv1.KVSet
 	if err := validatePluginKVNamespace(req.Namespace); err != nil {
 		return nil, err
 	}
+	callCtx, namespace, cleanup, err := s.authorizeKV(ctx, req.AccessToken, req.Namespace, true)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
 	if err := validatePluginKVKey(req.Key); err != nil {
 		return nil, err
 	}
@@ -198,7 +218,10 @@ func (s *pluginHostServiceServer) KVSet(ctx context.Context, req *pluginv1.KVSet
 	if err != nil {
 		return nil, err
 	}
-	if err := s.store.Set(ctx, s.pluginKey, req.Namespace, req.Key, req.Value, ttl); err != nil {
+	if err := s.store.Set(callCtx, s.pluginKey, namespace, req.Key, req.Value, ttl); err != nil {
+		if s.access != nil {
+			return nil, status.Error(codes.Unavailable, "写入键值失败，宿主存储暂不可用")
+		}
 		return nil, status.Errorf(codes.Internal, "写入键值失败: %v", err)
 	}
 	return &pluginv1.KVSetResponse{}, nil
@@ -214,10 +237,19 @@ func (s *pluginHostServiceServer) KVDelete(ctx context.Context, req *pluginv1.KV
 	if err := validatePluginKVNamespace(req.Namespace); err != nil {
 		return nil, err
 	}
+	callCtx, namespace, cleanup, err := s.authorizeKV(ctx, req.AccessToken, req.Namespace, true)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
 	if err := validatePluginKVKey(req.Key); err != nil {
 		return nil, err
 	}
-	if err := s.store.Delete(ctx, s.pluginKey, req.Namespace, req.Key); err != nil {
+	if err := s.store.Delete(callCtx, s.pluginKey, namespace, req.Key); err != nil {
+		if s.access != nil {
+			return nil, status.Error(codes.Unavailable, "删除键值失败，宿主存储暂不可用")
+		}
 		return nil, status.Errorf(codes.Internal, "删除键值失败: %v", err)
 	}
 	return &pluginv1.KVDeleteResponse{}, nil
@@ -233,6 +265,12 @@ func (s *pluginHostServiceServer) KVList(ctx context.Context, req *pluginv1.KVLi
 	if err := validatePluginKVNamespace(req.Namespace); err != nil {
 		return nil, err
 	}
+	callCtx, namespace, cleanup, err := s.authorizeKV(ctx, req.AccessToken, req.Namespace, false)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
 	if req.KeyPrefix != "" {
 		if err := validatePluginKVKey(req.KeyPrefix); err != nil {
 			return nil, err
@@ -245,14 +283,20 @@ func (s *pluginHostServiceServer) KVList(ctx context.Context, req *pluginv1.KVLi
 	if limit > pluginKVMaxListLimit {
 		limit = pluginKVMaxListLimit
 	}
-	keys, err := s.store.List(ctx, s.pluginKey, req.Namespace, req.KeyPrefix, limit)
+	keys, err := s.store.List(callCtx, s.pluginKey, namespace, req.KeyPrefix, limit)
 	if err != nil {
+		if s.access != nil {
+			return nil, status.Error(codes.Unavailable, "列举键值失败，宿主存储暂不可用")
+		}
 		return nil, status.Errorf(codes.Internal, "列举键值失败: %v", err)
 	}
 	return &pluginv1.KVListResponse{Keys: keys}, nil
 }
 
 func (s *pluginHostServiceServer) ListAccounts(ctx context.Context, req *pluginv1.ListAccountsRequest) (*pluginv1.ListAccountsResponse, error) {
+	if s != nil && s.access != nil {
+		return nil, status.Error(codes.PermissionDenied, "通用插件没有账号目录或凭据权限")
+	}
 	if s == nil || s.directory == nil || s.scope.Empty() {
 		return nil, status.Error(codes.Unavailable, "账号目录不可用")
 	}
@@ -275,6 +319,9 @@ func (s *pluginHostServiceServer) ListAccounts(ctx context.Context, req *pluginv
 }
 
 func (s *pluginHostServiceServer) ResolveOutboundIdentity(ctx context.Context, req *pluginv1.ResolveOutboundIdentityRequest) (*pluginv1.ResolveOutboundIdentityResponse, error) {
+	if s != nil && s.access != nil {
+		return nil, status.Error(codes.PermissionDenied, "通用插件没有账号目录或凭据权限")
+	}
 	if s == nil || s.directory == nil || s.scope.Empty() {
 		return nil, status.Error(codes.Unavailable, "账号目录不可用")
 	}
@@ -367,4 +414,48 @@ func isValidPluginKVSegment(value string, maxLen int) bool {
 		}
 	}
 	return true
+}
+
+func (s *pluginHostServiceServer) ListUserCreations(ctx context.Context, req *pluginv1.ListUserCreationsRequest) (*pluginv1.ListUserCreationsResponse, error) {
+	if s == nil || s.access == nil {
+		return nil, status.Error(codes.PermissionDenied, "此运行时不提供用户创建观察")
+	}
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "请求为空")
+	}
+	grant, callCtx, cleanup, err := s.access.authorize(ctx, req.AccessToken, PluginCapabilityUsersCreatedRead, false)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	if !grant.background && grant.caller.Role != RoleAdmin {
+		return nil, status.Error(codes.PermissionDenied, "只有后台工作或管理员调用可以观察用户创建")
+	}
+	if req.AfterUserId < 0 || req.ThroughUserId < 0 {
+		return nil, status.Error(codes.InvalidArgument, "用户创建读取游标不能为负")
+	}
+	if s.creations == nil {
+		return nil, status.Error(codes.Unavailable, "用户创建完成记录暂不可用")
+	}
+	limit := int(req.Limit)
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	includeEmail := s.access.manifest.HasCapability(PluginCapabilityUsersEmailRead)
+	page, err := s.creations.List(callCtx, req.AfterUserId, req.ThroughUserId, limit, includeEmail)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "读取用户创建完成记录失败，可在下一轮重试")
+	}
+	if page == nil {
+		return nil, status.Error(codes.Internal, "用户创建完成记录未返回结果")
+	}
+	response := &pluginv1.ListUserCreationsResponse{Items: make([]*pluginv1.UserCreation, 0, len(page.Items)), NextUserId: page.NextUserID, ThroughUserId: page.ThroughUserID, Done: page.Done}
+	for _, item := range page.Items {
+		email := ""
+		if includeEmail {
+			email = item.Email
+		}
+		response.Items = append(response.Items, &pluginv1.UserCreation{EventId: item.EventID, UserId: item.UserID, CreatedAt: item.CreatedAt.UTC().Format(time.RFC3339Nano), CompletedAt: item.CompletedAt.UTC().Format(time.RFC3339Nano), SignupSource: item.SignupSource, Email: email})
+	}
+	return response, nil
 }

@@ -173,6 +173,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 	}
 
 	applyUserEntityToService(userIn, created)
+	service.TrackUserCreation(ctx, userIn.ID)
 	return nil
 }
 

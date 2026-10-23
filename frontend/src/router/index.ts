@@ -188,6 +188,18 @@ const routes: RouteRecordRaw[] = [
 
   // ==================== User Routes ====================
   {
+    path: '/extensions/:pluginID/:entryID',
+    name: 'PluginExtension',
+    component: () => import('@/views/plugins/PluginView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: false, title: 'Plugin', titleKey: 'admin.plugins.businessTitle' }
+  },
+  {
+    path: '/admin/extensions/:pluginID/:entryID',
+    name: 'AdminPluginExtension',
+    component: () => import('@/views/plugins/PluginView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Plugin', titleKey: 'admin.plugins.businessTitle' }
+  },
+  {
     path: '/',
     redirect: '/home'
   },

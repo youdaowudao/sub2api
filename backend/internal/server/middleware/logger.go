@@ -6,6 +6,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -60,7 +61,7 @@ func Logger() gin.HandlerFunc {
 			zap.String("client_ip", clientIP),
 			zap.String("protocol", protocol),
 			zap.String("method", method),
-			zap.String("path", path),
+			zap.String("path", logredact.RedactPluginAssetPaths(path)),
 		}
 		if rejected {
 			fields = append(fields,

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -307,5 +308,70 @@ func TestLogger_AccessLogDroppedWhenLevelWarn(t *testing.T) {
 		if event != nil && event.Message == "http request completed" {
 			t.Fatalf("access log should not be indexed when level=warn: %+v", event)
 		}
+	}
+}
+
+func TestPluginAssetCapabilityNeverAppearsInContextOrAccessLog(t *testing.T) {
+	for _, path := range []string{
+		"/api/v1/plugin-ui/fixture-private-asset-capability/index.html",
+		"/api/v1/plugin-entry-ui/7/fixture-private-asset-capability/index.html",
+	} {
+		t.Run(path[:18], func(t *testing.T) {
+			sink := initMiddlewareTestLogger(t)
+			router := gin.New()
+			router.Use(RequestLogger(), Logger())
+			router.GET(path, func(c *gin.Context) {
+				if c.Request.URL.Path != path {
+					t.Fatal("日志脱敏不能改变真实请求路径")
+				}
+				logger.FromContext(c.Request.Context()).Info("plugin resource context check")
+				c.Status(http.StatusOK)
+			})
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+			if recorder.Code != http.StatusOK {
+				t.Fatal("真实资源入口不可被日志修正改变")
+			}
+			events := sink.list()
+			if len(events) < 2 {
+				t.Fatal("缺少请求上下文或访问日志证据")
+			}
+			for _, event := range events {
+				if value, ok := event.Fields["path"].(string); ok && strings.Contains(value, "fixture-private-asset-capability") {
+					t.Error("插件资源能力URL不得进入请求上下文或访问日志")
+				}
+			}
+		})
+	}
+}
+
+func TestPluginAssetCapabilityNeverAppearsInRecoveryLog(t *testing.T) {
+	originalMode := gin.Mode()
+	gin.SetMode(gin.DebugMode)
+	t.Cleanup(func() { gin.SetMode(originalMode) })
+	for _, path := range []string{
+		"/api/v1/plugin-ui/fixture-private-asset-capability/index.html",
+		"/api/v1/plugin-entry-ui/7/fixture-private-asset-capability/index.html",
+	} {
+		t.Run(path[:18], func(t *testing.T) {
+			var output bytes.Buffer
+			original := gin.DefaultErrorWriter
+			gin.DefaultErrorWriter = &output
+			t.Cleanup(func() { gin.DefaultErrorWriter = original })
+			router := gin.New()
+			router.Use(Recovery())
+			router.GET(path, func(c *gin.Context) { panic("plugin asset fixture panic") })
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+			if recorder.Code != http.StatusInternalServerError {
+				t.Fatal("保留原标准500处理")
+			}
+			if strings.Contains(output.String(), "fixture-private-asset-capability") {
+				t.Error("恢复日志不得保存插件资源能力URL")
+			}
+			if !strings.Contains(output.String(), "plugin asset fixture panic") {
+				t.Error("脱敏不能丢失原错误原因")
+			}
+		})
 	}
 }
