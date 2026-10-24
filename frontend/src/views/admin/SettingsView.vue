@@ -4431,6 +4431,7 @@
                     </div>
                     <!-- /auth source 平台限额覆盖区块 -->
                   </div>
+                  <ForkEmailSignupFilterSettings v-if="authSource.source === 'email'" />
                 </div>
               </div>
             </div>
@@ -9041,6 +9042,7 @@ import {
   type RechargeBonusTierDraft,
 } from "@/utils/rechargeBonus";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
+import ForkEmailSignupFilterSettings from "@/views/admin/settings/ForkEmailSignupFilterSettings.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import {
   useStepUp,
