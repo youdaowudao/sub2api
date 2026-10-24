@@ -178,6 +178,7 @@
 </template>
 
 <script setup lang="ts">
+import { recordGuideRegistration } from '@/features/guide/registration'
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -719,7 +720,7 @@ async function handleVerify(): Promise<void> {
       authStore.clearPendingAuthSession?.()
     } else {
       // Register with verification code
-      await authStore.register({
+      const registeredUser = await authStore.register({
         email: email.value,
         password: password.value,
         verify_code: verifyCode.value.trim(),
@@ -733,6 +734,7 @@ async function handleVerify(): Promise<void> {
         invitation_code: invitationCode.value || undefined,
         ...(affCode.value ? { aff_code: affCode.value } : {})
       })
+      recordGuideRegistration(registeredUser)
     }
 
     // Clear session data

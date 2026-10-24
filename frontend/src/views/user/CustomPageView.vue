@@ -27,6 +27,8 @@
           </div>
         </div>
 
+        <QuickStartArticle v-else-if="isBuiltinQuickStart" />
+
         <!-- Markdown mode with TOC -->
         <div v-else-if="isMarkdownMode" class="flex h-full overflow-hidden">
           <!-- TOC Sidebar -->
@@ -126,6 +128,8 @@
 </template>
 
 <script setup lang="ts">
+import QuickStartArticle from '@/features/guide/components/QuickStartArticle.vue'
+import { boundQuickStartMenuId } from '@/features/guide/config'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useResizeObserver } from '@vueuse/core'
@@ -232,7 +236,10 @@ const menuItem = computed(() => {
   return null
 })
 
+const isBuiltinQuickStart = computed(() => !!menuItem.value && menuItem.value.id === boundQuickStartMenuId())
+
 const markdownSlug = computed(() => {
+  if (isBuiltinQuickStart.value) return ''
   const item = menuItem.value
   if (!item) return ''
   if (item.page_slug) return item.page_slug
@@ -243,7 +250,7 @@ const markdownSlug = computed(() => {
 const isMarkdownMode = computed(() => !!markdownSlug.value)
 
 const embeddedUrl = computed(() => {
-  if (!menuItem.value || isMarkdownMode.value) return ''
+  if (isBuiltinQuickStart.value || !menuItem.value || isMarkdownMode.value) return ''
   return buildEmbeddedUrl(
     menuItem.value.url,
     authStore.user?.id,

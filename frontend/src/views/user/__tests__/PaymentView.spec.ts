@@ -9,6 +9,64 @@ import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
 import type { CheckoutInfoResponse, MethodLimit, SubscriptionPlan } from '@/types/payment'
 
+describe('PaymentView guide availability marker', () => {
+  let wrapper: ReturnType<typeof shallowMount> | undefined
+  beforeEach(() => {
+    routeState.path = '/purchase'; routeState.query = {}
+    window.localStorage.clear(); appStoreState.setPublicSettings({ subscription_enabled: true })
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture())
+    createOrder.mockReset(); routerReplace.mockReset(); routerPush.mockReset()
+  })
+  afterEach(() => { wrapper?.unmount(); wrapper = undefined; appStoreState.setPublicSettings(undefined) })
+  function create() {
+    wrapper = shallowMount(PaymentView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Teleport: true, Transition: false } } })
+    return wrapper
+  }
+  it('stays loading until checkout resolves, then exposes all three normal recharge targets', async () => {
+    let done!: (value: ReturnType<typeof checkoutInfoFixture>) => void
+    getCheckoutInfo.mockReturnValue(new Promise(resolve => { done = resolve }))
+    create(); expect(wrapper!.get('[data-guide-recharge]').attributes('data-guide-recharge')).toBe('loading')
+    done(checkoutInfoFixture()); await flushPromises(); await flushPromises()
+    expect(wrapper!.get('[data-guide-recharge]').attributes('data-guide-recharge')).toBe('available')
+    for (const id of ['recharge-amount', 'recharge-method', 'recharge-submit']) expect(wrapper!.findAll(`[data-tour="${id}"]`)).toHaveLength(1)
+    expect(wrapper!.get('[data-tour="recharge-tabs"]').findAll('button')).toHaveLength(2)
+    expect(createOrder).not.toHaveBeenCalled()
+  })
+  it.each([
+    { subscriptions: true, balanceDisabled: true, methods: true },
+    { subscriptions: false, balanceDisabled: true, methods: true },
+    { subscriptions: true, balanceDisabled: false, methods: false },
+  ])('reports unavailable when recharge has no usable form: %j', async item => {
+    appStoreState.setPublicSettings({ subscription_enabled: item.subscriptions })
+    getCheckoutInfo.mockResolvedValue(item.methods
+      ? checkoutInfoWithPlansFixture({ checkout: { balance_disabled: item.balanceDisabled } })
+      : checkoutInfoFixture({ methods: {}, plans: checkoutInfoWithPlansFixture().data.plans }))
+    create(); await flushPromises(); await flushPromises()
+    expect(wrapper!.get('[data-guide-recharge]').attributes('data-guide-recharge')).toBe('unavailable')
+    expect(wrapper!.find('[data-tour="recharge-amount"]').exists()).toBe(false)
+    expect(createOrder).not.toHaveBeenCalled()
+  })
+  it('reports busy on the subscription tab and available after the user returns to recharge', async () => {
+    routeState.query = { tab: 'subscription' }
+    getCheckoutInfo.mockResolvedValue(checkoutInfoWithPlansFixture())
+    create(); await flushPromises(); await flushPromises()
+    expect(wrapper!.get('[data-guide-recharge]').attributes('data-guide-recharge')).toBe('busy')
+    const recharge = wrapper!.findAll('button').find(button => button.text() === 'payment.tabTopUp')!
+    await recharge.trigger('click')
+    expect(wrapper!.get('[data-guide-recharge]').attributes('data-guide-recharge')).toBe('available')
+    expect(createOrder).not.toHaveBeenCalled()
+  })
+  it('reports busy for a restored unpaid order without changing the recovery snapshot', async () => {
+    const snapshot = { orderId: 901, amount: 10, qrCode: 'isolated-test-qr', expiresAt: '2099-01-01T00:10:00Z', paymentType: 'wxpay', payUrl: '', outTradeNo: 'guide-fixture', clientSecret: '', intentId: '', currency: 'CNY', countryCode: '', paymentEnv: '', payAmount: 10, orderType: 'balance', paymentMode: 'qr', resumeToken: '', createdAt: Date.now() }
+    const original = JSON.stringify(snapshot)
+    window.localStorage.setItem(PAYMENT_RECOVERY_STORAGE_KEY, original)
+    create(); await flushPromises(); await flushPromises()
+    expect(wrapper!.get('[data-guide-recharge]').attributes('data-guide-recharge')).toBe('busy')
+    expect(window.localStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY)).toBe(original)
+    expect(createOrder).not.toHaveBeenCalled()
+  })
+})
+
 const routeState = vi.hoisted(() => ({
   path: '/purchase',
   query: {} as Record<string, unknown>,

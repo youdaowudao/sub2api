@@ -357,4 +357,15 @@ describe('DataTable', () => {
 
     expect(wrapper.emitted('update:selectedKeys')?.at(-1)?.[0]).toEqual([99, 1, 2])
   })
+  it('exposes the same stable row ID on mobile cards after sorting and row replacement', async () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, { props: {
+      columns: [{ key: 'name', label: 'Name' }], data: [{ id: 72, name: 'Alpha' }], rowKey: 'id'
+    } })
+    expect(wrapper.get('[data-row-id="72"]').text()).toContain('Alpha')
+    await wrapper.setProps({ data: [{ id: 72, name: 'Beta' }] })
+    expect(wrapper.get('[data-row-id="72"]').text()).toContain('Beta')
+    wrapper.unmount()
+  })
+
 })

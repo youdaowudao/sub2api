@@ -725,6 +725,15 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
+  it("places the guide configuration directly after saved custom-menu settings", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const guide = wrapper.get('[data-guide-settings]').element;
+    expect(guide.previousElementSibling?.textContent).toContain('admin.settings.customMenu.add');
+    expect(guide.parentElement?.style.display).not.toBe('none');
+    wrapper.unmount();
+  });
+
   it("loads and saves the open button visibility for each custom menu", async () => {
     const menuItems = [
       { id: "docs", label: "Docs", url: "https://example.com/docs", icon_svg: "", visibility: "user", sort_order: 0 },

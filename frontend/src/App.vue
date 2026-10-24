@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import GuideHost from '@/features/guide/components/GuideHost.vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import { computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import Toast from '@/components/common/Toast.vue'
@@ -166,5 +167,6 @@ onMounted(async () => {
   <RouterView />
   <Toast />
   <AnnouncementPopup />
+  <GuideHost />
   <AdminComplianceDialog />
 </template>

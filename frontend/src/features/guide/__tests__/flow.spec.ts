@@ -1,0 +1,127 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createFlow } from '../flow'
+import { beginGuideAction, completeGuideAction } from '../businessEvents'
+import { steps } from '../steps'
+import { fakeDriver, installGuideDOM, keyPage, nextGuideStep, settle } from './fixture'
+
+describe('ordinary user guide flows', () => {
+  let flow: ReturnType<typeof createFlow>
+  const stopped = vi.fn()
+  beforeEach(() => { installGuideDOM(); sessionStorage.clear(); history.replaceState({}, '', '/keys'); keyPage(); stopped.mockReset() })
+  afterEach(() => { flow?.stop(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = '' })
+  async function createToSubmit() {
+    flow = createFlow(fakeDriver, { modules: ['keys'], onStop: stopped })
+    await flow.start({ userId: 7 }, { manual: true, module: 'keys' })
+    await nextGuideStep(); expect(flow.step).toBe('name')
+    await nextGuideStep(); expect(flow.step).toBe('provider')
+    await nextGuideStep(); expect(flow.step).toBe('group')
+    await nextGuideStep(); expect(flow.step).toBe('submit')
+  }
+  it('cannot skip creation, and a failed or merely submitted request never enters review', async () => {
+    await createToSubmit()
+    expect(document.querySelector('.s2o-driver-popover-next-btn')).toBeNull()
+    expect(steps.submit.showButtons).toEqual(['previous'])
+    document.querySelector<HTMLButtonElement>('[data-tour="key-form-submit"]')!.click()
+    await settle()
+    expect(flow.step).toBe('submit')
+    expect(document.querySelector('.s2o-popover')?.textContent).not.toContain('密钥已创建')
+    document.querySelector('[role="dialog"]')!.remove(); await settle()
+    expect(stopped).toHaveBeenCalledWith('cancelled:dialog-closed', 'submit')
+    expect(flow.clean).toBe(true)
+  })
+  it('registers success during a step transition and consumes it before the dialog-close check', async () => {
+    await createToSubmit()
+    document.querySelector<HTMLButtonElement>('.s2o-driver-popover-prev-btn')!.click() // Start the async transition.
+    const ticket = beginGuideAction('key-create')
+    completeGuideAction(ticket, { keyId: 72 })
+    document.querySelector('[role="dialog"]')!.remove()
+    await settle()
+    expect(flow.step).toBe('review')
+    expect(document.querySelector('.s2o-popover')?.textContent).toContain('密钥已创建')
+    expect(stopped).not.toHaveBeenCalled()
+    await nextGuideStep()
+    expect(stopped).toHaveBeenCalledWith('completed:user_confirmed', 'review')
+  })
+  it('does not reuse an earlier creation success after returning to inspect and opening a new form', async () => {
+    await createToSubmit()
+    const dialog = document.querySelector('[role="dialog"]')!
+    completeGuideAction(beginGuideAction('key-create'), { keyId: 72 }); dialog.remove(); await settle()
+    expect(flow.step).toBe('review')
+    document.querySelector<HTMLButtonElement>('.s2o-driver-popover-prev-btn')!.click(); await settle()
+    expect(flow.step).toBe('create')
+    document.querySelector('[data-tour="keys-create-btn"]')!.addEventListener('click', () => document.querySelector('main')!.prepend(dialog), { once: true })
+    document.querySelector<HTMLButtonElement>('[data-tour="keys-create-btn"]')!.click(); await settle(); await settle()
+    expect(flow.step).toBe('name')
+    expect(document.querySelector('.s2o-popover')?.textContent).not.toContain('密钥已创建')
+  })
+  it('hands the default two chapters over without another welcome or unrelated chapters', async () => {
+    flow = createFlow(fakeDriver, { modules: ['keys', 'key-use', 'quick-start', 'recharge'], registrationModules: ['keys', 'quick-start'], moduleConfig: [{ id: 'quick-start', menuId: 'quick' }], getPublicSettings: () => ({ custom_menu_items: [{ id: 'quick', visibility: 'user' }] }), onStop: stopped })
+    document.body.insertAdjacentHTML('afterbegin', '<a data-tour="sidebar-custom-quick"></a>')
+    await flow.start({ userId: 7 })
+    expect(flow.modules).toEqual(['keys', 'quick-start'])
+    expect(document.querySelector('.s2o-popover')?.textContent).toContain('创建密钥 → 快速开始')
+    await nextGuideStep(); completeGuideAction(beginGuideAction('key-create'), { keyId: 71 })
+    document.querySelector('[role="dialog"]')!.remove(); await settle()
+    expect(flow.step).toBe('review')
+    expect(document.querySelector('.s2o-driver-popover-next-btn')?.textContent).toBe('已创建，去快速开始')
+    await nextGuideStep(); expect(flow.step).toBe('quick-nav'); expect(flow.moduleId).toBe('quick-start')
+    expect(document.querySelector('.s2o-popover')?.textContent).not.toContain('欢迎使用')
+  })
+  it.each(['unavailable', 'available', 'busy'])('uses the recharge marker %s without touching page state', async marker => {
+    history.replaceState({}, '', '/purchase')
+    document.body.innerHTML = `<a data-tour="sidebar-my-keys"></a><div data-tour="header-balance"></div><main data-guide-recharge="${marker}"><div data-tour="recharge-amount"></div><div data-tour="recharge-method"></div><button data-tour="recharge-submit" disabled></button></main>`
+    flow = createFlow(fakeDriver, { modules: ['recharge'], getPublicSettings: () => ({ payment_enabled: true }), onStop: stopped })
+    await flow.start({ userId: 7 }, { manual: true, module: 'recharge' })
+    await nextGuideStep(); await nextGuideStep()
+    if (marker === 'busy') expect(stopped).toHaveBeenCalledWith('cancelled:recharge-busy', expect.any(String))
+    else expect(flow.step).toBe(marker === 'available' ? 'recharge-amount' : 'recharge-unavailable')
+    expect(document.querySelector('main')?.getAttribute('data-guide-recharge')).toBe(marker)
+    if (marker === 'available') {
+      await nextGuideStep(); await nextGuideStep(); expect(flow.step).toBe('recharge-confirm')
+      document.querySelector('main')!.setAttribute('data-guide-recharge', 'busy'); await settle()
+      expect(stopped).toHaveBeenCalledWith('cancelled:recharge-busy', 'recharge-confirm')
+    }
+  })
+  it('recognizes disabled online payment from cached settings without network requests', async () => {
+    document.querySelector('[role="dialog"]')!.remove()
+    document.body.insertAdjacentHTML('beforeend', '<div data-tour="header-balance"></div>')
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch)
+    flow = createFlow(fakeDriver, { modules: ['recharge'], getPublicSettings: () => ({ payment_enabled: false }) })
+    await flow.start({ userId: 7 }, { manual: true, module: 'recharge' }); await nextGuideStep(); await nextGuideStep()
+    expect(flow.step).toBe('recharge-unavailable'); expect(fetch).not.toHaveBeenCalled()
+  })
+  it('completes both quick-start round trips, preselects the newly created key and accepts only its native copy', async () => {
+    document.body.insertAdjacentHTML('afterbegin', '<a data-tour="sidebar-custom-quick"></a>')
+    document.querySelector('tbody')!.insertAdjacentHTML('beforeend', '<tr data-row-id="72"><td><span data-tour="key-name">New</span></td><td><button data-tour="key-copy"></button><button data-tour="key-group"></button></td><td><div data-tour="key-actions"></div></td></tr>')
+    document.querySelector('main')!.insertAdjacentHTML('beforeend', '<div class="s2o-quick-start"><section data-onboarding="windows-step"><div data-onboarding="windows-run"></div><div data-onboarding="windows-command"><textarea id="windows-command" readonly>command</textarea></div></section><section data-onboarding="codex-test"></section><section data-onboarding="models"></section><section data-onboarding="problems"></section><section data-onboarding="support"></section></div>')
+    const article = document.querySelector<HTMLElement>('.s2o-quick-start')!
+    Object.defineProperty(article, 'scrollTo', { configurable: true, value: vi.fn() })
+    flow = createFlow(fakeDriver, { modules: ['keys', 'quick-start'], moduleConfig: [{ id: 'quick-start', menuId: 'quick' }], getPublicSettings: () => ({ custom_menu_items: [{ id: 'quick', visibility: 'user' }] }), onStop: stopped })
+    await flow.start({ userId: 7 }); await nextGuideStep()
+    completeGuideAction(beginGuideAction('key-create'), { keyId: 72 }); document.querySelector('[role="dialog"]')!.remove(); await settle()
+    expect(flow.step).toBe('review'); await nextGuideStep(); expect(flow.step).toBe('quick-nav')
+    history.replaceState({}, '', '/custom/quick'); await settle(); expect(flow.step).toBe('quick-command')
+    document.querySelector('#windows-command')!.dispatchEvent(new CustomEvent('s2o:command-copied', { bubbles: true })); await settle()
+    expect(vi.mocked(Element.prototype.animate).mock.instances.at(-1)).toBe(document.querySelector('.s2o-driver-popover-next-btn'))
+    await nextGuideStep(); expect(flow.step).toBe('quick-wait')
+    await settle(); expect(flow.step).toBe('quick-wait') // Focus/time do not confirm external execution.
+    await nextGuideStep(); expect(flow.step).toBe('quick-keys-nav')
+    history.replaceState({}, '', '/keys'); await settle(); await settle(); expect(flow.step).toBe('quick-key-copy')
+    const selectedCopy = document.querySelector('[data-row-id="72"] [data-tour="key-copy"]')
+    expect(vi.mocked(Element.prototype.animate).mock.instances.at(-1)).toBe(selectedCopy)
+    completeGuideAction(beginGuideAction('key-copy', 71), { keyId: 71 }); await settle()
+    expect(vi.mocked(Element.prototype.animate).mock.instances.at(-1)).toBe(selectedCopy)
+    completeGuideAction(beginGuideAction('key-copy', 72), { keyId: 72 }); await settle()
+    expect(vi.mocked(Element.prototype.animate).mock.instances.at(-1)).toBe(document.querySelector('.s2o-driver-popover-next-btn'))
+    await nextGuideStep(); expect(flow.step).toBe('quick-paste-wait')
+    await nextGuideStep(); expect(flow.step).toBe('quick-return-nav')
+    history.replaceState({}, '', '/custom/quick'); await settle(); expect(flow.step).toBe('quick-test')
+    await nextGuideStep(); expect(flow.step).toBe('quick-prices')
+    await nextGuideStep(); expect(flow.step).toBe('quick-support')
+    await nextGuideStep(); expect(flow.step).toBe('finish')
+    expect(document.querySelector('.s2o-popover')?.textContent).toContain('创建密钥、快速开始')
+    expect(document.querySelector('.s2o-popover')?.textContent).not.toContain('余额充值')
+    vi.mocked(article.scrollTo).mockClear(); await nextGuideStep()
+    expect(article.scrollTo).not.toHaveBeenCalled(); expect(flow.clean).toBe(true)
+  })
+})

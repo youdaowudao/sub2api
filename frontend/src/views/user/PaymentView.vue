@@ -1,12 +1,12 @@
 <template>
   <AppLayout>
-    <div class="mx-auto max-w-4xl space-y-6">
+    <div class="mx-auto max-w-4xl space-y-6" :data-guide-recharge="loading ? 'loading' : paymentPhase === 'paying' ? 'busy' : !tabs.some(tab => tab.key === 'recharge') ? 'unavailable' : activeTab !== 'recharge' ? 'busy' : enabledMethods.length === 0 ? 'unavailable' : 'available'">
       <div v-if="loading" class="flex items-center justify-center py-20">
         <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary-500 border-t-transparent"></div>
       </div>
       <template v-else>
         <!-- Tab Switcher (hide during payment and subscription confirm) -->
-        <div v-if="tabs.length > 1 && paymentPhase === 'select' && !selectedPlan" class="flex space-x-1 rounded-xl bg-gray-100 p-1 dark:bg-dark-800">
+        <div v-if="tabs.length > 1 && paymentPhase === 'select' && !selectedPlan" data-tour="recharge-tabs" class="flex space-x-1 rounded-xl bg-gray-100 p-1 dark:bg-dark-800">
           <button v-for="tab in tabs" :key="tab.key"
             class="flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-all"
             :class="activeTab === tab.key ? 'bg-white text-gray-900 shadow dark:bg-dark-700 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'"
@@ -49,7 +49,7 @@
               <p class="text-gray-500 dark:text-gray-400">{{ t('payment.notAvailable') }}</p>
             </div>
             <template v-else>
-            <div class="card p-6">
+            <div data-tour="recharge-amount" class="card p-6">
               <!-- 充值赠送活动文案（后台 Markdown 配置，空则不渲染） -->
               <div
                 v-if="renderedBonusNotice"
@@ -69,7 +69,7 @@
               />
               <p v-if="amountError" class="mt-2 text-xs text-amber-600 dark:text-amber-300">{{ amountError }}</p>
             </div>
-            <div v-if="enabledMethods.length >= 1" class="card p-6">
+            <div v-if="enabledMethods.length >= 1" data-tour="recharge-method" class="card p-6">
               <PaymentMethodSelector
                 :methods="methodOptions"
                 :selected="selectedMethod"
@@ -107,7 +107,7 @@
                 </p>
               </div>
             </div>
-            <button :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmit || submitting" @click="handleSubmitRecharge">
+            <button data-tour="recharge-submit" :class="['btn w-full py-3 text-base font-medium', paymentButtonClass]" :disabled="!canSubmit || submitting" @click="handleSubmitRecharge">
               <span v-if="submitting" class="flex items-center justify-center gap-2">
                 <span class="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
                 {{ t('common.processing') }}

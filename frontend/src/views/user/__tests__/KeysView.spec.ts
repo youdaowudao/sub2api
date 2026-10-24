@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
+import { bindGuideBusinessSession } from '@/features/guide/businessEvents'
 import type { ApiKey } from '@/types'
 import { keysAPI } from '@/api'
 import KeysView from '../KeysView.vue'
@@ -173,6 +174,8 @@ const DataTableStub = {
           <slot name="cell-id" :value="row.id" :row="row" />
         </div>
         <slot name="cell-name" :value="row.name" :row="row" />
+        <slot name="cell-key" :value="row.key" :row="row" />
+        <slot name="cell-group" :row="row" />
         <slot name="cell-actions" :row="row" />
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
@@ -654,4 +657,66 @@ describe('user KeysView column settings', () => {
       expect(optionIds(wrapper)).toHaveLength(12)
     })
   })
+  describe('guide success callbacks', () => {
+    let wrapper: VueWrapper | undefined
+    let release: (() => void) | undefined
+    const complete = vi.fn()
+    beforeEach(() => {
+      complete.mockReset()
+      getAvailableGroups.mockResolvedValue([{ id: 1, name: 'OpenAI', platform: 'openai', rate_multiplier: 1, subscription_type: 'standard' }])
+      release = bindGuideBusinessSession({ sessionId: {}, userId: 7, accepts: () => true, complete })
+    })
+    afterEach(() => { release?.(); wrapper?.unmount(); wrapper = undefined })
+    const prepare = async () => {
+      wrapper = await mountView()
+      await wrapper.get('[data-tour="keys-create-btn"]').trigger('click')
+      await wrapper.get('[data-tour="key-form-name"]').setValue('Guide key')
+      return wrapper
+    }
+    it('reports a successful creation ID before closing and preserves the administrator nextStep callback', async () => {
+      const view = await prepare()
+      view.findComponent('[data-tour="key-form-group"]').vm.$emit('update:modelValue', 1)
+      isCurrentStep.mockReturnValue(true)
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), id: 88, group_id: 1 })
+      complete.mockImplementation(() => { expect(view.find('#key-form').exists()).toBe(true) })
+      await view.get('#key-form').trigger('submit'); await flushPromises()
+      expect(complete).toHaveBeenCalledWith('key-create', 88)
+      expect(nextStep).toHaveBeenCalledWith(500)
+      expect(view.find('#key-form').exists()).toBe(false)
+    })
+    it('does not report validation failures, rejected creations or updates as a successful new key', async () => {
+      const view = await prepare()
+      await view.get('#key-form').trigger('submit'); await flushPromises()
+      expect(keysAPI.create).not.toHaveBeenCalled(); expect(complete).not.toHaveBeenCalled()
+      view.findComponent('[data-tour="key-form-group"]').vm.$emit('update:modelValue', 1)
+      vi.mocked(keysAPI.create).mockRejectedValue(new Error('creation failed'))
+      await view.get('#key-form').trigger('submit'); await flushPromises()
+      expect(complete).not.toHaveBeenCalled(); expect(nextStep).not.toHaveBeenCalled()
+      expect(view.find('#key-form').exists()).toBe(true)
+      await view.get('[data-test="close-dialog"]').trigger('click')
+      await view.get('[data-tour="key-edit"]').trigger('click')
+      view.findComponent('[data-tour="key-form-group"]').vm.$emit('update:modelValue', 1)
+      updateKey.mockResolvedValue(createApiKey())
+      await view.get('#key-form').trigger('submit'); await flushPromises()
+      expect(complete).not.toHaveBeenCalled()
+    })
+    it('reports only successful native copies and ignores a copy completed after its session exits', async () => {
+      wrapper = await mountView()
+      copyToClipboard.mockResolvedValue(false)
+      await wrapper.get('[data-tour="key-copy"]').trigger('click'); await flushPromises()
+      expect(complete).not.toHaveBeenCalled()
+      copyToClipboard.mockResolvedValue(true)
+      await wrapper.get('[data-tour="key-copy"]').trigger('click'); await flushPromises()
+      expect(complete).toHaveBeenCalledWith('key-copy', 1)
+      complete.mockClear()
+      let done!: (value: boolean) => void
+      copyToClipboard.mockReturnValueOnce(new Promise(resolve => { done = resolve }))
+      await wrapper.get('[data-tour="key-copy"]').trigger('click')
+      release!()
+      release = bindGuideBusinessSession({ sessionId: {}, userId: 7, accepts: () => true, complete })
+      done(true); await flushPromises()
+      expect(complete).not.toHaveBeenCalled()
+    })
+  })
+
 })

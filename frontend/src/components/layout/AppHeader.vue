@@ -4,6 +4,7 @@
       <!-- Left: Mobile Menu Toggle + Page Title -->
       <div class="flex shrink-0 items-center gap-2 sm:gap-4">
         <button
+          data-tour="header-menu"
           @click="toggleMobileSidebar"
           class="btn-ghost btn-icon lg:hidden"
           :aria-label="t('common.toggleMenu')"
@@ -59,6 +60,7 @@
         <!-- Balance Display -->
         <div
           v-if="user"
+          data-tour="header-balance"
           class="group relative hidden items-center gap-2 rounded-xl bg-primary-50 px-3 py-1.5 dark:bg-primary-900/20 sm:flex"
         >
           <svg
@@ -106,6 +108,7 @@
         <!-- User Dropdown -->
         <div v-if="user" class="relative" ref="dropdownRef">
           <button
+            data-tour="header-user-menu"
             @click="toggleDropdown"
             class="flex items-center gap-2 rounded-xl p-1.5 transition-colors hover:bg-gray-100 dark:hover:bg-dark-800"
             :aria-label="t('common.userMenu')"
@@ -142,7 +145,7 @@
               </div>
 
               <!-- Balance (mobile only) -->
-              <div class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 sm:hidden">
+              <div data-tour="header-balance-mobile" class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 sm:hidden">
                 <div class="text-xs text-gray-500 dark:text-dark-400">
                   {{ t('common.balance') }}
                 </div>
