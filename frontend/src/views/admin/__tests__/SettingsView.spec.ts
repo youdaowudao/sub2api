@@ -563,6 +563,7 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
+        ForkEmailSignupFilterSettings: true,
       },
     },
   });
@@ -1365,6 +1366,7 @@ describe("admin SettingsView payment visible method controls", () => {
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
+          ForkEmailSignupFilterSettings: true,
         },
       },
     });
@@ -1711,6 +1713,7 @@ describe("admin SettingsView payment visible method controls", () => {
           ProxySelector: true,
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
+          ForkEmailSignupFilterSettings: true,
         },
       },
     });
@@ -1918,6 +1921,23 @@ describe("admin SettingsView wechat connect controls", () => {
         .get('[data-testid="wechat-connect-mp-app-secret"]')
         .attributes("placeholder"),
     ).toContain("密钥已配置");
+  });
+
+  it("keeps the grant filter inside only the email card when its grant panel is closed", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openUsersTab(wrapper);
+
+    expect(wrapper.find('[data-testid="auth-source-email-panel"]').exists()).toBe(false);
+    const filterSelector = "fork-email-signup-filter-settings-stub";
+    expect(wrapper.findAll(filterSelector)).toHaveLength(1);
+    const emailToggle = wrapper.get('[data-testid="auth-source-email-enabled"]');
+    const emailCard = emailToggle.element.parentElement?.parentElement;
+    expect(emailCard?.querySelector(filterSelector)).not.toBeNull();
+    for (const toggle of wrapper.findAll('[data-testid^="auth-source-"][data-testid$="-enabled"]')) {
+      if (toggle.attributes("data-testid") === "auth-source-email-enabled") continue;
+      expect(toggle.element.parentElement?.parentElement?.querySelector(filterSelector)).toBeNull();
+    }
   });
 
   it("collapses auth source defaults until the source is enabled", async () => {

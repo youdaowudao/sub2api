@@ -227,6 +227,7 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	}
 
 	grantPlan := s.resolveSignupGrantPlan(ctx, "email")
+	forkSignupNote := s.applyForkEmailSignupFilter(ctx, email, &grantPlan)
 
 	// 新用户默认 RPM（0 = 不限制）。注册时写入，后续作为用户级兜底。
 	var defaultRPMLimit int
@@ -240,6 +241,7 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		PasswordHash: hashedPassword,
 		Role:         RoleUser,
 		Balance:      grantPlan.Balance,
+		Notes:        forkSignupNote,
 		Concurrency:  grantPlan.Concurrency,
 		RPMLimit:     defaultRPMLimit,
 		Status:       StatusActive,
