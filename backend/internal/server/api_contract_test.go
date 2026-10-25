@@ -350,6 +350,7 @@ func TestAPIContracts(t *testing.T) {
 				"data": [
 					{
 						"id": 10,
+						"sort_order": 0,
 						"name": "Group One",
 						"description": "desc",
 						"platform": "anthropic",
