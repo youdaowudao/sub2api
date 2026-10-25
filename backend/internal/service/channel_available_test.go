@@ -309,3 +309,15 @@ func TestFillGlobalPricingFallback_KeepsExistingPrice(t *testing.T) {
 func newStubPricingServiceFromMap(data map[string]*LiteLLMModelPricing) *PricingService {
 	return &PricingService{pricingData: data}
 }
+
+func TestListAvailable_ProjectsDisplayOrder(t *testing.T) {
+	for _, order := range []int{0, -10, 20} {
+		repo := &stubGroupRepoForAvailable{activeGroups: []Group{{ID: 1, Platform: PlatformComposite, SortOrder: order}}}
+		svc := newAvailableChannelService([]Channel{{ID: 1, GroupIDs: []int64{1}}}, repo)
+		rows, err := svc.ListAvailable(context.Background())
+		require.NoError(t, err)
+		require.Len(t, rows, 1)
+		require.Len(t, rows[0].Groups, 1)
+		require.Equal(t, order, rows[0].Groups[0].SortOrder)
+	}
+}

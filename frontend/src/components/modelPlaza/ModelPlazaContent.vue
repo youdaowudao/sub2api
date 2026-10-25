@@ -48,7 +48,7 @@
         @update:search="searchQuery = $event"
       />
 
-      <!-- 分组分节的模型清单(默认按生效倍率升序) -->
+      <!-- 分组分节的模型清单 -->
       <div v-if="filteredGroups.length > 0" class="space-y-5">
         <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" />
       </div>
@@ -64,6 +64,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { comparePlatformsForDisplay, sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -104,11 +105,11 @@ function effectiveRate(g: ModelPlazaGroup): number {
 }
 
 const platforms = computed(() =>
-  [...new Set((props.response?.groups ?? []).map((g) => g.platform).filter(Boolean))].sort()
+  [...new Set((props.response?.groups ?? []).map((g) => g.platform).filter(Boolean))].sort(comparePlatformsForDisplay)
 )
 
 const groupOptions = computed(() =>
-  (props.response?.groups ?? []).map((g) => ({
+  sortGroupsForDisplay(props.response?.groups ?? []).map((g) => ({
     id: g.id,
     name: g.name,
     platform: g.platform,
@@ -146,10 +147,7 @@ const filteredGroups = computed(() => {
       .map((g) => ({ ...g, models: g.models.filter((m) => m.name.toLowerCase().includes(q)) }))
       .filter((g) => g.models.length > 0)
   }
-  // 专属倍率会改变生效值,不能只依赖后端按默认倍率的排序。
-  return [...groups].sort(
-    (a, b) => effectiveRate(a) - effectiveRate(b) || a.name.localeCompare(b.name)
-  )
+  return sortGroupsForDisplay(groups)
 })
 </script>
 

@@ -574,7 +574,14 @@ describe('user KeysView column settings', () => {
       subscription_type: 'standard',
     }))
     const groupSelect = (wrapper: VueWrapper) => wrapper.findComponent('[data-tour="key-form-group"]')
-    const optionIds = (wrapper: VueWrapper) => groupSelect(wrapper).props('options').map((option: { value: number }) => option.value)
+    const optionIds = (wrapper: VueWrapper) => {
+      const options = groupSelect(wrapper).props('options') as { value: string | number; kind?: string; disabled?: boolean; platform?: string }[]
+      const headings = options.filter(o => o.kind === 'group')
+      const real = options.filter(o => o.kind !== 'group')
+      expect(headings.every(o => o.disabled === true && typeof o.value === 'string')).toBe(true)
+      expect(new Set(headings.map(o => o.value)).size).toBe(new Set(real.map(o => o.platform)).size)
+      return real.map(o => o.value)
+    }
     const chooseProvider = (wrapper: VueWrapper, value: string) => wrapper.get(`input[name="key-provider"][value="${value}"]`).setValue()
     const openCreate = async () => {
       const wrapper = await mountView()
@@ -595,8 +602,11 @@ describe('user KeysView column settings', () => {
       await chooseProvider(wrapper, 'domestic')
       expect(optionIds(wrapper)).toEqual([3, 4, 5, 6])
       await chooseProvider(wrapper, 'other')
-      expect(optionIds(wrapper)).toEqual([7, 8, 9, 10, 11, 12])
-      expect(wrapper.findAllComponents({ name: 'Select' })[0].props('options')).toHaveLength(14)
+      expect(optionIds(wrapper)).toEqual([7, 9, 8, 11, 12, 10])
+      const tableOptions = wrapper.findAllComponents({ name: 'Select' })[0].props('options') as { kind?: string; disabled?: boolean }[]
+      expect(tableOptions.filter(o => o.kind !== 'group')).toHaveLength(14)
+      expect(tableOptions.filter(o => o.kind === 'group')).toHaveLength(12)
+      expect(tableOptions.filter(o => o.kind === 'group').every(o => o.disabled)).toBe(true)
     })
 
     it('clears the previous group on provider change and submits only the newly selected group', async () => {
@@ -615,6 +625,26 @@ describe('user KeysView column settings', () => {
       await flushPromises()
       expect(keysAPI.create).toHaveBeenCalledOnce()
       expect(vi.mocked(keysAPI.create).mock.calls[0].slice(0, 2)).toEqual(['My key', 5])
+    })
+
+    it('keeps guide markers on real group buttons and excludes headings from search-only results', async () => {
+      const wrapper = await mountView()
+      await wrapper.get('[data-tour="key-group"]').trigger('click')
+      const popup = wrapper.get('[data-tour="key-group-dropdown"]')
+      expect(popup.findAll('[role="presentation"]')).toHaveLength(12)
+      expect(popup.findAll('[role="presentation"]').every(n => n.element.tagName !== 'BUTTON' && !n.attributes('data-tour'))).toBe(true)
+      const first = popup.get('[data-tour="key-group-option"]')
+      expect(first.element.tagName).toBe('BUTTON')
+      expect(first.findComponent({ name: 'GroupOptionItem' }).props('name')).toBe('Shared group 1')
+      expect(updateKey).not.toHaveBeenCalled()
+      await popup.get('input').setValue('Anthropic')
+      await flushPromises()
+      expect((wrapper.vm as any).groupSearchQuery).toBe('Anthropic')
+      expect((wrapper.vm as any).filteredGroupOptions).toHaveLength(0)
+      expect((wrapper.vm as any).filteredGroupSections).toHaveLength(0)
+      expect(wrapper.get('[data-tour="key-group-dropdown"]').findAll('[role="presentation"]')).toHaveLength(0)
+      expect(wrapper.get('[data-tour="key-group-dropdown"]').findAll('[data-tour="key-group-option"]')).toHaveLength(0)
+      wrapper.unmount()
     })
 
     it('defaults to a provider with available groups and disables empty categories', async () => {

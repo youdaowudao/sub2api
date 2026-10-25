@@ -165,6 +165,23 @@ describe('AvailableChannelsTable responsive surfaces', () => {
     expect(mobile.findAll('dd')[0].text()).toBe('-')
   })
 
+  it('uses catalog sections and administrator order on both surfaces without reclassifying Composite groups', async () => {
+    const group = (id: number, name: string, platform: string, sort_order: number) => ({ ...rows[0]!.platforms[0]!.groups[1]!, id, name, platform, sort_order })
+    const platforms = [
+      { platform: 'antigravity', groups: [group(7, 'Composite anti', 'composite', -100), group(6, 'Anti', 'antigravity', 10)], supported_models: [] },
+      { platform: 'openai', groups: [group(4, 'Composite open', 'composite', -100), group(2, 'Later', 'openai', 20), group(1, 'First', 'openai', 0)], supported_models: [] },
+    ]
+    const wrapper = mountTable({ rows: [{ name: 'Channel', description: '', platforms }] })
+    const badges = (surface: string) => wrapper.get(`[data-testid="${surface}-channels"]`).findAll('[data-group-badge]').map(n => n.text().split(':')[0])
+    expect(badges('desktop')).toEqual(['First', 'Later', 'Composite open', 'Anti', 'Composite anti'])
+    expect(badges('mobile')).toEqual(badges('desktop'))
+    await wrapper.setProps({ userGroupRates: { 1: 100, 2: .01 } })
+    expect(badges('desktop')).toEqual(['First', 'Later', 'Composite open', 'Anti', 'Composite anti'])
+    expect(platforms.map(p => p.platform)).toEqual(['antigravity', 'openai'])
+    expect(platforms[1]!.groups.map(g => g.id)).toEqual([4, 2, 1])
+    wrapper.unmount()
+  })
+
   it('provides loading and empty states on both responsive surfaces', async () => {
     const wrapper = mountTable({ loading: true, rows: [] })
 

@@ -611,6 +611,8 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -663,8 +665,8 @@ const subscriptionGroups = ref<Group[]>([])
 
 // 订阅类型分组选项
 const subscriptionGroupOptions = computed(() => {
-  return subscriptionGroups.value
-    .filter((g) => g.subscription_type === 'subscription')
+  return sortGroupsForDisplay(subscriptionGroups.value
+    .filter((g) => g.subscription_type === 'subscription'))
     .map((g) => ({
       value: g.id,
       label: g.name,

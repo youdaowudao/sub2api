@@ -570,7 +570,9 @@
               <span v-else class="text-gray-400">{{ t('keys.selectGroup') }}</span>
             </template>
             <template #option="{ option, selected }">
+              <span v-if="option.kind === 'group'">{{ option.label }}</span>
               <GroupOptionItem
+                v-else
                 :name="(option as unknown as GroupOption).label"
                 :platform="(option as unknown as GroupOption).platform"
                 :subscription-type="(option as unknown as GroupOption).subscriptionType"
@@ -1165,8 +1167,10 @@
         </div>
         <!-- Group list -->
         <div class="max-h-80 overflow-y-auto p-1.5">
+          <template v-for="section in filteredGroupSections" :key="section.platform">
+          <div role="presentation" class="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">{{ section.label }}</div>
           <button
-            v-for="option in filteredGroupOptions"
+            v-for="option in section.groups"
             data-tour="key-group-option"
             :key="option.value ?? 'null'"
             @click="changeGroup(selectedKeyForGroup!, option.value)"
@@ -1197,6 +1201,7 @@
               "
             />
           </button>
+          </template>
           <!-- Empty state when search has no results -->
           <div v-if="filteredGroupOptions.length === 0" class="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
             {{ t('keys.noGroupFound') }}
@@ -1208,6 +1213,7 @@
 </template>
 
 <script setup lang="ts">
+import { buildGroupSelectOptions, groupByPlatformForDisplay, sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 	import { beginGuideAction, completeGuideAction } from '@/features/guide/businessEvents'
 import { ref, reactive, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
 	import { useI18n } from 'vue-i18n'
@@ -1493,7 +1499,7 @@ const shouldSubmitEditStatus = (key: ApiKey, status: 'active' | 'inactive') => {
 const groupFilterOptions = computed(() => [
   { value: '', label: t('keys.allGroups') },
   { value: 0, label: t('keys.noGroup') },
-  ...groups.value.map((g) => ({ value: g.id, label: g.name }))
+  ...buildGroupSelectOptions(groups.value, (g) => ({ value: g.id, label: g.name }), t('common.unknownPlatform'))
 ])
 
 const statusFilterOptions = computed(() => [
@@ -1522,7 +1528,7 @@ const onStatusFilterChange = (value: string | number | boolean | null) => {
 
 // Convert groups to Select options format with rate multiplier and subscription type
 const groupOptions = computed(() =>
-  groups.value.map((group) => ({
+  sortGroupsForDisplay(groups.value).map((group) => ({
     value: group.id,
     label: group.name,
     description: group.description,
@@ -1544,10 +1550,11 @@ const createProviderOptions = computed(() => KEY_GROUP_PROVIDERS.map((value) => 
   count: groups.value.filter((group) => getKeyGroupProvider(group.platform) === value).length
 })))
 
-const formGroupOptions = computed(() => showEditModal.value
-  ? groupOptions.value
-  : groupOptions.value.filter((group) => getKeyGroupProvider(group.platform) === createProvider.value)
-)
+const formGroupOptions = computed(() => {
+  const eligible = showEditModal.value ? groups.value : groups.value.filter(group => getKeyGroupProvider(group.platform) === createProvider.value)
+  const optionsByID = new Map(groupOptions.value.map(option => [option.value, option]))
+  return buildGroupSelectOptions(eligible, group => optionsByID.get(group.id)!, t('common.unknownPlatform'))
+})
 
 const selectCreateProvider = (provider: KeyGroupProvider) => {
   if (createProvider.value === provider) return
@@ -1576,6 +1583,9 @@ const filteredGroupOptions = computed(() => {
       (opt.description && opt.description.toLowerCase().includes(query))
   })
 })
+
+const filteredGroupSections = computed(() => groupByPlatformForDisplay(
+  filteredGroupOptions.value.map(option => ({ ...option, id: option.value })), t('common.unknownPlatform')))
 
 const copyToClipboard = async (text: string, keyId: number) => {
   const guideTicket = beginGuideAction('key-copy', keyId)

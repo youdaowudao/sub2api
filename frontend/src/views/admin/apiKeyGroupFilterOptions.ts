@@ -1,3 +1,4 @@
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 import type { AdminGroup } from '@/types'
 
 export interface ApiKeyGroupFilterOption {
@@ -45,7 +46,7 @@ export function buildApiKeyGroupFilterOptions(
   const subscription: ApiKeyGroupFilterOption[] = []
   const disabledGroups: ApiKeyGroupFilterOption[] = []
 
-  for (const grp of groups) {
+  for (const grp of sortGroupsForDisplay(groups)) {
     const item: ApiKeyGroupFilterOption = { value: grp.id, label: grp.name }
     if (grp.status !== 'active') {
       disabledGroups.push(item)

@@ -199,6 +199,8 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { ref, onMounted, onUnmounted, toRef, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
@@ -526,7 +528,7 @@ onMounted(async () => {
   document.addEventListener('click', onDocumentClick)
   try {
     const gs = await adminAPI.groups.list(1, 1000)
-    groupOptions.value.push(...gs.items.map((g: any) => ({ value: g.id, label: g.name })))
+    groupOptions.value.push(...sortGroupsForDisplay(gs.items).map((g: any) => ({ value: g.id, label: g.name })))
   } catch {
     // Ignore filter option loading errors (page still usable)
   }

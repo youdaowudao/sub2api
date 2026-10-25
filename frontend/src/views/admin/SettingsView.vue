@@ -8977,6 +8977,7 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay } from "@/utils/groupDisplayOrder";
 import GuideSettingsCard from '@/features/guide/components/GuideSettingsCard.vue';
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { listPlatformIds } from "@/constants/platformCatalog";
@@ -10475,7 +10476,7 @@ async function saveWebSearchConfig(): Promise<boolean> {
 const defaultSubscriptionGroupOptions = computed<
   DefaultSubscriptionGroupOption[]
 >(() =>
-  subscriptionGroups.value.map((group) => ({
+  sortGroupsForDisplay(subscriptionGroups.value).map((group) => ({
     value: group.id,
     label: group.name,
     description: group.description,

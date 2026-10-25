@@ -271,3 +271,19 @@ func TestBuildPlatformSections_CompositeWithoutModelsKeepsEmptyCompositeSection(
 	require.Len(t, sections[0].Groups, 1)
 	require.Empty(t, sections[0].SupportedModels)
 }
+
+func TestAvailableDisplayOrderProjection(t *testing.T) {
+	for _, order := range []int{0, -10, 20} {
+		visible := filterUserVisibleGroups([]service.AvailableGroupRef{{ID: 1, Platform: service.PlatformComposite, SortOrder: order}}, map[int64]struct{}{1: {}})
+		sections := buildPlatformSections(service.AvailableChannel{SupportedModels: []service.SupportedModel{{Platform: service.PlatformOpenAI}, {Platform: service.PlatformAnthropic}}}, visible)
+		require.Len(t, sections, 2)
+		for _, section := range sections {
+			require.Equal(t, service.PlatformComposite, section.Groups[0].Platform)
+			raw, err := json.Marshal(section.Groups[0])
+			require.NoError(t, err)
+			var fields map[string]any
+			require.NoError(t, json.Unmarshal(raw, &fields))
+			require.Equal(t, float64(order), fields["sort_order"])
+		}
+	}
+}

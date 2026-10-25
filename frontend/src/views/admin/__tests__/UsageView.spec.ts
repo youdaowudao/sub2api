@@ -96,7 +96,8 @@ vi.mock('@/stores/app', () => ({
   }),
 }))
 
-vi.mock('@/utils/format', () => ({
+vi.mock('@/utils/format', async () => ({
+  ...await vi.importActual<typeof import('@/utils/format')>('@/utils/format'),
   formatReasoningEffort: (value: string | null | undefined) => value ?? '-',
 }))
 
@@ -198,6 +199,19 @@ describe('admin UsageView route filters', () => {
   afterEach(() => {
     Object.keys(routeQuery).forEach((key) => delete routeQuery[key])
     vi.useRealTimers()
+  })
+
+  it('keeps routed historical dates, then resets every range consumer to the new local today', async () => {
+    vi.setSystemTime(new Date(2026, 9, 25, 23, 59))
+    routeQuery.start_date = '2026-09-01'; routeQuery.end_date = '2026-09-07'
+    const wrapper = mountRouteFilteredUsageView(); vi.advanceTimersByTime(120); await flushPromises()
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ start_date: '2026-09-01', end_date: '2026-09-07' }), expect.anything())
+    expect(getSnapshotV2).toHaveBeenLastCalledWith(expect.objectContaining({ start_date: '2026-09-01', end_date: '2026-09-07' }))
+    vi.setSystemTime(new Date(2026, 9, 26, 0, 1))
+    ;(wrapper.vm as any).resetFilters(); await flushPromises()
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ start_date: '2026-10-26', end_date: '2026-10-26' }), expect.anything())
+    for (const fn of [getStats, getModelStats, getSnapshotV2]) expect(fn).toHaveBeenLastCalledWith(expect.objectContaining({ start_date: '2026-10-26', end_date: '2026-10-26' }))
+    wrapper.unmount()
   })
 
   it('shows the routed user while applying user_id to usage requests', async () => {
@@ -432,9 +446,8 @@ describe('admin UsageView distribution metric toggles', () => {
 
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
     const now = new Date()
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
     expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({
-      start_date: formatLocalDate(yesterday),
+      start_date: formatLocalDate(now),
       end_date: formatLocalDate(now),
       granularity: 'hour'
     }))

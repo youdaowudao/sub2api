@@ -93,6 +93,29 @@ describe('ChannelsView pricing model sync', () => {
     resetPlatformCatalog()
   })
 
+  it('sorts selected billing-rule groups without rewriting section or rule IDs, retaining unknown IDs', async () => {
+    const rows = [
+      { id: 2, name: 'Later', platform: 'anthropic', sort_order: 10 },
+      { id: 1, name: 'First', platform: 'anthropic', sort_order: 0 },
+    ]
+    getGroups.mockResolvedValue(rows)
+    const wrapper = mountView(); await openDialog(wrapper); await enablePlatform(wrapper, 'anthropic')
+    const vm = wrapper.vm as any
+    const section = vm.form.platforms.find((s: any) => s.platform === 'anthropic')
+    section.group_ids = [99, 2, 1]
+    section.account_stats_pricing_rules = [{ name: 'Rule', group_ids: [99, 2], account_ids: [], pricing: [] }]
+    vm.activeTab = 'anthropic'; await wrapper.vm.$nextTick()
+    const labels = wrapper.findAll('label').filter(n => n.classes().includes('cursor-pointer') && /^(First|Later|#99)$/.test(n.text()))
+    expect(labels.map(n => n.text())).toEqual(['First', 'Later', '#99'])
+    expect(vm.formToAPI().group_ids).toEqual([99, 2, 1])
+    expect(vm.accountStatsRulesToAPI()[0].group_ids).toEqual([99, 2])
+    await labels[0]!.get('input').setValue(true)
+    expect(section.group_ids).toEqual([99, 2, 1])
+    expect(section.account_stats_pricing_rules[0].group_ids).toEqual([99, 2, 1])
+    expect(rows.map(g => g.id)).toEqual([2, 1])
+    wrapper.unmount()
+  })
+
   it.each([
     ['openai', true],
     ['opencode_go', true],

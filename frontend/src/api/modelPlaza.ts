@@ -56,6 +56,7 @@ export interface PlazaModel {
 }
 
 export interface ModelPlazaGroup {
+  sort_order?: number
   id: number
   name: string
   description: string

@@ -54,6 +54,37 @@ export async function list(
   return data
 }
 
+/** The snapshot changed or a page is incomplete; never offer a partial sort draft. */
+export class GroupListChangedError extends Error {
+  constructor() { super('Group list changed while loading') }
+}
+
+export async function listAllForDisplay(options?: { signal?: AbortSignal }): Promise<AdminGroup[]> {
+  const rows: AdminGroup[] = []
+  const ids = new Set<number>()
+  let total = -1
+  let pages = 1
+  for (let page = 1; page <= pages; page++) {
+    options?.signal?.throwIfAborted()
+    const result = await list(page, 1000, { sort_by: 'id', sort_order: 'asc' }, options)
+    options?.signal?.throwIfAborted()
+    if (page === 1) { total = result.total; pages = result.pages }
+    if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(pages) || pages < 0 ||
+        result.total !== total || result.pages !== pages || result.page !== page ||
+        (total > 0 && (pages < 1 || !result.items.length)) || (total === 0 && pages > 1)) {
+      throw new GroupListChangedError()
+    }
+    for (const group of result.items) {
+      if (!Number.isSafeInteger(group.id) || group.id <= 0 || ids.has(group.id)) throw new GroupListChangedError()
+      ids.add(group.id)
+      rows.push(group)
+    }
+    if (rows.length > total) throw new GroupListChangedError()
+  }
+  if (ids.size !== total) throw new GroupListChangedError()
+  return rows
+}
+
 /**
  * Get all active groups (without pagination)
  * @param platform - Optional platform filter
@@ -475,6 +506,7 @@ export const groupsAPI = {
   getAll,
   getByPlatform,
   getAllIncludingInactive,
+  listAllForDisplay,
   getLiveCapability,
   getById,
   getModelAllowlistCandidates,

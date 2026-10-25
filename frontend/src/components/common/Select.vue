@@ -257,7 +257,7 @@ const getOptionLabel = (option: any): string => {
 
 const isOptionDisabled = (option: any): boolean => {
   if (typeof option === 'object' && option !== null) {
-    return !!option.disabled
+    return !!option.disabled || option.kind === 'group'
   }
   return false
 }
@@ -270,7 +270,7 @@ const isGroupHeaderOption = (option: any): boolean => {
 }
 
 const selectedOption = computed(() => {
-  return props.options.find((opt) => getOptionValue(opt) === props.modelValue) || null
+  return props.options.find((opt) => !isGroupHeaderOption(opt) && getOptionValue(opt) === props.modelValue) || null
 })
 
 const selectedLabel = computed(() => {
@@ -293,13 +293,21 @@ const filteredOptions = computed(() => {
   // 远程搜索模式不在本地过滤（选项即服务端搜索结果的一页）。
   if (isSearchable.value && searchQuery.value && !props.remote) {
     const query = searchQuery.value.toLowerCase()
-    opts = opts.filter((opt) => {
-      // Match label
-      if (getOptionLabel(opt).toLowerCase().includes(query)) return true
-      // Also match description if present
-      if (opt.description && String(opt.description).toLowerCase().includes(query)) return true
-      return false
-    })
+    const matches = (opt: any) => getOptionLabel(opt).toLowerCase().includes(query) ||
+      !!(opt.description && String(opt.description).toLowerCase().includes(query))
+    const result: any[] = []
+    let header: any = null
+    let headerIncluded = false
+    for (const opt of opts) {
+      if (isGroupHeaderOption(opt)) {
+        header = opt
+        headerIncluded = false
+      } else if (matches(opt)) {
+        if (header && !headerIncluded) { result.push(header); headerIncluded = true }
+        result.push(opt)
+      }
+    }
+    opts = result
     // In creatable mode, always prepend a fuzzy search option
     if (props.creatable && searchQuery.value.trim()) {
       const trimmed = searchQuery.value.trim()
@@ -425,6 +433,7 @@ watch(searchQuery, (query) => {
 })
 
 const selectOption = (option: any) => {
+  if (isOptionDisabled(option)) return
   const value = getOptionValue(option) ?? null
   emit('update:modelValue', value)
   emit('change', value, option)

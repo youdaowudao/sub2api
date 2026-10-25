@@ -266,6 +266,13 @@ describe('admin GroupsView column settings', () => {
     isCurrentStep.mockReturnValue(false)
   })
 
+  it('initially requests public groups with display order before pagination', async () => {
+    await mountView()
+    expect(listGroups).toHaveBeenCalledWith(1, expect.any(Number), expect.objectContaining({
+      is_exclusive: false, sort_by: 'display_order', sort_order: 'asc',
+    }), expect.anything())
+  })
+
   it('does not call advanced group APIs or expose the exclusive filter in simple mode', async () => {
     authState.isSimpleMode = true
     const wrapper = await mountView()

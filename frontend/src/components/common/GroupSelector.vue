@@ -24,8 +24,10 @@
           : 'rounded-lg border border-gray-200 bg-gray-50 dark:border-dark-600 dark:bg-dark-800'
       ]"
     >
+      <template v-for="section in groupSections" :key="section.platform">
+      <div role="presentation" class="col-span-2 px-2 pt-2 text-xs font-semibold text-gray-500 dark:text-gray-400">{{ section.label }}</div>
       <label
-        v-for="group in filteredGroups"
+        v-for="group in section.groups"
         :key="group.id"
         class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 transition-colors hover:bg-white dark:hover:bg-dark-700"
         :title="group.rate_multiplier == null ? group.name : t('admin.groups.rateAndAccounts', { rate: group.rate_multiplier, count: group.account_count || 0 })"
@@ -46,6 +48,7 @@
         />
         <span class="shrink-0 text-xs text-gray-400">{{ group.account_count || 0 }}</span>
       </label>
+      </template>
       <div
         v-if="filteredGroups.length === 0"
         class="col-span-2 py-2 text-center text-sm text-gray-500 dark:text-gray-400"
@@ -58,6 +61,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { groupByPlatformForDisplay, sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 import { useI18n } from 'vue-i18n'
 import GroupBadge from './GroupBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -111,8 +115,10 @@ const filteredGroups = computed(() => {
       (g) => g.name.toLowerCase().includes(q) || g.description?.toLowerCase().includes(q)
     )
   }
-  return result
+  return sortGroupsForDisplay(result)
 })
+
+const groupSections = computed(() => groupByPlatformForDisplay(filteredGroups.value, t('common.unknownPlatform')))
 
 watch(
   () => [authStore.isSimpleMode, props.groups, props.modelValue] as const,

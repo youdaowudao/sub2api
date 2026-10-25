@@ -77,7 +77,7 @@
         </button>
         <!-- Group options -->
         <button
-          v-for="group in allGroups"
+          v-for="group in displayGroups"
           :key="group.id"
           @click="changeGroup(selectedKeyForGroup!, group.id)"
           :class="[
@@ -106,6 +106,8 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { ref, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -123,6 +125,7 @@ const appStore = useAppStore()
 
 const apiKeys = ref<ApiKey[]>([])
 const allGroups = ref<AdminGroup[]>([])
+const displayGroups = computed(() => sortGroupsForDisplay(allGroups.value))
 const loading = ref(false)
 let requestVersion = 0
 const updatingKeyIds = ref(new Set<number>())

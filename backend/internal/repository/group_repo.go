@@ -11,6 +11,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -632,6 +633,31 @@ func groupListOrder(params pagination.PaginationParams) []func(*entsql.Selector)
 	tieField := group.FieldID
 	defaultOrder := true
 	switch sortBy {
+	case "display_order":
+		return []func(*entsql.Selector){func(selector *entsql.Selector) {
+			direction := " ASC"
+			if sortOrder == pagination.SortOrderDesc {
+				direction = " DESC"
+			}
+			platforms := domain.Platforms()
+			selector.OrderExpr(entsql.ExprFunc(func(b *entsql.Builder) {
+				b.WriteString("CASE ").Ident(selector.C(group.FieldPlatform))
+				for index, platform := range platforms {
+					b.WriteString(" WHEN ").Arg(platform.ID).WriteString(fmt.Sprintf(" THEN %d", index))
+				}
+				b.WriteString(" WHEN ").Arg(service.PlatformComposite).WriteString(fmt.Sprintf(" THEN %d", len(platforms)))
+				b.WriteString(" WHEN ").Arg("").WriteString(fmt.Sprintf(" THEN %d ELSE %d END", len(platforms)+2, len(platforms)+1)).WriteString(direction)
+			}))
+			for _, column := range []string{group.FieldPlatform, group.FieldSortOrder, group.FieldID} {
+				selector.OrderExpr(entsql.ExprFunc(func(b *entsql.Builder) {
+					b.Ident(selector.C(column))
+					if column == group.FieldPlatform {
+						b.WriteString(` COLLATE "C"`)
+					}
+					b.WriteString(direction)
+				}))
+			}
+		}}
 	case "", "sort_order":
 		field = group.FieldSortOrder
 	case "name":

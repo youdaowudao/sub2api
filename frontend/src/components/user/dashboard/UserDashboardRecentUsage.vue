@@ -2,12 +2,13 @@
   <div class="card">
     <div class="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-dark-700">
       <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('dashboard.recentUsage') }}</h2>
-      <span class="badge badge-gray">{{ t('dashboard.last7Days') }}</span>
+      <span class="badge badge-gray">{{ rangeLabel }}</span>
     </div>
     <div class="p-6">
       <div v-if="loading" class="flex items-center justify-center py-12">
         <LoadingSpinner size="lg" />
       </div>
+      <p v-else-if="error" role="alert" class="py-8 text-sm text-red-600 dark:text-red-400">{{ t('dashboard.recentLoadFailed') }}</p>
       <div v-else-if="data.length === 0" class="py-8">
         <EmptyState :title="t('dashboard.noUsageRecords')" :description="t('dashboard.startUsingApi')" />
       </div>
@@ -41,6 +42,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -48,10 +50,16 @@ import Icon from '@/components/icons/Icon.vue'
 import { formatDateTime } from '@/utils/format'
 import type { UsageLog } from '@/types'
 
-defineProps<{
+const props = defineProps<{
   data: UsageLog[]
   loading: boolean
+  error?: boolean
+  startDate: string
+  endDate: string
 }>()
 const { t } = useI18n()
+const rangeLabel = computed(() => props.startDate === props.endDate
+  ? props.startDate
+  : `${props.startDate} — ${props.endDate}`)
 const formatCost = (c: number) => c.toFixed(4)
 </script>
