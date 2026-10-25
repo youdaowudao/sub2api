@@ -149,6 +149,7 @@
 </template>
 
 <script setup lang="ts">
+import { buildGroupSelectOptions } from '@/utils/groupDisplayOrder'
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { keysAPI } from '@/api'
@@ -206,7 +207,7 @@ const ipFields: Array<{ key: IPField; label: string }> = [
   { key: 'ip_whitelist', label: 'keys.ipWhitelist' },
   { key: 'ip_blacklist', label: 'keys.ipBlacklist' }
 ]
-const groupOptions = computed(() => props.groups.map((group) => ({ value: group.id, label: group.name })))
+const groupOptions = computed(() => buildGroupSelectOptions(props.groups, (group) => ({ value: group.id, label: group.name }), t('common.unknownPlatform')))
 const statusOptions = computed(() => [
   { value: 'active', label: t('keys.enable') },
   { value: 'inactive', label: t('keys.disable') }

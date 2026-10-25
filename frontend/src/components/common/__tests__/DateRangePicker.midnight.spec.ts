@@ -26,6 +26,12 @@ describe('date presets after midnight', () => {
     await w.get('.date-picker-apply').trigger('click')
     expect(w.emitted('change')?.[0]?.[0]).toMatchObject({ startDate, endDate: '2026-10-01' })
   })
+  it('reidentifies yesterday without changing the applied range when reopened after midnight', async () => {
+    const w = await reopenNextDay()
+    expect(w.get('.date-picker-trigger').text()).toContain('dates.yesterday')
+    expect(w.emitted('change')).toBeUndefined()
+    expect(w.findAll('input[type="date"]')[0].element.value).toBe('2026-09-30')
+  })
   it('updates the maximum selectable date when reopened', async () => {
     const w = await reopenNextDay()
     expect(w.findAll('input[type="date"]')[1].attributes('max')).toBe('2026-10-02')

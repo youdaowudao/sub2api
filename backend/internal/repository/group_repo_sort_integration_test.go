@@ -109,3 +109,59 @@ func (s *GroupRepoSuite) TestList_SortBySortOrderDesc() {
 	s.Require().Contains(indexByID, g2.ID)
 	s.Require().Less(indexByID[g2.ID], indexByID[g1.ID])
 }
+
+// Display order must be applied by SQL before LIMIT/OFFSET, across platform boundaries.
+func (s *GroupRepoSuite) TestList_DisplayOrderAcrossPages() {
+	inputs := []service.Group{
+		{Name: "display-openai", Platform: "openai", SortOrder: -100},
+		{Name: "display-unknown", Platform: "zzz", SortOrder: -100},
+		{Name: "display-anthropic-later", Platform: "anthropic", SortOrder: 20},
+		{Name: "display-antigravity", Platform: "antigravity", SortOrder: -100},
+		{Name: "display-anthropic-first", Platform: "anthropic", SortOrder: 0},
+		{Name: "display-composite", Platform: "composite", SortOrder: -100},
+		{Name: "display-empty", Platform: "", SortOrder: -100},
+		{Name: "display-anthropic-tie", Platform: "anthropic", SortOrder: 20},
+		{Name: "display-unknown-first", Platform: "aaa", SortOrder: 100},
+	}
+	for i := range inputs {
+		inputs[i].Status = service.StatusActive
+		inputs[i].SubscriptionType = service.SubscriptionTypeStandard
+		inputs[i].RateMultiplier = 1
+		s.Require().NoError(s.repo.Create(s.ctx, &inputs[i]))
+	}
+	want := []int64{inputs[4].ID, inputs[2].ID, inputs[7].ID, inputs[0].ID, inputs[3].ID, inputs[5].ID, inputs[8].ID, inputs[1].ID, inputs[6].ID}
+	var got []int64
+	for page := 1; page <= 5; page++ {
+		rows, _, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: page, PageSize: 2, SortBy: "display_order", SortOrder: "asc"}, "", "", "display-", nil)
+		s.Require().NoError(err)
+		for _, g := range rows {
+			got = append(got, g.ID)
+		}
+	}
+	s.Require().Equal(want, got)
+	rows, _, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 2, SortBy: "display_order", SortOrder: "desc"}, "", "", "display-", nil)
+	s.Require().NoError(err)
+	s.Require().Equal([]int64{want[len(want)-1], want[len(want)-2]}, []int64{rows[0].ID, rows[1].ID})
+}
+
+func (s *GroupRepoSuite) TestDisplayOrder_SaveReadPreservesGroupAttributes() {
+	groups := []service.Group{
+		{Name: "saved-display-public", Platform: service.PlatformAnthropic, RateMultiplier: 5, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard},
+		{Name: "saved-display-exclusive", Platform: service.PlatformAnthropic, RateMultiplier: .1, Status: "inactive", SubscriptionType: service.SubscriptionTypeStandard, IsExclusive: true},
+	}
+	for i := range groups {
+		s.Require().NoError(s.repo.Create(s.ctx, &groups[i]))
+	}
+	s.Require().NoError(s.repo.UpdateSortOrders(s.ctx, []service.GroupSortOrderUpdate{{ID: groups[1].ID, SortOrder: 0}, {ID: groups[0].ID, SortOrder: 10}}))
+	rows, _, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: 1, PageSize: 20, SortBy: "display_order", SortOrder: "asc"}, "", "", "saved-display-", nil)
+	s.Require().NoError(err)
+	s.Require().Len(rows, 2)
+	s.Require().Equal(groups[1].ID, rows[0].ID)
+	s.Require().Equal(0, rows[0].SortOrder)
+	s.Require().True(rows[0].IsExclusive)
+	s.Require().Equal("inactive", rows[0].Status)
+	s.Require().Equal(.1, rows[0].RateMultiplier)
+	s.Require().Equal(groups[0].ID, rows[1].ID)
+	s.Require().Equal(10, rows[1].SortOrder)
+	s.Require().Equal(float64(5), rows[1].RateMultiplier)
+}

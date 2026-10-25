@@ -1,5 +1,7 @@
 export default {
   dashboard: {
+    chartsLoadFailed: '所选日期的图表加载失败，请刷新重试。',
+    recentLoadFailed: '所选日期的最近使用加载失败，请刷新重试。',
     title: '仪表盘',
     welcomeMessage: '欢迎回来！这是您账户的概览。',
     balance: '余额',
@@ -1049,7 +1051,7 @@ export default {
     lastWeek: '上周',
     thisMonth: '本月',
     lastMonth: '上月',
-    last24Hours: '近24小时',
+    yesterdayAndToday: '昨天和今天',
     last7Days: '近 7 天',
     last14Days: '近 14 天',
     last30Days: '近 30 天',

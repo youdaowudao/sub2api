@@ -72,6 +72,8 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PromptAuditDraft, PromptAuditGroup } from '../types'
@@ -84,8 +86,8 @@ const groupSearch = ref('')
 
 const filteredGroups = computed(() => {
   const query = groupSearch.value.trim().toLowerCase()
-  if (!query) return props.groups
-  return props.groups.filter((group) => `${group.name} ${group.id} ${group.platform}`.toLowerCase().includes(query))
+  if (!query) return sortGroupsForDisplay(props.groups)
+  return sortGroupsForDisplay(props.groups).filter((group) => `${group.name} ${group.id} ${group.platform}`.toLowerCase().includes(query))
 })
 const knownGroupIds = computed(() => new Set(props.groups.map((group) => group.id)))
 const missingGroupIds = computed(() => props.draft.group_ids.filter((id) => !knownGroupIds.value.has(id)))

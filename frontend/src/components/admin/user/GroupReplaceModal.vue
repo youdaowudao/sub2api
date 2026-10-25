@@ -76,6 +76,8 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -103,7 +105,7 @@ const submitting = ref(false)
 // 可选的专属标准分组（排除当前 oldGroup）
 const availableGroups = computed(() => {
   if (!props.oldGroup) return []
-  return props.allGroups.filter(
+  return sortGroupsForDisplay(props.allGroups).filter(
     g => g.status === 'active' && g.is_exclusive && g.subscription_type === 'standard' && g.id !== props.oldGroup!.id
   )
 })

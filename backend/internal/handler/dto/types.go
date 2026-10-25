@@ -91,6 +91,7 @@ type APIKey struct {
 }
 
 type Group struct {
+	SortOrder      int     `json:"sort_order"`
 	ID             int64   `json:"id"`
 	Name           string  `json:"name"`
 	Description    string  `json:"description"`
@@ -203,9 +204,6 @@ type AdminGroup struct {
 	AccountCount            int64          `json:"account_count,omitempty"`
 	ActiveAccountCount      int64          `json:"active_account_count,omitempty"`
 	RateLimitedAccountCount int64          `json:"rate_limited_account_count,omitempty"`
-
-	// 分组排序
-	SortOrder int `json:"sort_order"`
 }
 
 type Account struct {

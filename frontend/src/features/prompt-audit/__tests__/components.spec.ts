@@ -84,6 +84,23 @@ describe('Prompt Audit components', () => {
     expect(emitted.worker_count).toBe(6)
   })
 
+  it('sorts group rendering and filtered results while preserving policy checkbox semantics', async () => {
+    const draft = { enabled: true, group_ids: [3, 2], all_groups: false, scanners: [], endpoints: [], strategy: 'priority' } as unknown as PromptAuditDraft
+    const groups = [
+      { id: 3, name: 'Match OpenAI', platform: 'openai', sort_order: -100, status: 'active' },
+      { id: 2, name: 'Match later', platform: 'anthropic', sort_order: 10, status: 'inactive' },
+      { id: 1, name: 'Match first', platform: 'anthropic', sort_order: 0, status: 'active' },
+    ]
+    const wrapper = mount(PolicyPanel, { props: { draft, groups } })
+    const inputs = wrapper.findAll('label').filter(l => l.text().includes('Match'))
+    expect(inputs.map(l => l.text().match(/Match (first|later|OpenAI)/)?.[0])).toEqual(['Match first', 'Match later', 'Match OpenAI'])
+    await wrapper.get('[aria-label="admin.promptAudit.policy.searchGroups"]').setValue('Match')
+    expect(wrapper.findAll('label').filter(l => l.text().includes('Match')).map(l => l.text().match(/Match (first|later|OpenAI)/)?.[0])).toEqual(['Match first', 'Match later', 'Match OpenAI'])
+    await inputs[0]!.get('input').setValue(true)
+    expect((wrapper.emitted('update:draft')!.at(-1)![0] as PromptAuditDraft).group_ids).toEqual([1, 2, 3])
+    expect(draft.group_ids).toEqual([3, 2]); expect(groups.map(g => g.id)).toEqual([3, 2, 1])
+  })
+
   it('keeps identity fields separate, supports selection, and opens filter deletion from the toolbar', async () => {
     const event: PromptAuditEvent = {
       id: 1, job_id: 1, decision: 'critical', risk_level: 'critical', action: 'Block', categories: ['pii'], matched_scanners: ['pii'], scanner_scores: { pii: 1 }, scanner_evidence: { pii: 'redacted' }, scanner_backend: 'qwen3guard-openai', scanner_version: '1', guard_endpoint_id: 'guard-1', policy_id: 'priority', policy_version: 1, config_version: 1, chunk_total: 1, latency_ms: 10, issue_summaries: [], created_at: '2026-07-16T00:00:00Z',

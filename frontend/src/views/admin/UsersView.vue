@@ -792,6 +792,8 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -1064,6 +1066,7 @@ const sortState = reactive(loadInitialSortState())
 
 // Groups data for the groups column and the existing "authorised group" filter (active only)
 const allGroups = ref<AdminGroup[]>([])
+const displayAllGroups = computed(() => sortGroupsForDisplay(allGroups.value))
 const loadAllGroups = async () => {
   if (allGroups.value.length > 0) return
   try {
@@ -1088,7 +1091,7 @@ const loadAllGroupsForApiKeyFilter = async () => {
 const getUserGroups = (user: AdminUser) => {
   const exclusive: AdminGroup[] = []
   const publicGroups: AdminGroup[] = []
-  for (const g of allGroups.value) {
+  for (const g of displayAllGroups.value) {
     if (g.status !== 'active' || g.subscription_type !== 'standard') continue
     if (g.is_exclusive) {
       if (user.allowed_groups?.includes(g.id)) {
@@ -1106,7 +1109,7 @@ const groupFilterOptions = computed(() => {
   const options: { value: string; label: string }[] = [
     { value: '', label: t('admin.users.allAuthorizedGroups') }
   ]
-  for (const g of allGroups.value) {
+  for (const g of displayAllGroups.value) {
     if (g.status !== 'active' || !g.is_exclusive || g.subscription_type !== 'standard') continue
     options.push({ value: g.name, label: g.name })
   }

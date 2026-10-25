@@ -26,14 +26,14 @@
               :options="platformFilterOptions"
               :placeholder="t('admin.groups.allPlatforms')"
               class="w-44"
-              @change="loadGroups"
+              @change="handleGroupFilterChange"
             />
             <Select
               v-model="filters.status"
               :options="statusOptions"
               :placeholder="t('admin.groups.allStatus')"
               class="w-40"
-              @change="loadGroups"
+              @change="handleGroupFilterChange"
             />
             <Select
               v-if="!authStore.isSimpleMode"
@@ -41,7 +41,7 @@
               :options="exclusiveOptions"
               :placeholder="t('admin.groups.allGroups')"
               class="w-44"
-              @change="loadGroups"
+              @change="handleGroupFilterChange"
             />
           </div>
 
@@ -120,7 +120,7 @@
           :data="groups"
           :loading="loading"
           :server-side-sort="true"
-          default-sort-key="sort_order"
+          default-sort-key="display_order"
           default-sort-order="asc"
           @sort="handleSort"
         >
@@ -487,6 +487,11 @@
         @submit.prevent="handleCreateGroup"
         class="space-y-5"
       >
+        <p v-if="!authStore.isSimpleMode && formCandidatesLoading" class="text-sm text-gray-500" role="status">{{ t('common.loading') }}</p>
+        <div v-if="!authStore.isSimpleMode && formCandidatesError" class="text-sm text-red-600" role="alert">
+          {{ t('admin.groups.formCandidatesFailed') }}
+          <button type="button" class="btn btn-secondary btn-sm" @click="loadFormCandidates">{{ t('common.tryAgain') }}</button>
+        </div>
         <div>
           <GroupI18nField
             v-model="createForm.name"
@@ -556,7 +561,7 @@
             class="flex flex-wrap gap-1.5 mb-2"
           >
             <span
-              v-for="groupId in createForm.copy_accounts_from_group_ids"
+              v-for="groupId in sortGroupIdsForDisplay(createForm.copy_accounts_from_group_ids, formCandidateGroups)"
               :key="groupId"
               class="inline-flex items-center gap-1 rounded-full bg-primary-100 px-2.5 py-1 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300"
             >
@@ -2083,7 +2088,7 @@
           <button
             type="submit"
             form="create-group-form"
-            :disabled="submitting"
+            :disabled="submitting || formCandidatesBlocked"
             class="btn btn-primary"
             data-tour="group-form-submit"
           >
@@ -2126,6 +2131,11 @@
         @submit.prevent="handleUpdateGroup"
         class="space-y-5"
       >
+        <p v-if="!authStore.isSimpleMode && formCandidatesLoading" class="text-sm text-gray-500" role="status">{{ t('common.loading') }}</p>
+        <div v-if="!authStore.isSimpleMode && formCandidatesError" class="text-sm text-red-600" role="alert">
+          {{ t('admin.groups.formCandidatesFailed') }}
+          <button type="button" class="btn btn-secondary btn-sm" @click="loadFormCandidates">{{ t('common.tryAgain') }}</button>
+        </div>
         <div>
           <GroupI18nField
             v-model="editForm.name"
@@ -2194,7 +2204,7 @@
             class="flex flex-wrap gap-1.5 mb-2"
           >
             <span
-              v-for="groupId in editForm.copy_accounts_from_group_ids"
+              v-for="groupId in sortGroupIdsForDisplay(editForm.copy_accounts_from_group_ids, formCandidateGroups)"
               :key="groupId"
               class="inline-flex items-center gap-1 rounded-full bg-primary-100 px-2.5 py-1 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300"
             >
@@ -3732,7 +3742,7 @@
           <button
             type="submit"
             form="edit-group-form"
-            :disabled="submitting"
+            :disabled="submitting || formCandidatesBlocked"
             class="btn btn-primary"
             data-tour="group-form-submit"
           >
@@ -3791,66 +3801,47 @@
       :title="t('admin.groups.sortOrder')"
       width="normal"
       @close="closeSortModal"
+      :close-on-escape="!sortSubmitting"
+      :show-close-button="!sortSubmitting"
     >
       <div class="space-y-4">
         <p class="text-sm text-gray-500 dark:text-gray-400">
           {{ t("admin.groups.sortOrderHint") }}
         </p>
-        <VueDraggable
-          v-model="sortableGroups"
-          :animation="200"
-          class="space-y-2"
-        >
-          <div
-            v-for="group in sortableGroups"
-            :key="group.id"
-            class="flex cursor-grab items-center gap-3 rounded-lg border border-gray-200 bg-white p-3 transition-shadow hover:shadow-md active:cursor-grabbing dark:border-dark-600 dark:bg-dark-700"
-          >
-            <div class="text-gray-400">
-              <Icon name="menu" size="md" />
-            </div>
-            <div class="flex-1">
-              <div class="font-medium text-gray-900 dark:text-white">
-                {{ group.name }}
+        <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.groups.sortOrderReloadHint') }}</p>
+        <div v-if="sortLoading" role="status">{{ t('common.loading') }}</div>
+        <div v-else-if="sortLoadError" role="alert" class="text-sm text-red-600">
+          {{ sortLoadError }}
+          <button type="button" class="btn btn-secondary btn-sm" @click="loadSortableGroups">{{ t('common.tryAgain') }}</button>
+        </div>
+        <template v-else>
+          <p v-if="sortableGroups.length === 0" class="py-8 text-center text-gray-500">{{ t('admin.groups.sortOrderEmpty') }}</p>
+          <section v-for="section in sortableGroups" :key="section.platform" :data-sort-platform="section.platform" class="space-y-2">
+            <h4 class="text-sm font-semibold text-gray-600 dark:text-gray-300">{{ section.label }}</h4>
+            <VueDraggable v-model="section.groups" :animation="200" handle=".group-sort-handle" :disabled="sortSubmitting" class="space-y-2">
+              <div v-for="(group, index) in section.groups" :key="group.id" :data-sort-id="group.id" class="flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-600 dark:bg-dark-700">
+                <span class="group-sort-handle cursor-grab text-gray-400" :title="group.name"><Icon name="menu" size="md" /></span>
+                <div class="min-w-0 flex-1">
+                  <div class="truncate font-medium text-gray-900 dark:text-white" :title="group.name">{{ group.name }}</div>
+                  <span v-if="group.status !== 'active'" class="text-xs text-gray-500">{{ t('common.inactive') }}</span>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" :disabled="sortSubmitting || index === 0" :aria-label="t('admin.groups.sortMoveUp', { name: group.name })" @click="moveSortGroup(section.groups, index, -1)">{{ t('admin.groups.moveUp') }}</button>
+                <button type="button" class="btn btn-secondary btn-sm" :disabled="sortSubmitting || index === section.groups.length - 1" :aria-label="t('admin.groups.sortMoveDown', { name: group.name })" @click="moveSortGroup(section.groups, index, 1)">{{ t('admin.groups.moveDown') }}</button>
               </div>
-              <div class="text-xs text-gray-500 dark:text-gray-400">
-                <span
-                  :class="[
-                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
-                    group.platform === 'anthropic'
-                      ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                      : group.platform === 'openai'
-                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                        : group.platform === 'antigravity'
-                          ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                          : group.platform === 'grok'
-                            ? 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100'
-                            : group.platform === 'kimi'
-                              ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400'
-                              : group.platform === 'zhipu'
-                                ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
-                                : group.platform === 'deepseek'
-                                  ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400'
-                                  : group.platform === 'minimax'
-                                    ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400'
-                                  : group.platform === 'opencode_go'
-                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
-                                    : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-                  ]"
-                >
-                  {{ t("admin.groups.platforms." + group.platform, platformLabel(group.platform)) }}
-                </span>
-              </div>
-            </div>
-            <div class="text-sm text-gray-400">#{{ group.id }}</div>
-          </div>
-        </VueDraggable>
+            </VueDraggable>
+          </section>
+        </template>
+        <div v-if="sortSaveError" role="alert" class="text-sm text-red-600">
+          {{ t('admin.groups.sortOrderUnconfirmed') }}
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="sortSubmitting" @click="showSortReloadConfirm = true">{{ t('common.refresh') }}</button>
+        </div>
       </div>
 
       <template #footer>
         <div class="flex justify-end gap-3 pt-4">
           <button
             @click="closeSortModal"
+            :disabled="sortSubmitting"
             type="button"
             class="btn btn-secondary"
           >
@@ -3858,7 +3849,7 @@
           </button>
           <button
             @click="saveSortOrder"
-            :disabled="sortSubmitting"
+            :disabled="sortSubmitting || sortLoading || !!sortLoadError || sortableGroups.length === 0"
             class="btn btn-primary"
           >
             <svg
@@ -3886,6 +3877,8 @@
         </div>
       </template>
     </BaseDialog>
+
+    <ConfirmDialog :show="showSortReloadConfirm" :title="t('common.confirm')" :message="t('admin.groups.sortOrderDiscard')" @cancel="showSortReloadConfirm = false" @confirm="showSortReloadConfirm = false; loadSortableGroups()" />
 
     <!-- Composite Routes Modal -->
     <BaseDialog
@@ -4265,6 +4258,8 @@
 </template>
 
 <script setup lang="ts">
+import { groupByPlatformForDisplay, sortGroupsForDisplay, sortGroupIdsForDisplay } from '@/utils/groupDisplayOrder';
+import { GroupListChangedError } from '@/api/admin/groups';
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAppStore } from "@/stores/app";
@@ -4676,7 +4671,7 @@ const fallbackGroupOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.claudeCode.noFallback") },
   ];
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = sortGroupsForDisplay(formCandidateGroups.value).filter(
     (g) =>
       g.platform === "anthropic" &&
       !g.claude_code_only &&
@@ -4694,7 +4689,7 @@ const fallbackGroupOptionsForEdit = computed(() => {
     { value: null, label: t("admin.groups.claudeCode.noFallback") },
   ];
   const currentId = editingGroup.value?.id;
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = sortGroupsForDisplay(formCandidateGroups.value).filter(
     (g) =>
       g.platform === "anthropic" &&
       !g.claude_code_only &&
@@ -4712,7 +4707,7 @@ const invalidRequestFallbackOptions = computed(() => {
   const options: { value: number | null; label: string }[] = [
     { value: null, label: t("admin.groups.invalidRequestFallback.noFallback") },
   ];
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = sortGroupsForDisplay(formCandidateGroups.value).filter(
     (g) =>
       g.platform === "anthropic" &&
       g.status === "active" &&
@@ -4731,7 +4726,7 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
     { value: null, label: t("admin.groups.invalidRequestFallback.noFallback") },
   ];
   const currentId = editingGroup.value?.id;
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = sortGroupsForDisplay(formCandidateGroups.value).filter(
     (g) =>
       g.platform === "anthropic" &&
       g.status === "active" &&
@@ -4756,7 +4751,7 @@ const copyAccountsGroupLabel = (g: AdminGroup) => {
 
 // 复制账号的源分组选项（创建时）- 相同平台；composite 分组可汇总各平台账号
 const copyAccountsGroupOptions = computed(() => {
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = sortGroupsForDisplay(formCandidateGroups.value).filter(
     (g) =>
       canCopyAccountsFromGroup(createForm.platform, g.platform) &&
       (g.account_count || 0) > 0,
@@ -4770,7 +4765,7 @@ const copyAccountsGroupOptions = computed(() => {
 // 复制账号的源分组选项（编辑时）- 相同平台；composite 分组可汇总各平台账号，排除自身
 const copyAccountsGroupOptionsForEdit = computed(() => {
   const currentId = editingGroup.value?.id;
-  const eligibleGroups = groups.value.filter(
+  const eligibleGroups = sortGroupsForDisplay(formCandidateGroups.value).filter(
     (g) =>
       canCopyAccountsFromGroup(editForm.platform, g.platform) &&
       (g.account_count || 0) > 0 &&
@@ -4809,7 +4804,7 @@ const searchQuery = ref("");
 const filters = reactive({
   platform: "",
   status: "",
-  is_exclusive: "",
+  is_exclusive: "false",
 });
 const pagination = reactive({
   page: 1,
@@ -4818,7 +4813,7 @@ const pagination = reactive({
   pages: 0,
 });
 const sortState = reactive({
-  sort_by: "sort_order",
+  sort_by: "display_order",
   sort_order: "asc" as "asc" | "desc",
 });
 
@@ -4846,7 +4841,46 @@ const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
 const showRPMOverridesModal = ref(false);
 const rpmOverridesGroup = ref<AdminGroup | null>(null);
-const sortableGroups = ref<AdminGroup[]>([]);
+const sortableGroups = ref<{ platform: string; label: string; groups: AdminGroup[] }[]>([]);
+const sortLoading = ref(false);
+const sortLoadError = ref("");
+const sortSaveError = ref(false);
+const showSortReloadConfirm = ref(false);
+let sortLoadSeq = 0;
+let sortLoadController: AbortController | null = null;
+const formCandidateGroups = ref<AdminGroup[]>([]);
+const formCandidatesLoading = ref(false);
+const formCandidatesReady = ref(false);
+const formCandidatesError = ref(false);
+const formCandidatesBlocked = computed(() => !authStore.isSimpleMode && !formCandidatesReady.value);
+let formCandidateSeq = 0;
+let formCandidateController: AbortController | null = null;
+
+const invalidateFormCandidates = () => {
+  formCandidateSeq++;
+  formCandidateController?.abort();
+  formCandidatesLoading.value = false;
+};
+const loadFormCandidates = async () => {
+  invalidateFormCandidates();
+  formCandidateGroups.value = [];
+  formCandidatesReady.value = false;
+  formCandidatesError.value = false;
+  if (authStore.isSimpleMode) return;
+  const seq = formCandidateSeq;
+  formCandidateController = new AbortController();
+  formCandidatesLoading.value = true;
+  try {
+    const rows = await adminAPI.groups.listAllForDisplay({ signal: formCandidateController.signal });
+    if (seq !== formCandidateSeq) return;
+    formCandidateGroups.value = rows;
+    formCandidatesReady.value = true;
+  } catch {
+    if (seq === formCandidateSeq) formCandidatesError.value = true;
+  } finally {
+    if (seq === formCandidateSeq) formCandidatesLoading.value = false;
+  }
+};
 type ConcreteGroupPlatform = Exclude<GroupPlatform, "composite">;
 type CompositeRouteFormState = {
   public_model: string;
@@ -5733,6 +5767,8 @@ const loadCapacitySummary = async () => {
   }
 };
 
+const handleGroupFilterChange = () => { pagination.page = 1; void loadGroups(); };
+
 let searchTimeout: ReturnType<typeof setTimeout>;
 const handleSearch = () => {
   clearTimeout(searchTimeout);
@@ -5761,11 +5797,13 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 };
 
 const openCreateModal = () => {
+  void loadFormCandidates();
   showCreateModal.value = true;
   loadModelAllowlistCandidates("create", 0, createForm.platform);
 };
 
 const closeCreateModal = () => {
+  invalidateFormCandidates();
   showCreateModal.value = false;
   createModelRoutingRules.value.forEach((rule) => {
     accountSearchRunner.clearKey(getCreateRuleSearchKey(rule));
@@ -5885,6 +5923,7 @@ const validateGroupReasoningMultipliers = (pricing: PricingFormEntry[]): boolean
 };
 
 const handleCreateGroup = async () => {
+  if (formCandidatesBlocked.value) return;
   if (!createForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
@@ -6053,6 +6092,7 @@ const handleCreateGroup = async () => {
 };
 
 const handleEdit = async (group: AdminGroup) => {
+  void loadFormCandidates();
   editingGroup.value = group;
   editForm.name = group.name;
   editForm.description = group.description || "";
@@ -6180,6 +6220,7 @@ const handleEdit = async (group: AdminGroup) => {
 };
 
 const closeEditModal = () => {
+  invalidateFormCandidates();
   editModelRoutingRules.value.forEach((rule) => {
     accountSearchRunner.clearKey(getEditRuleSearchKey(rule));
   });
@@ -6223,6 +6264,7 @@ const closeEditModal = () => {
 };
 
 const handleUpdateGroup = async () => {
+  if (formCandidatesBlocked.value) return;
   if (!editingGroup.value) return;
   if (!editForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
@@ -6837,45 +6879,54 @@ const handleClickOutside = (event: MouseEvent) => {
   }
 };
 
-// 打开排序弹窗
-const openSortModal = async () => {
+const loadSortableGroups = async () => {
+  sortLoadController?.abort();
+  const seq = ++sortLoadSeq;
+  sortLoadController = new AbortController();
+  sortLoading.value = true;
+  sortLoadError.value = "";
+  sortSaveError.value = false;
+  sortableGroups.value = [];
   try {
-    // 获取所有分组（不分页）
-    const allGroups = await adminAPI.groups.getAll();
-    // 按 sort_order 排序
-    sortableGroups.value = [...allGroups].sort(
-      (a, b) => a.sort_order - b.sort_order,
-    );
-    showSortModal.value = true;
+    const rows = await adminAPI.groups.listAllForDisplay({ signal: sortLoadController.signal });
+    if (seq !== sortLoadSeq || !showSortModal.value) return;
+    sortableGroups.value = groupByPlatformForDisplay(rows, t('common.unknownPlatform'));
   } catch (error) {
-    appStore.showError(t("admin.groups.failedToLoad"));
-    console.error("Error loading groups for sorting:", error);
+    if (seq === sortLoadSeq && showSortModal.value) sortLoadError.value = t(error instanceof GroupListChangedError ? 'admin.groups.sortOrderListChanged' : 'admin.groups.sortOrderLoadFailed');
+  } finally {
+    if (seq === sortLoadSeq) sortLoading.value = false;
   }
 };
-
-// 关闭排序弹窗
+const openSortModal = () => {
+  showSortModal.value = true;
+  void loadSortableGroups();
+};
 const closeSortModal = () => {
+  if (sortSubmitting.value) return;
+  ++sortLoadSeq;
+  sortLoadController?.abort();
   showSortModal.value = false;
+  showSortReloadConfirm.value = false;
   sortableGroups.value = [];
 };
-
-// 保存排序
+const moveSortGroup = (groups: AdminGroup[], index: number, offset: number) => {
+  if (sortSubmitting.value || index + offset < 0 || index + offset >= groups.length) return;
+  const [moved] = groups.splice(index, 1);
+  groups.splice(index + offset, 0, moved!);
+};
 const saveSortOrder = async () => {
+  if (sortSubmitting.value || sortLoading.value || sortLoadError.value || !sortableGroups.value.length) return;
   sortSubmitting.value = true;
+  sortSaveError.value = false;
   try {
-    const updates = sortableGroups.value.map((g, index) => ({
-      id: g.id,
-      sort_order: index * 10,
-    }));
+    const updates = sortableGroups.value.flatMap(section => section.groups).map((g, index) => ({ id: g.id, sort_order: index * 10 }));
     await adminAPI.groups.updateSortOrder(updates);
-    appStore.showSuccess(t("admin.groups.sortOrderUpdated"));
+    appStore.showSuccess(t('admin.groups.sortOrderUpdated'));
+    sortSubmitting.value = false;
     closeSortModal();
-    loadGroups();
-  } catch (error: any) {
-    appStore.showError(
-      error.response?.data?.detail || t("admin.groups.failedToUpdateSortOrder"),
-    );
-    console.error("Error updating sort order:", error);
+    void loadGroups();
+  } catch {
+    sortSaveError.value = true;
   } finally {
     sortSubmitting.value = false;
   }
@@ -6891,6 +6942,10 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  clearTimeout(searchTimeout);
+  invalidateFormCandidates();
+  ++sortLoadSeq;
+  sortLoadController?.abort();
   document.removeEventListener("click", handleClickOutside);
   accountSearchRunner.clearAll();
   clearAllAccountSearchState();

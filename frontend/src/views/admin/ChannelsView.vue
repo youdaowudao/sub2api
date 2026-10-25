@@ -499,7 +499,7 @@
                   <label class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.channels.form.ruleGroups') }}</label>
                   <div class="mt-1 flex flex-wrap gap-1">
                     <label
-                      v-for="gid in section.group_ids"
+                      v-for="gid in sortGroupIdsForDisplay(section.group_ids, allGroups)"
                       :key="gid"
                       class="inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors"
                       :class="rule.group_ids.includes(gid)
@@ -628,6 +628,8 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay, sortGroupIdsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -807,7 +809,7 @@ function togglePlatform(platform: GroupPlatform) {
 }
 
 function getGroupsForPlatform(platform: GroupPlatform): AdminGroup[] {
-  return allGroups.value.filter(
+  return sortGroupsForDisplay(allGroups.value).filter(
     g => g.platform === platform || (g.platform === 'composite' && compositePlatforms.value.includes(platform))
   )
 }

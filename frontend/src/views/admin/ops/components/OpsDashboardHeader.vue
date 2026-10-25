@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
@@ -152,7 +154,7 @@ watch(
 onMounted(async () => {
   try {
     const list = await adminAPI.groups.getAll()
-    groups.value = list.map((g) => ({ id: g.id, name: g.name, platform: g.platform }))
+    groups.value = sortGroupsForDisplay(list).map((g) => ({ id: g.id, name: g.name, platform: g.platform }))
   } catch (e) {
     console.error('[OpsDashboardHeader] Failed to load groups', e)
     groups.value = []

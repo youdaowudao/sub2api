@@ -840,6 +840,8 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -1106,7 +1108,7 @@ const extendForm = reactive({
 // Group options for filter (all groups)
 const groupOptions = computed(() => [
   { value: '', label: t('admin.subscriptions.allGroups') },
-  ...groups.value.map((g) => ({ value: g.id.toString(), label: g.name }))
+  ...sortGroupsForDisplay(groups.value).map((g) => ({ value: g.id.toString(), label: g.name }))
 ])
 
 const platformFilterOptions = computed(() => [
@@ -1116,8 +1118,8 @@ const platformFilterOptions = computed(() => [
 
 // Group options for assign (only subscription type groups)
 const subscriptionGroupOptions = computed(() =>
-  groups.value
-    .filter((g) => g.subscription_type === 'subscription' && g.status === 'active')
+  sortGroupsForDisplay(groups.value
+    .filter((g) => g.subscription_type === 'subscription' && g.status === 'active'))
     .map((g) => ({
       value: g.id,
       label: g.name,

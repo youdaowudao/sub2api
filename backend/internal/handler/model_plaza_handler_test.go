@@ -305,3 +305,13 @@ func TestModelPlazaHandler_VaryKeepsCORSOrigin(t *testing.T) {
 		require.Equal(t, []string{"Origin", "Accept-Language"}, w.Header().Values("Vary"))
 	}
 }
+
+func TestPlazaDisplayOrderProjection(t *testing.T) {
+	for _, order := range []int{0, -10, 20} {
+		raw, err := json.Marshal(toModelPlazaGroupDTO(&service.PlazaGroup{ID: 1, SortOrder: order}, nil))
+		require.NoError(t, err)
+		var fields map[string]any
+		require.NoError(t, json.Unmarshal(raw, &fields))
+		require.Equal(t, float64(order), fields["sort_order"])
+	}
+}

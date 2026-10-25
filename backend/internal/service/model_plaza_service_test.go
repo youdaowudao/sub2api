@@ -42,7 +42,7 @@ func TestListPlazaGroups_GroupCentricAggregation(t *testing.T) {
 		plazaPricedChannel(2, "chB", []int64{10}, "anthropic", "claude-opus"),
 	}
 	groups := []Group{
-		{ID: 10, Name: "g-main", Description: "desc", Platform: "anthropic", RateMultiplier: 1},
+		{ID: 10, Name: "g-main", Description: "desc", Platform: "anthropic", RateMultiplier: 1, SortOrder: -10},
 		{ID: 20, Name: "g-empty", Platform: "anthropic", RateMultiplier: 0.5},
 	}
 	svc := newPlazaService(channels, groups, nil)
@@ -51,6 +51,7 @@ func TestListPlazaGroups_GroupCentricAggregation(t *testing.T) {
 	require.Len(t, out, 1, "无模型的分组不应返回")
 	require.Equal(t, int64(10), out[0].ID)
 	require.Equal(t, "desc", out[0].Description)
+	require.Equal(t, -10, out[0].SortOrder)
 	require.Len(t, out[0].Models, 2)
 	// 组内模型按名称排序
 	require.Equal(t, "claude-opus", out[0].Models[0].Name)
@@ -188,7 +189,7 @@ func TestListPlazaGroups_InactiveChannelSkipped(t *testing.T) {
 	require.Empty(t, out)
 }
 
-func TestListPlazaGroups_SortedByRateMultiplierAsc(t *testing.T) {
+func TestListPlazaGroups_PreservesRepositoryOrderForDisplay(t *testing.T) {
 	channels := []Channel{
 		plazaPricedChannel(1, "ch", []int64{10, 20, 30}, "anthropic", "claude-sonnet"),
 	}
@@ -201,9 +202,9 @@ func TestListPlazaGroups_SortedByRateMultiplierAsc(t *testing.T) {
 	out, err := svc.ListGroups(context.Background())
 	require.NoError(t, err)
 	require.Len(t, out, 3)
-	require.Equal(t, "cheap", out[0].Name, "倍率低者在前")
-	require.Equal(t, "a-standard", out[1].Name, "同倍率按名称")
-	require.Equal(t, "b-standard", out[2].Name)
+	require.Equal(t, "b-standard", out[0].Name, "展示倍率不能覆盖仓库顺序")
+	require.Equal(t, "a-standard", out[1].Name)
+	require.Equal(t, "cheap", out[2].Name)
 }
 
 func TestListPlazaGroups_OfficialPricingFill(t *testing.T) {

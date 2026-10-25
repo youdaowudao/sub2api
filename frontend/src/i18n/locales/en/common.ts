@@ -1,5 +1,6 @@
 export default {
   common: {
+    unknownPlatform: 'Unknown platform',
     loading: 'Loading...',
     submitting: 'Submitting...',
     justNow: 'just now',

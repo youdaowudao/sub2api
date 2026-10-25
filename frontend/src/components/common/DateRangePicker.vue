@@ -106,7 +106,7 @@ const isOpen = ref(false)
 const containerRef = ref<HTMLElement | null>(null)
 const localStartDate = ref(props.startDate)
 const localEndDate = ref(props.endDate)
-const activePreset = ref<string | null>('last24Hours')
+const activePreset = ref<string | null>(null)
 
 const today = () => formatDateToString(new Date())
 
@@ -146,11 +146,12 @@ const presets: DatePreset[] = [
     }
   },
   {
-    labelKey: 'dates.last24Hours',
-    value: 'last24Hours',
+    labelKey: 'dates.yesterdayAndToday',
+    value: 'yesterdayAndToday',
     getRange: () => {
       const end = new Date()
-      const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
+      const start = new Date(end)
+      start.setDate(start.getDate() - 1)
       return {
         start: formatDateToString(start),
         end: formatDateToString(end)
@@ -256,7 +257,15 @@ const onDateChange = () => {
   }
 }
 
+// Opening recomputes preset identity against the current calendar day.
+onDateChange()
+
 const toggle = () => {
+  if (!isOpen.value) {
+    localStartDate.value = props.startDate
+    localEndDate.value = props.endDate
+    onDateChange()
+  }
   isOpen.value = !isOpen.value
 }
 

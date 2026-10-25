@@ -40,6 +40,7 @@ vi.mock('@/api/admin', () => ({
       getCapacitySummary,
       getLiveCapability,
       getAll: vi.fn(),
+      listAllForDisplay: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       update: updateGroup,
       delete: vi.fn(),
@@ -177,6 +178,7 @@ function mountView() {
 
 describe('GroupsView duplicate action', () => {
   beforeEach(() => {
+    vi.mocked(adminAPI.groups.listAllForDisplay).mockResolvedValue([])
     authState.isSimpleMode = false
     localStorage.clear()
     vi.spyOn(console, 'error').mockImplementation(() => {})

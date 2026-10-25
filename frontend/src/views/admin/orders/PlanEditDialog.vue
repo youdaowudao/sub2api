@@ -91,6 +91,8 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -132,8 +134,8 @@ const validityUnitOptions = computed(() => [
 ])
 
 const groupOptions = computed(() =>
-  props.groups
-    .filter(g => g.subscription_type === 'subscription')
+  sortGroupsForDisplay(props.groups
+    .filter(g => g.subscription_type === 'subscription'))
     .map(g => ({
       value: g.id,
       label: `${g.name} — ${g.platform} (${g.rate_multiplier}x)`,

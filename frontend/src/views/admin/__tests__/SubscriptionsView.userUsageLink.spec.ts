@@ -117,6 +117,24 @@ describe('admin subscription users', () => {
     }
   })
 
+  it('uses administrator display order for both filters and eligible assignment choices', async () => {
+    const rows = [
+      { id: 3, name: 'OpenAI', platform: 'openai', sort_order: -10, subscription_type: 'subscription', status: 'active' },
+      { id: 2, name: 'Later', platform: 'anthropic', sort_order: 20, subscription_type: 'subscription', status: 'active' },
+      { id: 1, name: 'First', platform: 'anthropic', sort_order: 0, subscription_type: 'subscription', status: 'active' },
+      { id: 4, name: 'Disabled', platform: 'anthropic', sort_order: -100, subscription_type: 'subscription', status: 'inactive' },
+    ]
+    getAllGroups.mockResolvedValueOnce(rows)
+    const wrapper = mountView(); await flushPromises()
+    expect((wrapper.vm as any).groupOptions.map((o: { value: string }) => o.value)).toEqual(['', '4', '1', '2', '3'])
+    await wrapper.findAll('button').find(b => b.text() === 'admin.subscriptions.assignSubscription')!.trigger('click')
+    const choices = wrapper.findAllComponents({ name: 'Select' }).find(c => c.props('options').some((o: { value: unknown }) => o.value === 1))!
+    expect(choices.props('options').map((o: { value: number }) => o.value)).toEqual([1, 2, 3])
+    expect((wrapper.vm as any).assignForm.group_id).toBeNull()
+    expect(rows.map(g => g.id)).toEqual([3, 2, 1, 4])
+    wrapper.unmount()
+  })
+
   it('searches current users when assigning a subscription', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const wrapper = mountView()

@@ -232,6 +232,7 @@ export interface PromptDeletePreview {
 }
 
 export interface PromptAuditGroup {
+  sort_order?: number
   id: number
   name: string
   status: 'active' | 'inactive'

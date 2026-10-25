@@ -1976,6 +1976,33 @@ describe("admin SettingsView wechat connect controls", () => {
     expect(wrapper.text()).toContain("首次绑定时授权");
   });
 
+  it("sorts subscription choices without changing either automatic gift target", async () => {
+    const rows = [
+      { id: 30, name: 'OpenAI first from API', platform: 'openai', sort_order: -30, subscription_type: 'subscription', status: 'active' },
+      { id: 10, name: 'Anthropic first in display', platform: 'anthropic', sort_order: 0, subscription_type: 'subscription', status: 'active' },
+    ];
+    getGroups.mockResolvedValueOnce(rows);
+    const wrapper = mountView();
+    await flushPromises();
+    await openUsersTab(wrapper);
+    const add = wrapper.findAll('button').find(n => n.text() === 'admin.settings.defaults.addDefaultSubscription');
+    expect(add).toBeDefined();
+    await add!.trigger('click');
+    const select = wrapper.findComponent('.default-sub-group-select');
+    expect(select.props('modelValue')).toBe(30);
+    expect((select.props('options') as { value: number }[]).map(o => o.value)).toEqual([10, 30]);
+    await wrapper.get('[data-testid="auth-source-email-enabled"]').setValue(true);
+    const sourceAdd = wrapper.findAll('button').filter(n => n.text() === 'admin.settings.defaults.addDefaultSubscription')[1];
+    await sourceAdd!.trigger('click');
+    await wrapper.find('form').trigger('submit.prevent');
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      default_subscriptions: [expect.objectContaining({ group_id: 30 })],
+      auth_source_default_email_subscriptions: [expect.objectContaining({ group_id: 30 })],
+    }));
+    expect(rows.map(g => g.id)).toEqual([30, 10]);
+  });
+
   it("preserves optional OIDC compatibility flags instead of forcing them on save", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,

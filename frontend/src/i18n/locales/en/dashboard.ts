@@ -1,5 +1,7 @@
 export default {
   dashboard: {
+    chartsLoadFailed: 'Could not load charts for the selected dates. Please refresh to retry.',
+    recentLoadFailed: 'Could not load recent usage for the selected dates. Please refresh to retry.',
     title: 'Dashboard',
     welcomeMessage: "Welcome back! Here's an overview of your account.",
     balance: 'Balance',
@@ -1045,7 +1047,7 @@ export default {
     lastWeek: 'Last Week',
     thisMonth: 'This Month',
     lastMonth: 'Last Month',
-    last24Hours: 'Last 24 Hours',
+    yesterdayAndToday: 'Yesterday and Today',
     last7Days: 'Last 7 Days',
     last14Days: 'Last 14 Days',
     last30Days: 'Last 30 Days',

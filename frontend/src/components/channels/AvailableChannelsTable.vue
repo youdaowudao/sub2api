@@ -34,7 +34,7 @@
            tbody 之间强分隔线表达"渠道边界"，tbody 内部用淡分隔线区分平台。 -->
       <tbody
         v-else
-        v-for="(channel, chIdx) in rows"
+        v-for="(channel, chIdx) in displayRows"
         :key="`${channel.name}-${chIdx}`"
         class="border-b-2 border-gray-200 last:border-b-0 dark:border-dark-600"
       >
@@ -182,7 +182,7 @@
       </div>
       <section
         v-else
-        v-for="(channel, chIdx) in rows"
+        v-for="(channel, chIdx) in displayRows"
         :key="`mobile-${channel.name}-${chIdx}`"
         class="border-b-2 border-gray-200 px-4 py-4 last:border-b-0 dark:border-dark-600"
       >
@@ -320,6 +320,8 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+import { sortGroupsForDisplay, comparePlatformsForDisplay } from '@/utils/groupDisplayOrder'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
@@ -354,13 +356,14 @@ const props = defineProps<{
 void props.userGroupRates
 
 const { t } = useI18n()
+const displayRows = computed(() => props.rows.map(row => ({ ...row, platforms: [...row.platforms].sort((a, b) => comparePlatformsForDisplay(a.platform, b.platform)) })))
 
 function exclusiveGroups(section: UserChannelPlatformSection): UserAvailableGroup[] {
-  return section.groups.filter((g) => g.is_exclusive)
+  return sortGroupsForDisplay(section.groups).filter((g) => g.is_exclusive)
 }
 
 function publicGroups(section: UserChannelPlatformSection): UserAvailableGroup[] {
-  return section.groups.filter((g) => !g.is_exclusive)
+  return sortGroupsForDisplay(section.groups).filter((g) => !g.is_exclusive)
 }
 
 const appStore = useAppStore()

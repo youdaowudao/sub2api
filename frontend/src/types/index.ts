@@ -575,6 +575,8 @@ export type GroupI18n = Record<string, GroupLocaleText>
 
 // 用户侧接口返回的 name / description 已由后端按请求语言（Accept-Language）选好
 export interface Group {
+  /** Read-only display order; optional for older responses. */
+  sort_order?: number
   id: number
   name: string
   description: string | null

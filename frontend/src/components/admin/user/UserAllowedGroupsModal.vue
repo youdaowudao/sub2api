@@ -201,6 +201,8 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -236,8 +238,12 @@ const restrictPublicGroups = ref(false)
 const exclusiveGroups = computed(() => groups.value.filter((g) => g.is_exclusive))
 const publicGroups = computed(() => groups.value.filter((g) => !g.is_exclusive))
 
-const exclusiveGroupConfigs = computed(() => groupConfigs.value.filter((c) => c.isExclusive))
-const publicGroupConfigs = computed(() => groupConfigs.value.filter((c) => !c.isExclusive))
+const displayGroupConfigs = computed(() => {
+  const byID = new Map(groupConfigs.value.map(c => [c.groupId, c]))
+  return sortGroupsForDisplay(groups.value).map(g => byID.get(g.id)!).filter(Boolean)
+})
+const exclusiveGroupConfigs = computed(() => displayGroupConfigs.value.filter((c) => c.isExclusive))
+const publicGroupConfigs = computed(() => displayGroupConfigs.value.filter((c) => !c.isExclusive))
 
 watch(
   () => props.show,

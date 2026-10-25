@@ -1147,6 +1147,8 @@
 </template>
 
 <script setup lang="ts">
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+
 import { computed, onMounted, onUnmounted, reactive, ref, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -1485,7 +1487,7 @@ const endpointOptions = computed<SelectOption[]>(() => [
 
 const groupFilterOptions = computed<SelectOption[]>(() => [
   { value: 0, label: t('admin.riskControl.filters.allGroups') },
-  ...groups.value.map((group) => ({
+  ...sortGroupsForDisplay(groups.value).map((group) => ({
     value: group.id,
     label: `${group.name} (${group.platform})`,
   })),
@@ -1511,8 +1513,8 @@ const hiddenModelFilterModelCount = computed(() => Math.max(0, configForm.model_
 
 const filteredGroups = computed(() => {
   const keyword = groupSearch.value.trim().toLowerCase()
-  if (!keyword) return groups.value
-  return groups.value.filter((group) => {
+  if (!keyword) return sortGroupsForDisplay(groups.value)
+  return sortGroupsForDisplay(groups.value).filter((group) => {
     return group.name.toLowerCase().includes(keyword) || String(group.platform).toLowerCase().includes(keyword)
   })
 })

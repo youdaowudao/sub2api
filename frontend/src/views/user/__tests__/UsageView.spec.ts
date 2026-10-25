@@ -216,6 +216,20 @@ describe('user UsageView', () => {
     getAvailable.mockResolvedValue([{ id: 1, name: 'default' }])
   })
 
+  it('defaults to local today and recomputes today when resetting after midnight', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 9, 25, 23, 59))
+    const wrapper = mountUsageView(); await flushPromises()
+    for (const fn of [query, getStats, getDashboardModels, getDashboardSnapshotV2]) {
+      expect(fn).toHaveBeenCalledWith(expect.objectContaining({ start_date: '2026-10-25', end_date: '2026-10-25' }), ...([query].includes(fn) ? [expect.anything()] : []))
+    }
+    vi.setSystemTime(new Date(2026, 9, 26, 0, 1))
+    expect(wrapper.findComponent(DateRangePicker).props('startDate')).toBe('2026-10-25')
+    await wrapper.findAll('button').find(b => b.text().includes('Reset'))!.trigger('click'); await flushPromises()
+    expect(query).toHaveBeenLastCalledWith(expect.objectContaining({ start_date: '2026-10-26', end_date: '2026-10-26' }), expect.anything())
+    expect(getDashboardSnapshotV2).toHaveBeenLastCalledWith(expect.objectContaining({ start_date: '2026-10-26', end_date: '2026-10-26' }))
+    wrapper.unmount(); vi.useRealTimers()
+  })
+
   it('loads logs, stats, model stats, and snapshot on first render', async () => {
     const wrapper = mountUsageView()
     await flushPromises()
