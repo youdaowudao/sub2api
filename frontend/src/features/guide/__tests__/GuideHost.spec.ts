@@ -21,6 +21,45 @@ describe('ordinary guide host and replay picker', () => {
     stores.route = reactive({ path: '/keys', fullPath: '/keys', meta: { requiresAuth: true, requiresAdmin: false } })
   })
   afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = '' })
+  async function openPicker() {
+    wrapper = mount(GuideHost, { attachTo: document.body }); await flushPromises()
+    const launcher = document.querySelector<HTMLButtonElement>('#s2o-launcher')!
+    launcher.click(); await flushPromises()
+    expect(document.querySelector('#s2o-replay-picker')).not.toBeNull()
+    return launcher
+  }
+  it.each(['focusin', 'pointerdown'])('keeps the business control focused when %s outside dismisses the picker', async source => {
+    const outside = document.createElement('input'); outside.id = 'outside-guide-control'; document.body.append(outside)
+    const launcher = await openPicker(), restored = vi.spyOn(launcher, 'focus')
+    if (source === 'pointerdown') outside.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    outside.focus(); await flushPromises()
+    expect(document.querySelector('#s2o-replay-picker')).toBeNull()
+    expect(document.activeElement).toBe(outside)
+    expect(restored).not.toHaveBeenCalled()
+  })
+  it.each(['escape', 'close-button'])('returns focus to the launcher after explicit %s dismissal', async source => {
+    const launcher = await openPicker()
+    if (source === 'escape') document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    else document.querySelector<HTMLButtonElement>('.s2o-replay-close')!.click()
+    await flushPromises()
+    expect(document.querySelector('#s2o-replay-picker')).toBeNull()
+    expect(document.activeElement).toBe(launcher)
+  })
+  it.each(['popstate', 'hashchange', 'pagehide', 'storage'])('closes on %s without moving focus back to the launcher', async name => {
+    const launcher = await openPicker(), restored = vi.spyOn(launcher, 'focus')
+    const event = name === 'storage' ? new StorageEvent(name, { key: 'guide-focus-test' }) : new Event(name)
+    window.dispatchEvent(event); await flushPromises()
+    expect(document.querySelector('#s2o-replay-picker')).toBeNull()
+    expect(restored).not.toHaveBeenCalled()
+  })
+  it('returns focus synchronously before starting a selected chapter', async () => {
+    const launcher = await openPicker(), restored = vi.spyOn(launcher, 'focus')
+    document.querySelector<HTMLButtonElement>('[data-s2o-module="key-use"]')!.click()
+    expect(restored).toHaveBeenCalledWith({ preventScroll: true })
+    await settle()
+    expect(document.querySelector('#s2o-replay-picker')).toBeNull()
+    expect(document.querySelector('.s2o-popover')).not.toBeNull()
+  })
   it('offers four separate chapters, closes the chooser on Escape, and hides replay during playback', async () => {
     wrapper = mount(GuideHost, { attachTo: document.body }); await flushPromises()
     const launcher = document.querySelector<HTMLButtonElement>('#s2o-launcher')!

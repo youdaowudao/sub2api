@@ -36,8 +36,11 @@ watch(() => [authStore.user?.id, authStore.user?.role, authStore.isAuthenticated
   await nextTick()
   void controller?.update()
 }, { flush: 'post' })
-function closePicker() { pickerOpen.value = false; void nextTick(() => launcher.value?.focus({ preventScroll: true })) }
-function replay(module: ModuleId) { closePicker(); void controller?.replay(module) }
+function closePicker(restoreFocus = false) {
+  pickerOpen.value = false
+  if (restoreFocus && canReplay.value && launcher.value?.isConnected) launcher.value.focus({ preventScroll: true })
+}
+function replay(module: ModuleId) { closePicker(true); void controller?.replay(module) }
 onBeforeUnmount(() => { controller?.destroy(); controller = null })
 </script>
 
