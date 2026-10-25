@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { moduleCatalog, type ModuleId } from '../config'
 
-const props = defineProps<{ modules: ModuleId[] }>()
+const props = defineProps<{ modules: ModuleId[]; viewedModules: ModuleId[] }>()
 const emit = defineEmits<{ select: [module: ModuleId]; close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const abort = new AbortController()
@@ -28,13 +28,13 @@ onBeforeUnmount(() => { abort.abort(); document.body.classList.remove('s2o-picke
 <template>
   <section id="s2o-replay-picker" ref="panel" aria-labelledby="s2o-replay-title">
     <div class="s2o-replay-header">
-      <h2 id="s2o-replay-title">选择要重播的内容</h2>
+      <h2 id="s2o-replay-title">选择要查看的内容</h2>
       <button type="button" class="s2o-replay-close" aria-label="关闭引导选择" @click="emit('close', true)">关闭</button>
     </div>
-    <p>按需选择一段，随时可以退出。</p>
+    <p>选择一章开始，随时可以退出。</p>
     <div class="s2o-replay-choices">
-      <button v-for="id in props.modules" :key="id" type="button" :data-s2o-module="id" @click="emit('select', id)">
-        <strong>{{ moduleCatalog.find(item => item.id === id)?.title }}</strong>
+      <button v-for="id in props.modules" :key="id" type="button" :data-s2o-module="id" :class="{ 's2o-replay-viewed': props.viewedModules.includes(id) }" @click="emit('select', id)">
+        <span class="s2o-chapter-heading"><strong>{{ moduleCatalog.find(item => item.id === id)?.title }}</strong><span class="s2o-chapter-state">{{ props.viewedModules.includes(id) ? '已查看' : '未查看' }}</span></span>
         <span>{{ moduleCatalog.find(item => item.id === id)?.description }}</span>
       </button>
     </div>

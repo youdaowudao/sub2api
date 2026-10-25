@@ -47,7 +47,7 @@ function preview() {
   const value = validated(); if (!value) return
   try {
     localStorage.setItem(previewConfigKey, JSON.stringify(value))
-    notify('已保存试用配置，只对当前浏览器生效。在这个浏览器里用测试普通账号登录，在地址后加 ?onboarding-preview=1 打开用户页面，再点右下角“重播使用引导”。')
+    notify('已保存试用配置，只对当前浏览器生效。在这个浏览器里用测试普通账号登录，在地址后加 ?onboarding-preview=1 打开用户页面，再点右下角「使用引导」。')
   } catch { notify('当前浏览器无法保存试用配置，可以直接导出文件。', true) }
 }
 function clearPreview() {
@@ -74,7 +74,7 @@ function exportConfig() {
       <p v-if="message" :role="error ? 'alert' : 'status'" class="text-sm" :class="error ? 'text-red-600' : 'text-emerald-700'">{{ message }}</p>
     </div>
     <div v-else class="card-body space-y-4">
-      <p class="text-sm text-gray-500 dark:text-dark-400">选择普通用户可以重播的章节。新用户注册后只连续播放“创建密钥 → 快速开始”；未勾选的章节不会播放。</p>
+      <p class="text-sm text-gray-500 dark:text-dark-400">选择普通用户可查看的章节。新用户注册后按配置顺序播放全部已启用章节；章间等待 5 秒，也可点“继续引导”提前继续。未勾选的章节不会播放。</p>
       <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-700" data-guide-current>
         <h4 class="mb-2 font-medium">当前全站配置</h4>
         <ul><li v-for="item in currentModules" :key="item.id">{{ moduleCatalog.find(module => module.id === item.id)?.title }}：{{ item.enabled ? '已启用' : '已关闭' }}</li></ul>

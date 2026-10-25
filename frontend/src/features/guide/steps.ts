@@ -8,14 +8,14 @@ export const anchors: Record<string, string> = {
   submit: '[data-tour="key-form-submit"]',
 };
 export const steps: Record<string, any> = {
-  welcome: { title: '欢迎使用 Sub2API', description: '接下来带你找到密钥管理，并创建自己的 API 密钥。所有操作都由你完成，随时可以退出。', nextBtnText: '开始引导' },
+  welcome: { title: '欢迎来到本站', description: '如果您是第一次使用，可以跟随引导完成几个简单操作，快速了解本站的接入和使用方法。已有使用经验的用户，可以点击右上角“退出”，自行操作。', nextBtnText: '开始引导' },
   menu: { title: '先展开菜单', description: '点击这里打开导航菜单。', showButtons: [] },
   navigate: { title: '打开密钥管理', description: '请点击这里，进入你的 API 密钥列表。', side: 'right', showButtons: [] },
   create: { title: '创建 API 密钥', description: '点击页面上的创建按钮，打开表单。', side: 'bottom', showButtons: [] },
   name: { title: '给密钥起个名字', description: '第一次可以填写“测试”或“gpt”，方便识别。填写后点击“继续”。', side: 'bottom', nextBtnText: '继续' },
   provider: { title: '选择 OpenAI', description: '请点击闪动的 OpenAI 卡片。选好后，点击闪动的“继续”，再为密钥选择分组。', side: 'bottom', nextBtnText: '继续', prevBtnText: '上一步', showButtons: ['previous', 'next'] },
   group: { title: '选择 OpenAI 分组', description: '展开列表，优先点击闪动的第一个可选分组，也可以按需要选择其他分组。核对分组说明和计费后，点击闪动的“继续”。', side: 'top', nextBtnText: '继续', prevBtnText: '上一步', showButtons: ['previous', 'next'] },
-  submit: { title: '核对并创建', description: '额度限制不是充值金额，请勿填写充值金额。下方保持默认，核对名称和分组后点“创建”。', side: 'top', prevBtnText: '上一步', showButtons: ['previous'] },
+  submit: { title: '核对并创建', description: '额度限制不是充值金额，请勿填写充值金额。无需再填写其他内容，直接点击“创建”即可。', side: 'top', prevBtnText: '上一步', showButtons: ['previous'] },
   review: { title: '请确认创建结果', description: '密钥已创建。请在列表里找到刚才的密钥，核对名称和分组，确认后结束引导。', nextBtnText: '我已创建，结束引导', prevBtnText: '返回检查', showButtons: ['previous', 'next'] },
   'usage-menu': { title: '打开菜单', description: '进入密钥列表。', showButtons: [] },
   'usage-nav': { title: '打开密钥列表', description: '点击这里。', side: 'right', showButtons: [] },
@@ -43,7 +43,7 @@ export const steps: Record<string, any> = {
   'quick-key-pick': { title: '选要使用的密钥', description: '核对分组，点击对应的这一行。', showButtons: [] },
   'quick-key-copy': { title: '复制 API Key', description: '核对这一行的分组，点击密钥旁的复制按钮。需要更换分组时，选中后立即保存。', side: 'bottom', nextBtnText: '我已复制，去粘贴' },
   'quick-key-close': { title: '收起分组列表', description: '再点一次分组入口，收起后复制这把密钥。', showButtons: [] },
-  'quick-key-empty': { title: '先创建一把密钥', description: '这里还没有密钥。先退出引导，创建密钥后再重播本节。', showButtons: [] },
+  'quick-key-empty': { title: '先创建一把密钥', description: '这里还没有密钥。先退出并创建密钥，再从右下角「使用引导」查看本节。', showButtons: [] },
   'quick-paste-wait': { title: '回 PowerShell 粘贴密钥', description: '在刚才的 API Key 提示处粘贴并按回车；继续前先保存 Codex 任务，脚本会关闭应用。等脚本执行结束，再回来继续。', nextBtnText: '脚本已完成，继续' },
   'quick-return-menu': { title: '打开菜单', description: '回到快速开始，继续第 3 步。', showButtons: [] },
   'quick-return-nav': { title: '回到快速开始', description: '点击这里，继续重新打开 Codex 并测试。', side: 'right', showButtons: [] },
@@ -64,7 +64,9 @@ export const steps: Record<string, any> = {
   'orders-nav': { title: '打开我的订单', description: '请点击“我的订单”，查看最近的付款记录和订单状态。这次不用付款，没有订单也可以继续。', side: 'right', showButtons: [] },
   'orders-list': { title: '最近的付款与订单状态', description: '以后可以在这里查看最近的订单，核对付款金额、支付方式和订单状态。尚未支付的订单也可能显示，请留意状态。还没有订单时显示空列表，之后有付款记录再来查看即可。', side: 'top', nextBtnText: '我已了解' },
   'recharge-unavailable': { title: '在线充值暂未开放', description: '本站当前未开启在线充值，余额仍可在账户区域查看。充值入口开放后，这段引导会带你认识金额和支付方式。', nextBtnText: '我已了解' },
-  finish: { title: '引导完成', description: '你已了解本节的操作入口。需要时可从右下角重播引导。', nextBtnText: '结束引导' },
+  'more-help': { title: '更多功能与帮助', description: '<p>这里介绍几个常用功能。</p><ul><li><strong>邀请返利</strong>：邀请好友，查看返利规则和记录。</li><li><strong>使用教程</strong>：查看使用方法和常见操作说明。</li><li><strong>联系客服（新用户福利）</strong>：查看客服联系方式和新用户福利。</li></ul><p><strong>遇到问题怎么办</strong>：先查看使用教程和使用记录；仍无法解决时，联系客服，说明所用客户端、模型和出错时间，并提供报错截图。截图中请隐藏密钥等敏感信息。</p>', nextBtnText: '继续' },
+  'more-tools': { title: '模型与工具', description: '<ul><li><strong>模型价格</strong>：查看模型和分组价格。</li><li><strong>智商雷达</strong>：查看 GPT 表现相关工具及说明。</li><li><strong>GPT生图</strong>：在线使用 GPT 生成图片。</li></ul><p>具体入口以当前菜单为准。</p>', nextBtnText: '继续', prevBtnText: '上一步', showButtons: ['previous', 'next'] },
+  finish: { title: '本次引导结束', description: '需要时，点右下角「使用引导」选择章节再次查看。', nextBtnText: '完成' },
 };
 
 export function sidebarTourId(path: string): string | undefined {

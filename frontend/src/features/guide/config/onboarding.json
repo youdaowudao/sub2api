@@ -4,6 +4,7 @@
     { "id": "keys", "enabled": true },
     { "id": "key-use", "enabled": true },
     { "id": "quick-start", "enabled": true, "menuId": "onboarding-quick-start" },
-    { "id": "recharge", "enabled": true }
+    { "id": "recharge", "enabled": true },
+    { "id": "more", "enabled": true }
   ]
 }

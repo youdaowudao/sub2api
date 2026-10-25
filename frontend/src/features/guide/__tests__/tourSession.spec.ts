@@ -10,6 +10,30 @@ describe('guide exit and resources', () => {
   const stopped = vi.fn()
   beforeEach(() => { animations = installGuideDOM(); sessionStorage.clear(); history.replaceState({}, '', '/keys'); keyPage(); stopped.mockReset() })
   afterEach(() => { tour?.stop(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = '' })
+  it('pauses the real Driver without suppression or returning to the old scroll position, then can start again', async () => {
+    const input = document.querySelector<HTMLInputElement>('[data-tour="key-form-name"]')!
+    const container = input.parentElement!
+    Object.defineProperty(container, 'scrollTo', { configurable: true, value: vi.fn((x: number, y: number) => { container.scrollLeft = x; container.scrollTop = y }) })
+    input.focus()
+    tour = createTourSession(driver, { onStop: stopped })
+    await tour.start(() => input, { id: 'name', manual: false }); await settle()
+    document.querySelector<HTMLButtonElement>('.s2o-driver-popover-next-btn')!.focus()
+    container.scrollTop = 240
+    vi.stubGlobal('scrollY', 550)
+    vi.spyOn(input, 'focus').mockImplementation(() => { container.scrollTop = 0; window.scrollTo(0, 0) })
+    expect(tour.pause()).toBe(true)
+    expect(stopped).toHaveBeenCalledWith('paused:chapter')
+    expect(sessionStorage.getItem('s2o:visit-suppressed:v1')).toBeNull()
+    expect(container.scrollTop).toBe(240)
+    expect(window.scrollTo).toHaveBeenLastCalledWith(0, 550)
+    expect(getCleanupStats()).toEqual({ listeners: 0, frames: 0, targets: 0 })
+    expect(tour.clean).toBe(true); expect(animations.size).toBe(0)
+    expect(document.querySelector('.s2o-driver-overlay, .s2o-popover, #s2o-exit')).toBeNull()
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true, bubbles: true })
+    window.dispatchEvent(escape); expect(escape.defaultPrevented).toBe(false)
+    expect(await tour.start(undefined, { id: 'welcome', manual: false })).toBe(true)
+    tour.stop('cancelled'); expect(tour.clean).toBe(true)
+  })
   it.each(['independent', 'nearby', 'escape'])('cleans listeners, timers, frames, observers, animation and temporary nodes on %s exit', async method => {
     tour = createTourSession(fakeDriver, { onStop: stopped })
     await tour.start('[data-tour="key-form-name"]', { id: 'name' })

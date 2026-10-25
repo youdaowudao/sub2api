@@ -3,7 +3,7 @@ import { flushPromises } from '@vue/test-utils'
 import { createGuideController, type GuideState } from '../controller'
 import config from '../config/onboarding.json'
 import { normalizeConfig } from '../config'
-import { progressKey, recordGuideRegistration, registrationKey, suppressedKey } from '../registration'
+import { historyKey, progressKey, recordGuideRegistration, registrationKey, suppressedKey } from '../registration'
 import { FLOW_VERSION } from '../steps'
 import { beginGuideAction, completeGuideAction } from '../businessEvents'
 import { fakeDriver, installGuideDOM, keyPage, nextGuideStep, settle } from './fixture'
@@ -22,6 +22,60 @@ describe('guide controller authentication and lifetime', () => {
     controller = createGuideController({ getState: () => state, getPublicSettings: () => ({ payment_enabled: false }), driverFactory: fakeDriver as any, ...overrides })
     return controller
   }
+  it('keeps viewed markers on guide exit and same-account refresh but clears them on account boundaries', async () => {
+    create(); await controller!.replay('more'); controller!.exit()
+    expect(controller!.status().viewedModules).toEqual(['more'])
+    localStorage.setItem('auth_token', 'updated-test-session')
+    window.dispatchEvent(new StorageEvent('storage', { key: 'auth_token' }))
+    expect(controller!.status().viewedModules).toEqual(['more'])
+    state.user = { id: 8, role: 'user' }; localStorage.setItem('auth_user', JSON.stringify(state.user))
+    await controller!.update(); expect(controller!.status().viewedModules).toEqual([])
+    await controller!.replay('more'); expect(controller!.status().viewedModules).toEqual(['more'])
+    localStorage.removeItem('auth_token'); window.dispatchEvent(new StorageEvent('storage', { key: 'auth_token' }))
+    expect(controller!.status().viewedModules).toEqual([])
+    expect(controller!.status().clean).toBe(true)
+  })
+  it('saves a chapter break without viewing the next chapter and permits immediate continuation', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<a data-tour="sidebar-custom-onboarding-quick-start"></a>')
+    create({ getPublicSettings: () => ({ custom_menu_items: [{ id: 'onboarding-quick-start', visibility: 'user' }] }) })
+    recordGuideRegistration(state.user!); await controller!.update(); await settle()
+    await nextGuideStep()
+    completeGuideAction(beginGuideAction('key-create'), { keyId: 71 })
+    document.querySelector('[role="dialog"]')!.remove(); await settle(); await nextGuideStep()
+    expect(controller!.status().paused).toBe(true)
+    expect(controller!.status().viewedModules).toEqual(['keys'])
+    const saved = JSON.parse(sessionStorage.getItem(progressKey)!)
+    expect(saved).toMatchObject({ moduleId: 'key-use', step: 'chapter-break' })
+    expect(sessionStorage.getItem(suppressedKey)).toBeNull()
+    expect(sessionStorage.getItem(historyKey)).toBeNull()
+    document.body.insertAdjacentHTML('beforeend', '<div role="dialog" aria-modal="true"><div class="modal-content"></div></div>')
+    expect(await controller!.continue()).toBe(false)
+    expect(controller!.status().note).toBe('请先关闭当前窗口，再继续引导。')
+    expect(controller!.status().paused).toBe(true)
+    document.querySelector('[role="dialog"]')!.remove()
+    const first = controller!.continue(), repeated = controller!.continue()
+    expect(await repeated).toBe(false); expect(await first).toBe(true)
+    await settle()
+    expect(controller!.status().step).toBe('usage-row')
+    expect(controller!.status().viewedModules).toEqual(['keys', 'key-use'])
+    expect(JSON.parse(sessionStorage.getItem(progressKey)!).expiresAt).toBe(saved.expiresAt)
+    controller!.exit(); expect(controller!.status().viewedModules).toEqual(['keys', 'key-use'])
+    expect(controller!.status().clean).toBe(true)
+  })
+  it('restores a valid registration chapter break without a welcome or next chapter popup', async () => {
+    sessionStorage.setItem(progressKey, JSON.stringify(progress({ moduleId: 'quick-start', step: 'chapter-break' })))
+    create(); await controller!.update(); await settle()
+    expect(controller!.status().paused).toBe(true)
+    expect(controller!.status().viewedModules).toEqual([])
+    expect(document.querySelector('.s2o-popover, #s2o-exit')).toBeNull()
+    window.dispatchEvent(new Event('pagehide')); expect(controller!.status().clean).toBe(true)
+    window.dispatchEvent(new Event('pageshow')); await settle()
+    expect(controller!.status().paused).toBe(true)
+    localStorage.removeItem('auth_token'); window.dispatchEvent(new StorageEvent('storage', { key: 'auth_token' }))
+    expect(controller!.status().paused).toBe(false)
+    expect(await controller!.continue()).toBe(false)
+    expect(controller!.status().clean).toBe(true)
+  })
   it.each([
     { authenticated: false }, { user: null }, { user: { id: 7, role: 'admin' } },
     { simpleMode: true }, { backendMode: true }, { requiresAuth: false }, { requiresAdmin: true },
@@ -39,24 +93,46 @@ describe('guide controller authentication and lifetime', () => {
     window.dispatchEvent(new StorageEvent('storage', { key: 'refresh_token' })); await settle()
     expect(controller!.status().active).toBe(false)
   })
-  it('waits for the user route, then plays only the two registration chapters with an unchanging deadline', async () => {
+  it('waits for the user route, then plays every enabled chapter with an unchanging registration deadline', async () => {
     state.path = '/register'; state.requiresAuth = false
     create(); await controller!.update()
     recordGuideRegistration(state.user!)
     const registration = JSON.parse(sessionStorage.getItem(registrationKey)!)
     expect(controller!.status().active).toBe(false)
     state.path = '/keys'; state.requiresAuth = true; await controller!.update(); await settle()
-    expect(controller!.status().activeModules).toEqual(['keys', 'quick-start'])
+    expect(controller!.status().activeModules).toEqual(['keys', 'key-use', 'quick-start', 'recharge', 'more'])
     expect(sessionStorage.getItem(registrationKey)).toBeNull()
     expect(JSON.parse(sessionStorage.getItem(progressKey)!).expiresAt).toBe(registration.expiresAt)
     vi.advanceTimersByTime(1000); await nextGuideStep()
     expect(JSON.parse(sessionStorage.getItem(progressKey)!).expiresAt).toBe(registration.expiresAt)
   })
-  it('does not automatically play when only usage and recharge are enabled', async () => {
+  it('automatically plays the enabled subset after registration', async () => {
     create({ config: normalizeConfig({ schemaVersion: 1, modules: [{ id: 'key-use', enabled: true }, { id: 'recharge', enabled: true }] }) })
     recordGuideRegistration(state.user!); await controller!.update(); await settle()
-    expect(controller!.status().active).toBe(false); expect(sessionStorage.getItem(registrationKey)).toBeNull()
+    expect(controller!.status().activeModules).toEqual(['key-use', 'recharge']); expect(sessionStorage.getItem(registrationKey)).toBeNull()
     expect(controller!.available()).toBe(true)
+  })
+  it('plays an overview-only registration without false confirmations and still permits manual viewing', async () => {
+    const onlyMore = normalizeConfig({ schemaVersion: 1, modules: [{ id: 'more', enabled: true }] })
+    create({ config: onlyMore })
+    recordGuideRegistration(state.user!); await controller!.update(); await settle()
+    expect(controller!.status().step).toBe('welcome')
+    expect(sessionStorage.getItem(registrationKey)).toBeNull()
+    await nextGuideStep(); expect(controller!.status().step).toBe('more-help')
+    await nextGuideStep(); await nextGuideStep(); await nextGuideStep()
+    expect(JSON.parse(sessionStorage.getItem(historyKey)!).at(-1)).toMatchObject({ trigger: 'registration', reason: 'completed:tour_viewed' })
+    expect(await controller!.replay('more')).toBe(true)
+    expect(controller!.status().step).toBe('more-help')
+    await nextGuideStep(); await nextGuideStep(); await nextGuideStep()
+    const result = JSON.parse(sessionStorage.getItem(historyKey)!).at(-1)
+    expect(result).toMatchObject({ trigger: 'manual', reason: 'completed:tour_viewed', result: 'completed' })
+    expect(result).not.toHaveProperty('confirmation')
+    expect(sessionStorage.getItem(progressKey)).toBeNull()
+    expect(controller!.status().note).toBe('已看完本次内容。')
+    expect(controller!.status().clean).toBe(true)
+    controller!.destroy(); create({ config: onlyMore }); await controller!.update()
+    expect(controller!.status().active).toBe(false)
+    expect(sessionStorage.getItem(progressKey)).toBeNull()
   })
   it('hides every entry with no enabled chapters, no sidebar marker, or a current opt-out query', async () => {
     create({ config: normalizeConfig({ schemaVersion: 1, modules: [] }) }); expect(controller!.available()).toBe(false); controller!.destroy()
@@ -121,17 +197,89 @@ describe('guide controller authentication and lifetime', () => {
     expect(document.querySelector('.s2o-popover')?.textContent).not.toContain('密钥已创建')
   })
   function progress(overrides: Record<string, unknown> = {}) {
-    return { version: FLOW_VERSION, modules: ['keys', 'quick-start'], configuration: JSON.stringify(config.modules), moduleId: 'keys', registrationId: 'a'.repeat(32), userId: 7, expiresAt: Date.now() + 10_000, step: 'create', path: '/keys', ...overrides }
+    return { version: FLOW_VERSION, modules: ['keys', 'key-use', 'quick-start', 'recharge', 'more'], configuration: JSON.stringify(config.modules), moduleId: 'keys', registrationId: 'a'.repeat(32), userId: 7, expiresAt: Date.now() + 10_000, step: 'create', path: '/keys', ...overrides }
   }
+  it('restores a pending chapter with a fresh five-second wait without extending registration expiry', async () => {
+    document.querySelector('[role="dialog"]')!.remove()
+    const saved = progress({ moduleId: 'more', step: 'chapter-break' })
+    sessionStorage.setItem(progressKey, JSON.stringify(saved))
+    create(); await controller!.update(); await settle()
+    expect(controller!.status().paused).toBe(true); expect(controller!.status().viewedModules).toEqual([])
+    await vi.advanceTimersByTimeAsync(4700)
+    expect(controller!.status().paused).toBe(true)
+    await vi.advanceTimersByTimeAsync(300)
+    expect(controller!.status().step).toBe('more-help')
+    expect(controller!.status().viewedModules).toEqual(['more'])
+    expect(JSON.parse(sessionStorage.getItem(progressKey)!).expiresAt).toBe(saved.expiresAt)
+  })
+  it('blocks an automatic transition once while a native dialog is open and allows a later manual retry', async () => {
+    sessionStorage.setItem(progressKey, JSON.stringify(progress({ moduleId: 'more', step: 'chapter-break' })))
+    create(); await controller!.update(); await settle()
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(controller!.status().paused).toBe(true)
+    expect(controller!.status().note).toBe('请先关闭当前窗口，再继续引导。')
+    document.querySelector('[role="dialog"]')!.remove()
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(controller!.status().paused).toBe(true)
+    expect(await controller!.continue()).toBe(true)
+    expect(controller!.status().step).toBe('more-help')
+  })
+  it.each(['exit', 'destroy', 'logout', 'pagehide'])('cancels a pending automatic transition on %s', async action => {
+    sessionStorage.setItem(progressKey, JSON.stringify(progress({ moduleId: 'more', step: 'chapter-break' })))
+    create(); await controller!.update(); await settle()
+    if (action === 'exit') controller!.exit()
+    if (action === 'destroy') controller!.destroy()
+    if (action === 'logout') { localStorage.removeItem('auth_token'); window.dispatchEvent(new StorageEvent('storage', { key: 'auth_token' })) }
+    if (action === 'pagehide') window.dispatchEvent(new Event('pagehide'))
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(controller!.status().active).toBe(false); expect(controller!.status().clean).toBe(true)
+    expect(document.querySelector('.s2o-popover')).toBeNull()
+  })
+  it.each([
+    ['key-use', 'usage-pick', 'usage-row'], ['recharge', 'balance', 'balance'],
+    ['more', 'more-help', 'more-help'], ['more', 'more-tools', 'more-tools'], ['more', 'finish', 'finish'],
+    ['more', 'balance', 'more-help'],
+  ])('restores %s checkpoint %s to %s without marking earlier chapters', async (moduleId, step, expected) => {
+    document.querySelector('[role="dialog"]')!.remove()
+    document.body.insertAdjacentHTML('beforeend', '<div data-tour="header-balance"></div>')
+    sessionStorage.setItem(progressKey, JSON.stringify(progress({ moduleId, step })))
+    create(); await controller!.update(); await settle()
+    expect(controller!.status().step).toBe(expected)
+    expect(controller!.status().viewedModules).toEqual([moduleId])
+  })
+  it('discards the previous two-chapter checkpoint without inventing a new registration', async () => {
+    sessionStorage.setItem(progressKey, JSON.stringify(progress({ modules: ['keys', 'quick-start'] })))
+    create(); await controller!.update(); await settle()
+    expect(controller!.status().active).toBe(false)
+    expect(sessionStorage.getItem(progressKey)).toBeNull()
+    expect(controller!.status().viewedModules).toEqual([])
+  })
+  it('marks only the resumed chapter after an active registration checkpoint is restored and exited', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<a data-tour="sidebar-custom-onboarding-quick-start"></a>')
+    const saved = progress({ moduleId: 'quick-start', step: 'quick-nav' })
+    sessionStorage.setItem(progressKey, JSON.stringify(saved))
+    create({ getPublicSettings: () => ({ custom_menu_items: [{ id: 'onboarding-quick-start', visibility: 'user' }] }) })
+    await controller!.update(); await settle()
+    expect(controller!.status().step).toBe('quick-nav')
+    expect(controller!.status().viewedModules).toEqual(['quick-start'])
+    expect(JSON.parse(sessionStorage.getItem(progressKey)!).expiresAt).toBe(saved.expiresAt)
+    controller!.exit()
+    expect(controller!.status().viewedModules).toEqual(['quick-start'])
+    expect(controller!.status().clean).toBe(true)
+  })
   it('preserves the resumed checkpoint while its real page target is still loading', async () => {
     state.path = '/custom/onboarding-quick-start'; history.replaceState({}, '', state.path)
     const saved = progress({ moduleId: 'quick-start', step: 'quick-test', path: state.path })
     sessionStorage.setItem(progressKey, JSON.stringify(saved))
     const observed: any[] = []
+    const viewedDuringWelcome: any[] = []
     create({
       getPublicSettings: () => ({ custom_menu_items: [{ id: 'onboarding-quick-start', visibility: 'user' }] }),
       onChange: () => {
-        if (controller?.status().step === 'welcome') observed.push(JSON.parse(sessionStorage.getItem(progressKey) || 'null'))
+        if (controller?.status().step === 'welcome') {
+          observed.push(JSON.parse(sessionStorage.getItem(progressKey) || 'null'))
+          viewedDuringWelcome.push(controller.status().viewedModules)
+        }
       },
     })
     const starting = controller!.update()
@@ -139,6 +287,7 @@ describe('guide controller authentication and lifetime', () => {
     try {
       expect(observed.length).toBeGreaterThan(0)
       for (const checkpoint of observed) expect(checkpoint).toMatchObject({ moduleId: 'quick-start', step: 'quick-test', expiresAt: saved.expiresAt })
+      for (const viewed of viewedDuringWelcome) expect(viewed).toEqual([])
     } finally { controller!.destroy(); await starting }
   })
   it('resumes only unexpired signup progress and records mismatched routes as cancellation', async () => {

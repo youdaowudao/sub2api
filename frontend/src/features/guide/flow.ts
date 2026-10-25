@@ -1,6 +1,5 @@
 import { createTourSession } from './tourSession';
 import { anchors, steps } from './steps';
-import { moduleCatalog } from './config';
 import { createKeyUse } from './keyUse';
 import { createKeyFormGuide } from './keyForm';
 import { bindGuideBusinessSession } from './businessEvents';
@@ -74,11 +73,12 @@ function createQuickStart({ menuId, getPublicSettings, onUpdate, onError }: any)
   };
 }
 
-export function createFlow(driver: any, { modules = ['keys'], registrationModules = modules, moduleConfig = [], getPublicSettings = () => null, isCurrentUser = () => true, onStep = () => {}, onStop = () => {} }: any = {}) {
+export function createFlow(driver: any, { modules = ['keys'], registrationModules = modules, moduleConfig = [], getPublicSettings = () => null, isCurrentUser = () => true, onStep = () => {}, onStop = () => {}, onContinue = null }: any = {}) {
   let session: any = null, step = '', changing = false, lastQuick: ReturnType<typeof createQuickStart> | null = null;
   const resources = { listeners: 0, observers: 0, timers: 0 };
   const tour = createTourSession(driver, { onStop: finish });
   function finish(reason: string) {
+    if (reason === 'paused:chapter') return;
     if (!session) return;
     const owned = session; session = null;
     owned.releaseBusiness?.();
@@ -106,17 +106,10 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
       if (['name', 'provider', 'group', 'submit', ...editSteps].includes(id)) owned.keyForm.showWarning({ scroll: ['submit', 'usage-edit-save'].includes(id) });
       else owned.keyForm.remove();
       const popover = { ...steps[id] };
-      if (id === 'welcome' && (owned.modules.length !== 1 || owned.modules[0] !== 'keys')) popover.description = owned.modules.map((value: string) => moduleCatalog.find(item => item.id === value)?.title).join(' → ') + '。随时可以退出。';
-      if (id === 'finish') {
-        const summaries: Record<string, string> = { keys: '你已了解创建密钥的步骤。', 'key-use': '你已了解密钥的常用操作入口。', 'quick-start': owned.quickConfirmed ? '已记录你对本机测试回复的确认。' : '你已了解 Windows 接入和排错的位置。', recharge: '你已了解余额、充值和订单的位置。' };
-        popover.description = owned.modules.length === 1
-          ? summaries[owned.modules[0]] + '需要时可从右下角重播本节引导。'
-          : '你已了解' + owned.modules.map((value: string) => moduleCatalog.find(item => item.id === value)?.title).join('、') + '。需要时可从右下角按段重播。';
+      if (id === 'review' && owned.index + 1 < owned.modules.length) {
+        popover.description = '请在列表里核对刚创建的密钥名称和分组。';
+        popover.nextBtnText = '已创建，继续';
       }
-      if (id === 'review' && owned.modules[owned.index + 1] === 'quick-start') {
-        popover.description = '请先确认密钥已出现在列表。接下来去快速开始，配置 Windows 版 Codex。';
-        popover.nextBtnText = '已创建，去快速开始';
-      } else if (id === 'review' && owned.index + 1 < owned.modules.length) popover.nextBtnText = '我已创建，继续引导';
       if (id === 'quick-nav' && !owned.confirmed) popover.description = '点击这里，配置 Windows 版 Codex。';
       if (id === 'provider' && !first(anchors.provider + ' input[value="openai"]:not(:disabled)')) {
         popover.description = 'OpenAI 当前没有可选分组。可以稍后重试，或退出引导继续使用页面。'; popover.showButtons = ['previous'];
@@ -166,14 +159,14 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
           align: ['submit', 'usage-edit-save'].includes(id) ? 'end' : 'center' },
         alignRowStart: ['usage-row', 'quick-key-copy'].includes(id),
         allowDisabled: id === 'recharge-confirm',
-        attention: id.startsWith('quick-') ? { selector: id === 'quick-command' ? () => owned.quick.state.copyGesture ? nextButton() : owned.quick.attention()
+        attention: id.startsWith('more-') ? { mode: 'next' } : id.startsWith('quick-') ? { selector: id === 'quick-command' ? () => owned.quick.state.copyGesture ? nextButton() : owned.quick.attention()
           : id === 'quick-wait' ? () => owned.quick.attention()
           : id === 'quick-key-pick' ? usage.pickTarget
           : id === 'quick-key-copy' ? () => usage.popup() ? usage.firstGroup() : owned.quickCopySeen ? nextButton() : usage.copy()
           : quickTargets[id] && id !== 'quick-key-empty' ? selector : nextButton }
           : id.startsWith('usage-') ? { selector: usageAttention[id] || (['usage-menu', 'usage-nav'].includes(id) ? selector : nextButton) }
           : selector && (id.startsWith('recharge-') || id.startsWith('balance') || id.startsWith('orders-')) ? { selector, mode: informational ? 'next' : 'target' } : undefined };
-      const result = firstStep ? await tour.start(selector, settings) : await tour.show(selector, settings);
+      const result = firstStep || tour.state === 'idle' ? await tour.start(selector, { ...settings, manual: owned.manual }) : await tour.show(selector, settings);
       if (session !== owned) return;
       if (!result) { stop('error:engine-unavailable'); if (session) finish('error:engine-unavailable'); return; }
       onStep(id, moduleId());
@@ -191,6 +184,7 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
       return go(location.pathname === '/keys' ? 'usage-pick' : visible(anchors.navigate) ? 'usage-nav' : 'usage-menu');
     }
     if (moduleId() === 'quick-start') return beginQuick();
+    if (moduleId() === 'more') return go('more-help');
     if (visible(anchors.name)) return stop('cancelled:dialog-open');
     if (visible(desktopBalance)) return go('balance');
     return go(visible(mobileBalance) ? 'balance-mobile' : 'balance-menu');
@@ -245,14 +239,35 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
     const owned = session; if (!owned) return;
     if (moduleId() === 'keys') owned.confirmed = true;
     if (moduleId() === 'quick-start') { owned.quickCompleted = true; owned.quick.destroy(); }
-    if (owned.index + 1 < owned.modules.length) { owned.index++; return beginModule(); }
+    if (owned.index + 1 < owned.modules.length) {
+      owned.index++; step = 'chapter-break'; owned.deadline = 0;
+      const paused = tour.pause();
+      if (session !== owned) return;
+      if (!paused) return stop('error:engine-frame');
+      document.body.classList.remove('s2o-active');
+      owned.deadline = Date.now() + 5000;
+      onStep(step, moduleId());
+      return;
+    }
     if (owned.modules.length === 1 && owned.modules[0] === 'keys') return stop('completed:user_confirmed');
     return go('finish');
   }
   function afterClient() { return go(session?.keyUse.ccsButton() ? 'usage-ccs' : 'usage-edit'); }
+  const paused = () => !!session && step === 'chapter-break';
+  const dialogOpen = () => [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some(element => !element.matches('.s2o-popover') && visible(() => element));
+  async function continueChapter() {
+    const owned = session;
+    if (!owned || !paused() || changing || owned.checking || !isCurrentUser(owned.event.userId) || dialogOpen()) return false;
+    owned.checking = true;
+    document.body.classList.add('s2o-active');
+    try { await beginModule(); return session === owned && !paused(); }
+    finally { if (session === owned) owned.checking = false; }
+  }
   async function next() {
     if (!session || changing) return;
     if (step === 'welcome') return beginModule();
+    if (step === 'more-help') return go('more-tools');
+    if (step === 'more-tools') return completeModule();
     if (step === 'name') { if (!first(anchors.name)?.value.trim()) { first(anchors.name)?.focus(); return; } return go('provider'); }
     if (step === 'provider') {
       if (!first(anchors.provider + ' input[value="openai"]:checked:not(:disabled)')) { first(anchors.provider + ' input[value="openai"]:not(:disabled)')?.focus({ preventScroll: true }); return; }
@@ -286,13 +301,21 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
     if (step === 'finish') return stop(session.confirmed ? 'completed:user_confirmed' : session.quickConfirmed ? 'completed:quickstart_user_confirmed' : 'completed:tour_viewed');
   }
   function previous() {
-    return go(({ provider: 'name', group: 'provider', submit: 'group', review: visible(anchors.name) ? 'name' : 'create', 'usage-edit-save': 'usage-edit-name', 'quick-wait': 'quick-command', 'quick-test': 'quick-problems', 'recharge-method': 'recharge-amount', 'recharge-confirm': 'recharge-method' } as Record<string, string>)[step] || 'welcome');
+    return go(({ provider: 'name', group: 'provider', submit: 'group', review: visible(anchors.name) ? 'name' : 'create', 'usage-edit-save': 'usage-edit-name', 'quick-wait': 'quick-command', 'quick-test': 'quick-problems', 'recharge-method': 'recharge-amount', 'recharge-confirm': 'recharge-method', 'more-tools': 'more-help' } as Record<string, string>)[step] || 'welcome');
   }
   function inspect() {
     const owned = session;
     if (!owned || changing || owned.checking) return;
     try {
     if (/^\/(login|register|email-verify|auth|setup)(\/|$)/.test(location.pathname)) return stop('cancelled:account-route');
+    if (paused()) {
+      if (owned.deadline && Date.now() >= owned.deadline) {
+        owned.deadline = 0;
+        if (onContinue) onContinue();
+        else void continueChapter();
+      }
+      return;
+    }
     if (['create', 'name', 'provider', 'group', 'submit', 'review'].includes(step) && location.pathname !== '/keys') return stop('cancelled:route-changed');
     if (['recharge-amount', 'recharge-method', 'recharge-confirm'].includes(step) && location.pathname !== '/purchase') return stop('cancelled:route-changed');
     if (['recharge-amount', 'recharge-method', 'recharge-confirm'].includes(step)) {
@@ -388,7 +411,7 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
     if (session) return false;
     const selected = module ? modules.filter((value: string) => value === module) : manual ? modules : registrationModules;
     if (!selected.length) return false;
-    const owned: any = { event, modules: [...selected], index: 0, confirmed: false, controller: new AbortController(), created: null, checking: false, deadline: 0,
+    const owned: any = { event, manual, modules: [...selected], index: 0, confirmed: false, controller: new AbortController(), created: null, checking: false, deadline: 0,
       keyUse: createKeyUse(), keyForm: createKeyFormGuide(), copySeen: false, usageResume: null, usageOpening: false, usageEditing: false, usageDialog: null, quickConfirmed: false, quickResume: 'quick-command', quickCopySeen: false, quickGroupOpen: false };
     owned.quick = createQuickStart({ menuId: moduleConfig.find((item: any) => item.id === 'quick-start')?.menuId, getPublicSettings,
       onUpdate: () => { if (session === owned) tour.refresh(); }, onError: (reason: string) => stop(reason) });
@@ -429,8 +452,13 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
     document.addEventListener('click', owned.click, true); document.addEventListener('keydown', owned.pickKey, true); resources.listeners += 2;
     owned.observer = new MutationObserver(inspect); owned.observer.observe(document.body, { childList: true, subtree: true }); resources.observers++;
     owned.tick = setInterval(inspect, 100); resources.timers++;
+    if (resume?.step === 'chapter-break' && owned.modules.includes(resume.moduleId)) {
+      owned.index = owned.modules.indexOf(resume.moduleId); step = 'chapter-break'; owned.deadline = Date.now() + 5000;
+      onStep(step, moduleId());
+      return true;
+    }
     document.body.classList.add('s2o-active');
-    await go('welcome', true, manual);
+    await go(manual && selected.length === 1 && selected[0] === 'more' ? 'more-help' : 'welcome', true, manual);
     if (session === owned && resume) {
       const index = owned.modules.indexOf(resume.moduleId);
       if (index >= 0) {
@@ -439,11 +467,12 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
         else if (resume.moduleId === 'key-use') await go(location.pathname === '/keys' ? 'usage-pick' : visible(anchors.navigate) ? 'usage-nav' : 'usage-menu');
         else if (resume.moduleId === 'quick-start') await beginQuick(resume.step);
         else if (resume.moduleId === 'recharge') await (location.pathname === '/purchase' ? openRecharge() : go(location.pathname === '/orders' ? 'orders-list' : visible(desktopBalance) ? 'balance' : 'balance-menu'));
+        else if (resume.moduleId === 'more') await go(['more-help', 'more-tools', 'finish'].includes(resume.step) ? resume.step : 'more-help');
       }
     }
     return session === owned;
   }
-  return { start, stop, get step() { return step; }, get moduleId() { return moduleId(); }, get modules() { return session ? [...session.modules] : []; }, get active() { return Boolean(session); },
+  return { start, stop, continue: continueChapter, get paused() { return paused(); }, get dialogOpen() { return dialogOpen(); }, get step() { return step; }, get moduleId() { return moduleId(); }, get modules() { return session ? [...session.modules] : []; }, get active() { return Boolean(session); },
     get clean() { return !session && tour.clean && (!lastQuick || lastQuick.clean) && Object.values(resources).every(v => v === 0); },
     get resources() { return { ...resources, engineSession: { ...tour.resources }, document: { ...(lastQuick?.resources || { listeners: 0, timers: 0, nodes: 0 }) } }; } };
 }

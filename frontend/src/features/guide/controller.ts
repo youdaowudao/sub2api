@@ -26,14 +26,14 @@ export interface ControllerOptions {
 export const stopMessages: Record<string, string> = {
   'error:target-timeout': '等待页面控件超时，引导已停止。页面可以继续使用。',
   'error:engine-frame': '引导显示发生异常，已停止。页面可以继续使用。',
-  'error:popover-position': '提示位置暂不可用，已停止引导。可以调整窗口后重播。',
+  'error:popover-position': '提示位置暂不可用，引导已停止。调整窗口后，可从右下角「使用引导」重新开始。',
   'cancelled:account-changed': '引导会话已失效，已停止。页面可以继续使用。',
   'cancelled:escape': '已按 Esc 退出引导。',
   'cancelled:dialog-open': '请先关闭当前窗口，再开始这段引导。',
   'error:recharge-entry': '暂时无法确认充值入口，引导已停止，页面可继续使用。',
   'error:quick-start-entry': '暂时找不到快速开始入口，引导已停止。页面可以继续使用；一直这样的话，请联系网站管理员。',
   'error:document-target': '快速开始页面的内容有变化，引导没法继续，已停止。页面可以正常阅读。',
-  'cancelled:recharge-busy': '充值页现在没有显示充值金额（可能正在付款，或打开的是订阅页签），引导已停止。切回充值后，可以从右下角重播这一段。',
+  'cancelled:recharge-busy': '充值页现在没有显示充值金额（可能正在付款，或打开的是订阅页签），引导已停止。切回充值后，可从右下角「使用引导」查看本章。',
 }
 
 export function createGuideController(options: ControllerOptions) {
@@ -44,13 +44,18 @@ export function createGuideController(options: ControllerOptions) {
   let destroyed = false, launching = false, pageHidden = false, suppressed = readSessionValue(suppressedKey) === '1'
   let proof: RegistrationRecord | null = null, manual = false, lastReason: string | null = null, note = ''
   let identity: string | null = null
+  const viewedModules = new Set<ModuleId>()
   const publish = () => { try { options.onChange?.() } catch { /* Optional UI must not affect the site. */ } }
   const flow = createFlow(options.driverFactory || driver, {
     modules, registrationModules: automaticModules, moduleConfig: config?.modules || [], getPublicSettings: options.getPublicSettings,
+    onContinue: () => { void continueChapter() },
     isCurrentUser: (userId: number) => available() && options.getState().user?.id === userId,
     onStep(step: string, moduleId: ModuleId) {
+      const restoringWelcome = launching && step === 'welcome' && proof !== null && 'step' in proof
+      if (step === 'chapter-break') note = ''
+      else if (!restoringWelcome) viewedModules.add(moduleId)
       // During resume, the temporary welcome must not replace the saved real step.
-      if (!manual && proof && !(launching && step === 'welcome' && 'step' in proof)) {
+      if (!manual && proof && !restoringWelcome) {
         const progress: ProgressRecord = { ...proof, modules: automaticModules, configuration: configIdentity, moduleId, step, path: options.getState().path }
         writeSessionValue(progressKey, JSON.stringify(progress))
       }
@@ -68,11 +73,11 @@ export function createGuideController(options: ControllerOptions) {
         ...(!manual && proof ? { registrationId: proof.registrationId } : {}),
         ...(reason === 'completed:user_confirmed' ? { confirmation: 'user_confirmed' } : reason === 'completed:quickstart_user_confirmed' ? { confirmation: 'quickstart_user_confirmed' } : {}),
       }]))
-      note = stopMessages[reason] || (result === 'completed' ? reason === 'completed:tour_viewed' ? '已完成所选内容的介绍，需要时可以重播。' : '已记录你的确认。需要时可以重播引导。' : result === 'error' ? '引导已停止，页面可以继续使用。' : '已退出引导。')
+      note = stopMessages[reason] || (result === 'completed' ? reason === 'completed:tour_viewed' ? '已看完本次内容。' : '已记录你的确认。' : result === 'error' ? '引导已停止，页面可以继续使用。' : '已退出引导。')
       proof = null; publish()
     },
   })
-  if (configPreview) note = modules.length ? '正在试用所选模块，仅当前浏览器生效。点击重播开始。' : '试用配置未启用任何模块，引导已关闭。'
+  if (configPreview) note = modules.length ? '正在试用所选章节，仅当前浏览器生效。点击右下角「使用引导」开始。' : '试用配置未启用任何模块，引导已关闭。'
 
   function storedIdentityMatches(): boolean {
     try {
@@ -101,14 +106,14 @@ export function createGuideController(options: ControllerOptions) {
   }
   function validProgress(value: unknown, userId: number): value is ProgressRecord {
     const progress = value as ProgressRecord | null
-    return isRegistrationRecord(progress, userId) && progress.configuration === configIdentity && JSON.stringify(progress.modules) === JSON.stringify(automaticModules) && automaticModules.includes(progress.moduleId) && Object.prototype.hasOwnProperty.call(steps, progress.step) && typeof progress.path === 'string'
+    return isRegistrationRecord(progress, userId) && progress.configuration === configIdentity && JSON.stringify(progress.modules) === JSON.stringify(automaticModules) && automaticModules.includes(progress.moduleId) && (progress.step === 'chapter-break' || Object.prototype.hasOwnProperty.call(steps, progress.step)) && typeof progress.path === 'string'
   }
   async function update() {
     if (destroyed) return
     try {
       const state = options.getState()
       const current = state.authenticated && state.user ? `${state.user.id}:${state.user.role}` : null
-      if (identity && identity !== current) { clearRegistrationProgress(); flow.stop('cancelled:account-changed') }
+      if (identity && identity !== current) { viewedModules.clear(); clearRegistrationProgress(); flow.stop('cancelled:account-changed') }
       identity = current
       if (flow.active && !available()) {
         clearRegistrationProgress()
@@ -143,7 +148,15 @@ export function createGuideController(options: ControllerOptions) {
     if (event.storageArea && event.storageArea !== localStorage) return
     if (event.key !== null && !['auth_token', 'auth_user', 'refresh_token'].includes(event.key)) return
     if (storedIdentityMatches()) return
-    clearRegistrationProgress(); flow.stop('cancelled:account-changed'); publish()
+    viewedModules.clear(); clearRegistrationProgress(); flow.stop('cancelled:account-changed'); publish()
+  }
+  async function continueChapter() {
+    if (launching || !available() || !flow.paused) return false
+    if (flow.dialogOpen) { note = '请先关闭当前窗口，再继续引导。'; publish(); return false }
+    launching = true; note = ''; publish()
+    try { return await flow.continue() }
+    catch { flow.stop('error:engine-frame'); return false }
+    finally { launching = false; publish() }
   }
   const registered = onGuideRegistration(() => { void update() })
   const observer = new MutationObserver(() => { void update() })
@@ -157,11 +170,12 @@ export function createGuideController(options: ControllerOptions) {
     update,
     available,
     replay(module: ModuleId) { return modules.includes(module) ? launch(null, module) : Promise.resolve(false) },
+    continue: continueChapter,
     exit() { flow.stop() },
-    status: () => ({ available: available(), active: flow.active, launching, step: flow.active ? flow.step : null, module: flow.moduleId, modules: [...modules], registrationModules: [...automaticModules], activeModules: flow.modules, reason: lastReason, note, configPreview, clean: flow.clean, resources: flow.resources }),
+    status: () => ({ available: available(), active: flow.active, paused: flow.paused, pendingModule: flow.paused ? flow.moduleId : null, viewedModules: modules.filter(module => viewedModules.has(module)), launching, step: flow.active ? flow.step : null, module: flow.moduleId, modules: [...modules], registrationModules: [...automaticModules], activeModules: flow.modules, reason: lastReason, note, configPreview, clean: flow.clean, resources: flow.resources }),
     destroy() {
       if (destroyed) return
-      destroyed = true; registered(); observer.disconnect()
+      destroyed = true; viewedModules.clear(); registered(); observer.disconnect()
       window.removeEventListener('storage', storageChanged); window.removeEventListener('pagehide', pageHide); window.removeEventListener('pageshow', pageShow)
       flow.stop('cancelled:unloaded')
     },

@@ -140,8 +140,13 @@ export function createTourSession(driverFactory: any, options: { storage?: Stora
     }
     function stop(reason = 'cancelled') {
       if (active !== mine || mine.state === 'stopped') return;
+      const pausing = reason === 'paused:chapter';
+      const currentFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const guideFocused = !!currentFocus?.closest('.s2o-popover, #s2o-exit');
+      const currentPosition = { x: scrollX, y: scrollY };
+      const currentScroll = pausing ? new Map<HTMLElement, { x: number; y: number }>([...mine.scroll.keys()].filter((element: HTMLElement) => element.isConnected).map((element: HTMLElement) => [element, { x: element.scrollLeft, y: element.scrollTop }] as const)) : null;
       mine.state = 'stopped';
-      if (reason !== 'suspended') {
+      if (reason !== 'suspended' && !pausing) {
         suppressed = true;
         try { storage?.setItem(storageKey, '1'); } catch { /* Memory still suppresses this document. */ }
       }
@@ -151,14 +156,21 @@ export function createTourSession(driverFactory: any, options: { storage?: Stora
       finally {
         for (const cleanup of mine.cleanups.splice(0)) cleanup();
         exit.remove(); active = null;
-        const dialog = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].filter(el => !el.classList.contains('s2o-driver-popover') && el.getBoundingClientRect().width > 0).at(-1);
-        let focus = mine.focus;
-        if (dialog && !dialog.contains(focus)) {
-          focus = dialog.contains(document.activeElement) ? document.activeElement : dialog.querySelector('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]');
+        if (pausing) {
+          if (currentFocus?.isConnected && currentFocus !== document.body) currentFocus.focus({ preventScroll: true });
+          else if ((guideFocused || currentFocus === document.body) && document.activeElement instanceof HTMLElement) document.activeElement.blur();
+          for (const [element, offset] of currentScroll!) element.scrollTo(offset.x, offset.y);
+          window.scrollTo(currentPosition.x, currentPosition.y);
+        } else {
+          const dialog = [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].filter(el => !el.classList.contains('s2o-driver-popover') && el.getBoundingClientRect().width > 0).at(-1);
+          let focus = mine.focus;
+          if (dialog && !dialog.contains(focus)) {
+            focus = dialog.contains(document.activeElement) ? document.activeElement : dialog.querySelector('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]');
+          }
+          if (focus?.isConnected) focus.focus({ preventScroll: true });
+          for (const [element, offset] of mine.scroll) element.scrollTo(offset.x, offset.y);
+          window.scrollTo(position.x, position.y);
         }
-        if (focus?.isConnected) focus.focus({ preventScroll: true });
-        for (const [element, offset] of mine.scroll) element.scrollTo(offset.x, offset.y);
-        window.scrollTo(position.x, position.y);
         if (destroyFailed) history.push('error:destroy');
         mine.engine = null;
         options.onStop?.(destroyFailed ? 'error:destroy' : reason);
@@ -197,6 +209,11 @@ export function createTourSession(driverFactory: any, options: { storage?: Stora
     return show(selector, settings);
   }
   return { start, show, stop: (reason?: string) => active?.stop(reason), refresh: () => { active?.engine?.refresh(); active?.position.refresh(); active?.attention.refresh(); }, history, resources,
+    pause() {
+      if (!active) return false;
+      active.stop('paused:chapter');
+      return !active && zero() && history[history.length - 1] === 'paused:chapter';
+    },
     preserveQuickStartScroll() {
       if (!active) return;
       for (const element of active.scroll.keys()) if (element.matches('.s2o-quick-start')) active.scroll.delete(element);

@@ -5,11 +5,22 @@ import bundled from '../config/onboarding.json'
 describe('guide configuration', () => {
   beforeEach(() => { localStorage.clear(); history.replaceState({}, '', '/dashboard'); vi.resetModules() })
   afterEach(() => { history.replaceState({}, '', '/dashboard'); localStorage.clear(); vi.doUnmock('../config/onboarding.json') })
-  it('validates the shipped configuration and limits automatic playback to keys then quick start', () => {
+  it('plays every enabled chapter in configured order after registration', () => {
     expect(normalizeConfig(bundled)).toEqual(bundled)
-    expect(registrationModules(bundled)).toEqual(['keys', 'quick-start'])
-    expect(enabledModules(bundled)).toEqual(['keys', 'key-use', 'quick-start', 'recharge'])
-    expect(registrationModules({ schemaVersion: 1, modules: [{ id: 'key-use', enabled: true }, { id: 'recharge', enabled: true }] })).toEqual([])
+    expect(registrationModules(bundled)).toEqual(['keys', 'key-use', 'quick-start', 'recharge', 'more'])
+    expect(enabledModules(bundled)).toEqual(['keys', 'key-use', 'quick-start', 'recharge', 'more'])
+    expect(registrationModules({ schemaVersion: 1, modules: [{ id: 'recharge', enabled: true }, { id: 'keys', enabled: false }, { id: 'key-use', enabled: true }] })).toEqual(['recharge', 'key-use'])
+    expect(registrationModules({ schemaVersion: 1, modules: [] })).toEqual([])
+  })
+  it('accepts the legacy configuration and includes an enabled overview in registration playback', () => {
+    const legacy = { schemaVersion: 1, modules: bundled.modules.filter(module => module.id !== 'more') }
+    expect(enabledModules(legacy)).toEqual(['keys', 'key-use', 'quick-start', 'recharge'])
+    expect(registrationModules(legacy)).toEqual(['keys', 'key-use', 'quick-start', 'recharge'])
+    const onlyMore = { schemaVersion: 1, modules: [{ id: 'more', enabled: true }] }
+    expect(enabledModules(onlyMore)).toEqual(['more'])
+    expect(registrationModules(onlyMore)).toEqual(['more'])
+    expect(enabledModules({ schemaVersion: 1, modules: [{ id: 'more', enabled: false }] })).toEqual([])
+    expect(() => normalizeConfig({ schemaVersion: 1, modules: [{ id: 'more', enabled: true, menuId: 'unneeded' }] })).toThrow()
   })
   it.each([
     null, { ...bundled, extra: true }, { ...bundled, schemaVersion: 2 },

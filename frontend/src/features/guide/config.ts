@@ -1,6 +1,6 @@
 import bundledConfiguration from './config/onboarding.json'
 
-export type ModuleId = 'keys' | 'key-use' | 'quick-start' | 'recharge'
+export type ModuleId = 'keys' | 'key-use' | 'quick-start' | 'recharge' | 'more'
 export interface GuideModule { id: ModuleId; enabled: boolean; menuId?: string }
 export interface GuideConfig { schemaVersion: 1; modules: GuideModule[] }
 export const moduleCatalog: { id: ModuleId; title: string; description: string; needsMenu?: boolean }[] = [
@@ -8,6 +8,7 @@ export const moduleCatalog: { id: ModuleId; title: string; description: string; 
   { id: 'key-use', title: '使用密钥', description: '复制、切换分组，了解客户端配置。' },
   { id: 'quick-start', title: '快速开始', description: '打开自定义文档，手动复制命令，在本机配置 Codex。', needsMenu: true },
   { id: 'recharge', title: '余额充值', description: '查看余额、充值入口和付款记录。' },
+  { id: 'more', title: '更多功能与帮助', description: '了解常用功能与帮助入口。' },
 ]
 export const previewConfigKey = 's2o:configuration-preview:v1'
 
@@ -27,10 +28,7 @@ export function normalizeConfig(value: unknown): GuideConfig {
 }
 
 export const enabledModules = (value: unknown): ModuleId[] => normalizeConfig(value).modules.filter(item => item.enabled).map(item => item.id)
-export const registrationModules = (value: unknown): ModuleId[] => {
-  const enabled = new Set(enabledModules(value))
-  return (['keys', 'quick-start'] as const).filter(id => enabled.has(id))
-}
+export const registrationModules = (value: unknown): ModuleId[] => enabledModules(value)
 
 // Read once for the lifetime of this document, including the opt-out query.
 export const initialOptOut = new URLSearchParams(location.search).get('onboarding') === 'off'

@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { reactive } from 'vue'
 import GuideHost from '../components/GuideHost.vue'
-import { installGuideDOM, keyPage, settle } from './fixture'
+import { installGuideDOM, keyPage, nextGuideStep, settle } from './fixture'
+import { recordGuideRegistration } from '../registration'
+import { beginGuideAction, completeGuideAction } from '../businessEvents'
 
 const { stores } = vi.hoisted(() => ({ stores: { auth: null as any, app: null as any, route: null as any } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => stores.auth }))
@@ -28,6 +30,51 @@ describe('ordinary guide host and replay picker', () => {
     expect(document.querySelector('#s2o-replay-picker')).not.toBeNull()
     return launcher
   }
+  it.each(['continue', 'automatic', 'end'])('releases the page at a registration chapter break and supports %s', async action => {
+    stores.app.cachedPublicSettings.custom_menu_items = [{ id: 'onboarding-quick-start', visibility: 'user' }]
+    document.body.insertAdjacentHTML('beforeend', '<a data-tour="sidebar-custom-onboarding-quick-start"></a><input id="practice" value="draft" />')
+    wrapper = mount(GuideHost, { attachTo: document.body }); await flushPromises()
+    recordGuideRegistration(stores.auth.user); await settle(); await nextGuideStep()
+    completeGuideAction(beginGuideAction('key-create'), { keyId: 71 })
+    document.querySelector('[role="dialog"]')!.remove(); await settle(); await nextGuideStep()
+    const button = document.querySelector<HTMLButtonElement>('#s2o-continue')!
+    expect(button).not.toBeNull(); expect(button.disabled).toBe(false)
+    expect(document.querySelector('#s2o-continuation')?.textContent).toContain('下一章：使用密钥')
+    expect(document.querySelector('#s2o-continuation')?.textContent).toContain('5 秒后自动继续，也可立即继续。')
+    expect(document.querySelector('.s2o-popover, #s2o-exit, #s2o-launcher')).toBeNull()
+    expect(document.body.classList.contains('s2o-active')).toBe(false)
+    const practice = document.querySelector<HTMLInputElement>('#practice')!
+    practice.focus(); practice.value = 'free edit'; await vi.advanceTimersByTimeAsync(1000)
+    expect(document.activeElement).toBe(practice); expect(practice.value).toBe('free edit')
+    expect(document.querySelector('#s2o-continue')).not.toBeNull()
+    if (action !== 'end') {
+      if (action === 'automatic') await vi.advanceTimersByTimeAsync(4100)
+      else { button.click(); button.click(); await settle() }
+      expect(document.querySelector('[data-s2o-step="usage-row"]')).not.toBeNull()
+      expect(document.querySelector('#s2o-continuation')).toBeNull()
+      document.querySelector<HTMLButtonElement>('#s2o-exit')!.click(); await flushPromises()
+    } else {
+      document.querySelector<HTMLButtonElement>('#s2o-continuation button:last-child')!.click(); await flushPromises()
+      expect(document.querySelector('.s2o-popover, #s2o-continuation')).toBeNull()
+    }
+    document.querySelector<HTMLButtonElement>('#s2o-launcher')!.click(); await flushPromises()
+    expect(document.querySelector('[data-s2o-module="keys"]')?.textContent).toContain('已查看')
+    expect(document.querySelector('[data-s2o-module="key-use"]')?.textContent).toContain(action !== 'end' ? '已查看' : '未查看')
+    expect(document.querySelector('[data-s2o-module="quick-start"]')?.textContent).toContain('未查看')
+  })
+  it('remembers opened chapters after exiting the guide, but not after the host is recreated', async () => {
+    await openPicker()
+    expect(document.querySelector('[data-s2o-module="more"]')?.textContent).toContain('未查看')
+    document.querySelector<HTMLButtonElement>('[data-s2o-module="more"]')!.click(); await settle()
+    document.querySelector<HTMLButtonElement>('#s2o-exit')!.click(); await flushPromises()
+    document.querySelector<HTMLButtonElement>('#s2o-launcher')!.click(); await flushPromises()
+    expect(document.querySelector('[data-s2o-module="more"]')?.classList.contains('s2o-replay-viewed')).toBe(true)
+    expect(document.querySelector('[data-s2o-module="more"]')?.textContent).toContain('已查看')
+    expect(document.querySelector('[data-s2o-module="keys"]')?.textContent).toContain('未查看')
+    wrapper!.unmount(); wrapper = undefined
+    await openPicker()
+    expect(document.querySelector('[data-s2o-module="more"]')?.textContent).toContain('未查看')
+  })
   it.each(['focusin', 'pointerdown'])('keeps the business control focused when %s outside dismisses the picker', async source => {
     const outside = document.createElement('input'); outside.id = 'outside-guide-control'; document.body.append(outside)
     const launcher = await openPicker(), restored = vi.spyOn(launcher, 'focus')
@@ -60,11 +107,11 @@ describe('ordinary guide host and replay picker', () => {
     expect(document.querySelector('#s2o-replay-picker')).toBeNull()
     expect(document.querySelector('.s2o-popover')).not.toBeNull()
   })
-  it('offers four separate chapters, closes the chooser on Escape, and hides replay during playback', async () => {
+  it('offers five separate chapters, closes the chooser on Escape, and hides the launcher during playback', async () => {
     wrapper = mount(GuideHost, { attachTo: document.body }); await flushPromises()
     const launcher = document.querySelector<HTMLButtonElement>('#s2o-launcher')!
     expect(launcher).not.toBeNull(); launcher.click(); await flushPromises()
-    expect(document.querySelectorAll('[data-s2o-module]')).toHaveLength(4)
+    expect(document.querySelectorAll('[data-s2o-module]')).toHaveLength(5)
     document.querySelector<HTMLButtonElement>('[data-s2o-module]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     await flushPromises(); expect(document.querySelector('#s2o-replay-picker')).toBeNull()
     launcher.click(); await flushPromises(); document.querySelector<HTMLButtonElement>('[data-s2o-module="keys"]')!.click()
@@ -72,6 +119,22 @@ describe('ordinary guide host and replay picker', () => {
     document.querySelector<HTMLButtonElement>('#s2o-exit')!.click(); await flushPromises()
     expect(document.querySelector('#s2o-launcher')).not.toBeNull()
     expect(document.querySelector('#s2o-note')?.textContent).toBe('已退出引导。')
+  })
+  it('opens the overview through 使用引导, completes it and can choose it again', async () => {
+    const launcher = await openPicker()
+    expect(launcher.textContent).toBe('使用引导')
+    expect(document.querySelector('#s2o-replay-title')?.textContent).toBe('选择要查看的内容')
+    expect([...document.querySelectorAll('[data-s2o-module]')].at(-1)?.getAttribute('data-s2o-module')).toBe('more')
+    document.querySelector<HTMLButtonElement>('[data-s2o-module="more"]')!.click(); await settle()
+    expect(document.querySelector('[data-s2o-step="more-help"]')).not.toBeNull()
+    expect(document.querySelector('#s2o-launcher, #s2o-replay-picker')).toBeNull()
+    await nextGuideStep(); await nextGuideStep(); await nextGuideStep()
+    expect(document.querySelector('.s2o-popover, #s2o-exit, #s2o-attention-wait')).toBeNull()
+    expect(document.querySelector('#s2o-note')?.textContent).toBe('已看完本次内容。')
+    expect(document.querySelector('#s2o-note')?.textContent).not.toContain('重播')
+    document.querySelector<HTMLButtonElement>('#s2o-launcher')!.click(); await flushPromises()
+    document.querySelector<HTMLButtonElement>('[data-s2o-module="more"]')!.click(); await settle()
+    expect(document.querySelector('[data-s2o-step="more-help"]')).not.toBeNull()
   })
   it.each(['admin', 'guest'])('does not render ordinary replay for %s', async role => {
     stores.auth.user.role = role

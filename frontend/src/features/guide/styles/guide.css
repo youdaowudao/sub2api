@@ -39,16 +39,28 @@ body:has([data-tour="sidebar-my-keys"]):not(.s2o-active) #s2o-replay-picker:not(
 #s2o-replay-picker button { cursor: pointer; font: inherit; }
 #s2o-replay-picker .s2o-replay-close { flex-shrink: 0; min-width: 44px; min-height: 44px; border: 0; border-radius: 8px; padding: 6px; color: #065f46; background: transparent; font-size: 14px; }
 #s2o-replay-picker .s2o-replay-choices { display: grid; gap: 10px; }
-#s2o-replay-picker [data-s2o-module] { display: grid; gap: 4px; width: 100%; border: 1px solid #a2d8bd; border-radius: 10px; padding: 12px 14px; text-align: left; color: #17432b; background: #d9f7e8; }
+#s2o-replay-picker [data-s2o-module] { display: grid; gap: 4px; width: 100%; border: 1px solid #cbd5e1; border-radius: 10px; padding: 12px 14px; text-align: left; color: #17432b; background: #f8fafc; }
+#s2o-replay-picker .s2o-replay-viewed { background: #d9f7e8; border-color: #a2d8bd; }
+#s2o-replay-picker .s2o-chapter-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+#s2o-replay-picker .s2o-chapter-state { flex-shrink: 0; font-size: 13px; }
 #s2o-replay-picker [data-s2o-module] strong { font-weight: 700; font-size: 17px; }
 #s2o-replay-picker [data-s2o-module] span { color: #456c59; font-size: 14px; }
 #s2o-replay-picker button:hover { background: #bdf0d6; }
 .dark #s2o-replay-picker { color: #d1fae5; background: #13372b; border-color: #3b8263; }
-.dark #s2o-replay-picker [data-s2o-module] { color: #d1fae5; background: #1b4937; border-color: #3b8263; }
+.dark #s2o-replay-picker [data-s2o-module] { color: #d1fae5; background: #202b3d; border-color: #475569; }
+.dark #s2o-replay-picker .s2o-replay-viewed { background: #1b4937; border-color: #3b8263; }
 .dark #s2o-replay-picker p, .dark #s2o-replay-picker [data-s2o-module] span { color: #b0d7c3; }
 .dark #s2o-replay-picker .s2o-replay-close { color: #a7f3d0; }
 .dark #s2o-replay-picker button:hover { background: #28634a; }
 #s2o-launcher:focus-visible, #s2o-exit:focus-visible, #s2o-replay-picker button:focus-visible { outline: 3px solid #047857; outline-offset: 3px; }
+#s2o-continuation { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: max(18px, env(safe-area-inset-bottom, 0px)); z-index: 40; box-sizing: border-box; width: min(300px, calc(100vw - 32px)); padding: 14px; border: 1px solid #86d5a5; border-radius: 14px; background: #ecfdf3; color: #17432b; box-shadow: 0 3px 12px #0001; font: 15px/1.6 system-ui, sans-serif; }
+#s2o-continuation p { margin: 0 0 10px; }
+.s2o-continue-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.s2o-continue-actions button { min-height: 44px; padding: 8px 12px; border: 1px solid #86d5a5; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.s2o-continue-actions #s2o-continue { background: #047857; color: #fff; border-color: #047857; }
+.s2o-continue-actions button:disabled { opacity: .6; cursor: wait; }
+.s2o-continue-actions button:focus-visible { outline: 3px solid #047857; outline-offset: 3px; }
+.dark #s2o-continuation { background: #13372b; color: #d1fae5; border-color: #3b8263; }
 body.s2o-active [aria-label="选择这把密钥"] { cursor: pointer; }
 body.s2o-active [aria-label="选择这把密钥"]:focus-visible { outline: 3px solid #047857; outline-offset: 3px; border-radius: 3px; }
 
