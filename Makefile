@@ -1,6 +1,27 @@
 .PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
 
 FRONTEND_CRITICAL_VITEST := \
+	src/features/guide/__tests__/GuideHost.spec.ts \
+	src/features/guide/__tests__/GuideSettingsCard.spec.ts \
+	src/features/guide/__tests__/QuickStartArticle.spec.ts \
+	src/features/guide/__tests__/attention.spec.ts \
+	src/features/guide/__tests__/businessEvents.spec.ts \
+	src/features/guide/__tests__/config.spec.ts \
+	src/features/guide/__tests__/controller.spec.ts \
+	src/features/guide/__tests__/driver.spec.ts \
+	src/features/guide/__tests__/flow.spec.ts \
+	src/features/guide/__tests__/integrationSurface.spec.ts \
+	src/features/guide/__tests__/quickStartContent.spec.ts \
+	src/features/guide/__tests__/registration.spec.ts \
+	src/features/guide/__tests__/sharedComponents.contract.spec.ts \
+	src/features/guide/__tests__/steps.spec.ts \
+	src/features/guide/__tests__/tourSession.spec.ts \
+	src/views/auth/__tests__/RegisterView.spec.ts \
+	src/views/auth/__tests__/EmailVerifyView.spec.ts \
+	src/views/user/__tests__/CustomPageView.spec.ts \
+	src/views/user/__tests__/UserOrdersView.guide.spec.ts \
+	src/components/common/__tests__/DataTable.spec.ts \
+	src/components/layout/__tests__/AppSidebar.spec.ts \
 	src/i18n/__tests__/localeKeyCompleteness.spec.ts \
 	src/api/__tests__/client.spec.ts \
 	src/api/__tests__/tokenRefresh.spec.ts \

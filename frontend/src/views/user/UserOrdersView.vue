@@ -15,7 +15,7 @@
       </div>
 
       <!-- Table -->
-      <OrderTable :orders="orders" :loading="loading">
+      <OrderTable data-tour="orders-list" :orders="orders" :loading="loading">
         <template #actions="{ row }">
           <div class="flex items-center gap-2">
             <button v-if="row.status === 'PENDING'" @click="handleCancel(row.id)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-yellow-600 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-900/20">

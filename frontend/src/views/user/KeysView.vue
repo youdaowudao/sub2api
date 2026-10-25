@@ -121,6 +121,7 @@
                 {{ maskApiKey(value) }}
               </code>
               <button
+                data-tour="key-copy"
                 @click="copyToClipboard(value, row.id)"
                 class="rounded-lg p-1 transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
                 :class="
@@ -143,7 +144,7 @@
 
           <template #cell-name="{ value, row }">
             <div class="flex items-center gap-1.5">
-              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <span data-tour="key-name" class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
               <Icon
                 v-if="row.ip_whitelist?.length > 0 || row.ip_blacklist?.length > 0"
                 name="shield"
@@ -157,6 +158,7 @@
           <template #cell-group="{ row }">
             <div class="group/dropdown relative">
               <button
+                data-tour="key-group"
                 :ref="(el) => setGroupButtonRef(row.id, el)"
                 @click="openGroupSelector(row)"
                 class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
@@ -391,9 +393,10 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div data-tour="key-actions" class="flex items-center gap-1">
               <!-- Use Key Button -->
               <button
+                data-tour="key-use"
                 @click="openUseKeyModal(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
               >
@@ -403,6 +406,7 @@
               <!-- Import to CC Switch Button -->
               <button
                 v-if="!publicSettings?.hide_ccs_import_button"
+                data-tour="key-ccs"
                 @click="importToCcswitch(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
               >
@@ -411,6 +415,7 @@
               </button>
               <!-- Toggle Status Button -->
               <button
+                data-tour="key-toggle"
                 @click="toggleKeyStatus(row)"
                 :class="[
                   'flex flex-col items-center gap-0.5 rounded-lg p-1.5 transition-colors',
@@ -425,6 +430,7 @@
               </button>
               <!-- Edit Button -->
               <button
+                data-tour="key-edit"
                 @click="editKey(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
@@ -433,6 +439,7 @@
               </button>
               <!-- Delete Button -->
               <button
+                data-tour="key-delete"
                 @click="confirmDelete(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
               >
@@ -669,7 +676,7 @@
         </div>
 
         <!-- Quota Limit Section -->
-        <div class="space-y-3">
+        <div data-tour="key-form-quota" class="space-y-3">
           <label class="input-label">{{ t('keys.quotaLimit') }}</label>
           <!-- Switch commented out - always show input, 0 = unlimited
           <div class="flex items-center justify-between">
@@ -1132,6 +1139,7 @@
       <div
         v-if="groupSelectorKeyId !== null && dropdownPosition"
         ref="dropdownRef"
+        data-tour="key-group-dropdown"
         class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-max max-w-[calc(100vw-16px)] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 sm:min-w-[380px] dark:bg-dark-800 dark:ring-white/10"
         style="pointer-events: auto !important;"
         :style="{
@@ -1159,6 +1167,7 @@
         <div class="max-h-80 overflow-y-auto p-1.5">
           <button
             v-for="option in filteredGroupOptions"
+            data-tour="key-group-option"
             :key="option.value ?? 'null'"
             @click="changeGroup(selectedKeyForGroup!, option.value)"
             :class="[
@@ -1199,7 +1208,8 @@
 </template>
 
 <script setup lang="ts">
-	import { ref, reactive, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
+	import { beginGuideAction, completeGuideAction } from '@/features/guide/businessEvents'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
 	import { useI18n } from 'vue-i18n'
 	import { useAppStore } from '@/stores/app'
 	import { useOnboardingStore } from '@/stores/onboarding'
@@ -1568,8 +1578,10 @@ const filteredGroupOptions = computed(() => {
 })
 
 const copyToClipboard = async (text: string, keyId: number) => {
+  const guideTicket = beginGuideAction('key-copy', keyId)
   const success = await clipboardCopy(text, t('keys.copied'))
   if (success) {
+    completeGuideAction(guideTicket, { keyId })
     copiedKeyId.value = keyId
     setTimeout(() => {
       copiedKeyId.value = null
@@ -1798,6 +1810,7 @@ const confirmDelete = (key: ApiKey) => {
 }
 
 const handleSubmit = async () => {
+  const guideTicket = beginGuideAction('key-create')
   // Validate group_id is required
   if (formData.value.group_id === null) {
     appStore.showError(t('keys.groupRequired'))
@@ -1872,7 +1885,7 @@ const handleSubmit = async () => {
       appStore.showSuccess(t('keys.keyUpdatedSuccess'))
     } else {
       const customKey = formData.value.use_custom_key ? formData.value.custom_key : undefined
-      await keysAPI.create(
+      const createdKey = await keysAPI.create(
         formData.value.name,
         formData.value.group_id,
         customKey,
@@ -1882,6 +1895,7 @@ const handleSubmit = async () => {
         expiresInDays,
         rateLimitData
       )
+      if (guideTicket) completeGuideAction(guideTicket, { keyId: createdKey.id })
       appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded
       if (onboardingStore.isCurrentStep('[data-tour="key-form-submit"]')) {

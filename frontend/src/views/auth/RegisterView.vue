@@ -365,6 +365,7 @@
 </template>
 
 <script setup lang="ts">
+import { recordGuideRegistration } from '@/features/guide/registration'
 import { computed, ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -1076,7 +1077,7 @@ async function handleRegister(): Promise<void> {
     }
 
     // Otherwise, directly register
-    await authStore.register({
+    const registeredUser = await authStore.register({
       email: formData.email,
       password: formData.password,
       turnstile_token:
@@ -1087,6 +1088,7 @@ async function handleRegister(): Promise<void> {
       invitation_code: formData.invitation_code || undefined,
       ...(affCode ? { aff_code: affCode } : {})
     })
+    recordGuideRegistration(registeredUser)
     clearAffiliateReferralCode()
 
     // Show success toast

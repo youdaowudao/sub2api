@@ -41,7 +41,7 @@ importers:
         specifier: ^3.4.17
         version: 3.4.17
       driver.js:
-        specifier: ^1.4.0
+        specifier: 1.4.0
         version: 1.4.0
       file-saver:
         specifier: ^2.0.5

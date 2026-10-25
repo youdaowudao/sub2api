@@ -6955,6 +6955,7 @@
               </button>
             </div>
           </div>
+          <GuideSettingsCard />
 	        </div>
 	        <!-- /Tab: General -->
 
@@ -8976,6 +8977,7 @@
 </template>
 
 <script setup lang="ts">
+import GuideSettingsCard from '@/features/guide/components/GuideSettingsCard.vue';
 import { ref, reactive, computed, onMounted, watch } from "vue";
 import { listPlatformIds } from "@/constants/platformCatalog";
 import { useI18n } from "vue-i18n";

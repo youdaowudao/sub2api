@@ -605,6 +605,7 @@ describe('EmailVerifyView', () => {
     expect(clearPendingAuthSessionMock).toHaveBeenCalled()
     expect(pushMock).toHaveBeenCalledWith('/profile')
     expect(registerMock).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('s2o:registration:v1')).toBeNull()
   })
 
   it('requires and submits a fresh turnstile token for pending oauth account creation', async () => {
@@ -899,4 +900,42 @@ describe('EmailVerifyView', () => {
       tencent_captcha_randstr: undefined,
     }))
   })
+  it('records email registration success, preserves navigation, and never records a failure', async () => {
+    sessionStorage.setItem('register_data', JSON.stringify({ email: 'guide@example.com', password: 'secret-123' }))
+    registerMock.mockResolvedValue({ id: 43, role: 'user' })
+    const wrapper = mount(EmailVerifyView, { global: { stubs: {
+      AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' },
+      Icon: true, TurnstileWidget: true, transition: false
+    } } })
+    await flushPromises()
+    await wrapper.get('#code').setValue('654321')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(JSON.parse(sessionStorage.getItem('s2o:registration:v1') || 'null')).toMatchObject({ userId: 43 })
+    expect(pushMock).toHaveBeenCalledWith('/dashboard')
+    sessionStorage.removeItem('s2o:registration:v1')
+    pushMock.mockReset()
+    registerMock.mockRejectedValueOnce(new Error('invalid code'))
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+    expect(sessionStorage.getItem('s2o:registration:v1')).toBeNull()
+    expect(pushMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps email signup navigation when optional guide storage is unavailable', async () => {
+    sessionStorage.setItem('register_data', JSON.stringify({ email: 'guide@example.com', password: 'secret-123' }))
+    registerMock.mockResolvedValue({ id: 43, role: 'user' })
+    const wrapper = mount(EmailVerifyView, { global: { stubs: {
+      AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' }, Icon: true, TurnstileWidget: true, transition: false
+    } } })
+    await flushPromises(); await wrapper.get('#code').setValue('654321')
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('Denied') })
+    try {
+      await wrapper.get('form').trigger('submit.prevent'); await flushPromises()
+      expect(pushMock).toHaveBeenCalledWith('/dashboard')
+      expect(showSuccessMock).toHaveBeenCalled()
+    } finally { storage.mockRestore(); wrapper.unmount() }
+  })
+
 })

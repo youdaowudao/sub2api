@@ -3,7 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import CustomPageView from '../CustomPageView.vue'
 
-const { appStore } = vi.hoisted(() => ({
+const { appStore, guideRoute } = vi.hoisted(() => ({
+  guideRoute: { params: { id: 'docs' } },
   appStore: {
     publicSettingsLoaded: true,
     cachedPublicSettings: { custom_menu_items: [{ id: 'docs', url: 'https://example.com/docs' }] },
@@ -11,7 +12,7 @@ const { appStore } = vi.hoisted(() => ({
 }))
 
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<div><slot /></div>' } }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ params: { id: 'docs' } }) }))
+vi.mock('vue-router', () => ({ useRoute: () => guideRoute }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'en' } }) }))
 vi.mock('@/stores', () => ({ useAppStore: () => appStore }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isAdmin: false, user: { id: 7 }, token: 'test-token' }) }))
@@ -66,6 +67,7 @@ function click(button: HTMLElement, detail = 1) {
 
 describe('custom page open button', () => {
   beforeEach(() => {
+    guideRoute.params.id = 'docs'
     appStore.cachedPublicSettings.custom_menu_items = [{ id: 'docs', url: 'https://example.com/docs' }]
     vi.stubGlobal('ResizeObserver', class {
       constructor(callback: () => void) { notifyResize = callback }
@@ -165,4 +167,33 @@ describe('custom page open button', () => {
     expect(wrapper.find('iframe').exists()).toBe(false)
     expect(wrapper.get('.markdown-page-content h1').text()).toBe('Guide')
   })
+  it('renders the bound built-in quick start without fetching a page or building an iframe URL', async () => {
+    guideRoute.params.id = 'onboarding-quick-start'
+    appStore.cachedPublicSettings.custom_menu_items = [{ id: 'onboarding-quick-start', url: 'md:legacy' }]
+    const fetchPage = vi.fn().mockResolvedValue({ ok: true, text: async () => '# Legacy' })
+    vi.stubGlobal('fetch', fetchPage)
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('.s2o-quick-start').exists()).toBe(true)
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(wrapper.find('.custom-open-fab').exists()).toBe(false)
+    expect(fetchPage).not.toHaveBeenCalled()
+    expect(wrapper.findAll('#windows-command')).toHaveLength(1)
+  })
+
+  it('keeps the built-in article readable with onboarding=off and preserves missing-menu handling', async () => {
+    history.replaceState({}, '', '/custom/onboarding-quick-start?onboarding=off')
+    guideRoute.params.id = 'onboarding-quick-start'
+    appStore.cachedPublicSettings.custom_menu_items = [{ id: 'onboarding-quick-start', url: 'https://example.com/ignored' }]
+    const wrapper = mountPage(); await flushPromises()
+    expect(wrapper.find('.s2o-quick-start').exists()).toBe(true)
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    wrapper.unmount(); wrappers.pop()
+    appStore.cachedPublicSettings.custom_menu_items = []
+    const missing = mountPage(); await flushPromises()
+    expect(missing.text()).toContain('customPage.notFoundTitle')
+    expect(missing.find('.s2o-quick-start').exists()).toBe(false)
+    history.replaceState({}, '', '/')
+  })
+
 })

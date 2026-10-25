@@ -1,3 +1,4 @@
+import { sidebarTourId } from '@/features/guide/steps'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -78,5 +79,16 @@ describe('AppSidebar subscription feature flag', () => {
     expect(componentSource).toMatch(/case 'recharge_only':\s*return t\('nav\.recharge'\)/)
     expect(componentSource).toMatch(/case 'subscription_only':\s*return t\('nav\.subscribe'\)/)
     expect(componentSource).toMatch(/path: '\/purchase'[^\n]*label: purchaseNavLabel\.value/)
+  })
+})
+
+describe('ordinary guide sidebar markers', () => {
+  it('marks supported user routes and retains the original admin expression', () => {
+    expect(['/keys', '/purchase', '/orders', '/custom/quick-start', '/usage'].map(sidebarTourId)).toEqual(['sidebar-my-keys', 'sidebar-purchase', 'sidebar-orders', 'sidebar-custom-quick-start', undefined])
+    const userSection = componentSource.slice(componentSource.indexOf('v-for="item in userNavItems"'))
+    expect(userSection).toContain(':data-tour="sidebarTourId(item.path)"')
+    const adminSection = componentSource.slice(0, componentSource.indexOf('v-for="item in userNavItems"'))
+    expect(adminSection).toContain(":data-tour=\"item.path === '/keys' ? 'sidebar-my-keys' : undefined\"")
+    expect(adminSection).not.toContain(':data-tour="sidebarTourId(item.path)"')
   })
 })
