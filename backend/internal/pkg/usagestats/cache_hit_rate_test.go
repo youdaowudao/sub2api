@@ -2,6 +2,7 @@ package usagestats
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -32,3 +33,15 @@ func TestCalculateCacheHitRate(t *testing.T) {
 }
 
 func ratePtr(v float64) *float64 { return &v }
+
+func TestNewCacheHitRateResultMidnightGap(t *testing.T) {
+	loc, err := time.LoadLocation("America/Santiago")
+	require.NoError(t, err)
+	start := time.Date(2026, 9, 6, 1, 0, 0, 0, loc)
+	end := time.Date(2026, 9, 7, 0, 0, 0, 0, loc)
+	items := []CacheHitRateItem{{Requests: 1}}
+	result := NewCacheHitRateResult(start, end, items)
+	require.Equal(t, "2026-09-06", result.StartDate)
+	require.Equal(t, "2026-09-06", result.EndDate)
+	require.Equal(t, items, result.Items)
+}

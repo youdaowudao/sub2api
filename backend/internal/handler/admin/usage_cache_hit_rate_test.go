@@ -127,3 +127,23 @@ func TestCacheHitRateSettingsAudit(t *testing.T) {
 	require.Contains(t, changed, "allow_user_view_cache_hit_rate")
 	require.Contains(t, changed, "cache_hit_rate_default_range")
 }
+
+// The user authorized correcting only cache-rate dates, keeping the legacy Stats boundary.
+func TestCacheHitRateMidnightGapKeepsLegacyStatsWindow(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest("GET", "/admin/usage/stats?start_date=2026-09-06&end_date=2026-09-06&timezone=America%2FSantiago&nocache=1", nil))
+	require.Equal(t, 200, rec.Code)
+	require.Equal(t, "2026-09-05T23:00:00-04:00", repo.statsFilters.StartTime.Format(time.RFC3339))
+	require.Equal(t, "2026-09-06T23:00:00-03:00", repo.statsFilters.EndTime.Format(time.RFC3339))
+	loc, err := time.LoadLocation("America/Santiago")
+	require.NoError(t, err)
+	start, end, err := service.ResolveCacheHitRateWindow("2026-09-06", "2026-09-06", "America/Santiago", time.Date(2026, 9, 6, 12, 0, 0, 0, loc))
+	require.NoError(t, err)
+	require.Equal(t, "2026-09-06T01:00:00-03:00", start.Format(time.RFC3339))
+	require.Equal(t, "2026-09-07T00:00:00-03:00", end.Format(time.RFC3339))
+	lateCall := time.Date(2026, 9, 6, 23, 30, 0, 0, loc)
+	require.False(t, lateCall.Before(*repo.statsFilters.EndTime))
+	require.True(t, !lateCall.Before(start) && lateCall.Before(end))
+}

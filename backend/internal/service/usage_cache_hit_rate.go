@@ -12,22 +12,49 @@ import (
 // ResolveCacheHitRateWindow bounds cache-rate queries to at most two local dates.
 // The returned end is exclusive. Calendar arithmetic also handles DST days.
 func ResolveCacheHitRateWindow(startDate, endDate, userTZ string, now time.Time) (time.Time, time.Time, error) {
-	start, startErr := timezone.ParseInUserLocation("2006-01-02", startDate, userTZ)
-	end, endErr := timezone.ParseInUserLocation("2006-01-02", endDate, userTZ)
+	// Validate civil dates independently of whether local midnight exists.
+	start, startErr := time.Parse("2006-01-02", startDate)
+	end, endErr := time.Parse("2006-01-02", endDate)
 	if startErr != nil || endErr != nil || start.Format("2006-01-02") != startDate || end.Format("2006-01-02") != endDate {
 		return time.Time{}, time.Time{}, errors.New("start_date and end_date are required, format YYYY-MM-DD")
 	}
-	today := timezone.StartOfDayInUserLocation(now, userTZ)
-	yesterday := today.AddDate(0, 0, -1)
-	tomorrow := today.AddDate(0, 0, 1)
+	location := timezone.StartOfDayInUserLocation(now, userTZ).Location()
+	localNow := now.In(location)
+	today := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.UTC)
+	yesterday, tomorrow := today.AddDate(0, 0, -1), today.AddDate(0, 0, 1)
+	first, afterLast := yesterday, tomorrow
 	switch {
 	case start.Equal(today) && end.Equal(today):
-		return today, tomorrow, nil
+		first = today
 	case start.Equal(yesterday) && end.Equal(yesterday):
-		return yesterday, today, nil
-	default:
-		return yesterday, tomorrow, nil
+		afterLast = today
 	}
+	return cacheHitRateDayStart(first, location), cacheHitRateDayStart(afterLast, location), nil
+}
+
+// cacheHitRateDayStart resolves each civil day independently. Some zones skip
+// midnight or repeat it; use the first instant belonging to that day.
+func cacheHitRateDayStart(calendarDate time.Time, location *time.Location) time.Time {
+	start := time.Date(calendarDate.Year(), calendarDate.Month(), calendarDate.Day(), 0, 0, 0, 0, location)
+	localDate := time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	zoneStart, zoneEnd := start.ZoneBounds()
+	if localDate.Before(calendarDate) {
+		// Go normalized a nonexistent midnight back into the previous day.
+		return zoneEnd
+	}
+	if start.Hour() != 0 || start.Minute() != 0 || start.Second() != 0 {
+		// Go normalized forward past a gap; the new zone starts this day.
+		return zoneStart
+	}
+	if !zoneStart.IsZero() {
+		// If Go chose the second midnight in a fold, try the previous offset.
+		_, previousOffset := zoneStart.Add(-time.Nanosecond).Zone()
+		earlier := calendarDate.Add(-time.Duration(previousOffset) * time.Second).In(location)
+		if earlier.Before(start) && earlier.Format("2006-01-02 15:04:05") == calendarDate.Format("2006-01-02 15:04:05") {
+			return earlier
+		}
+	}
+	return start
 }
 
 type usageCacheHitRateReader interface {

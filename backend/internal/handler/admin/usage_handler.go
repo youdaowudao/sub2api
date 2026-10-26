@@ -705,5 +705,5 @@ func (h *UsageHandler) CacheHitRate(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, usagestats.CacheHitRateResult{StartDate: start.Format("2006-01-02"), EndDate: end.AddDate(0, 0, -1).Format("2006-01-02"), Items: items})
+	response.Success(c, usagestats.NewCacheHitRateResult(start, end, items))
 }

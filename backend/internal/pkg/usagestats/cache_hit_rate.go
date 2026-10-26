@@ -1,5 +1,7 @@
 package usagestats
 
+import "time"
+
 // CacheHitRateItem contains raw prompt-token totals for one usage dimension.
 type CacheHitRateItem struct {
 	ID                  int64    `json:"id"`
@@ -26,4 +28,13 @@ func CalculateCacheHitRate(input, creation, read int64) *float64 {
 	}
 	rate := float64(read) / total * 100
 	return &rate
+}
+
+// NewCacheHitRateResult formats the actual inclusive dates of an exclusive window.
+func NewCacheHitRateResult(start, end time.Time, items []CacheHitRateItem) CacheHitRateResult {
+	return CacheHitRateResult{
+		StartDate: start.Format("2006-01-02"),
+		EndDate:   end.Add(-time.Nanosecond).Format("2006-01-02"),
+		Items:     items,
+	}
 }
