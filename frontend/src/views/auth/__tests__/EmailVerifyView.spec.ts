@@ -901,6 +901,8 @@ describe('EmailVerifyView', () => {
     }))
   })
   it('records email registration success, preserves navigation, and never records a failure', async () => {
+    sessionStorage.setItem('s2o:visit-suppressed:v1', '1')
+    sessionStorage.setItem('s2o:progress:v1', 'old progress')
     sessionStorage.setItem('register_data', JSON.stringify({ email: 'guide@example.com', password: 'secret-123' }))
     registerMock.mockResolvedValue({ id: 43, role: 'user' })
     const wrapper = mount(EmailVerifyView, { global: { stubs: {
@@ -913,13 +915,19 @@ describe('EmailVerifyView', () => {
     await flushPromises()
     expect(JSON.parse(sessionStorage.getItem('s2o:registration:v1') || 'null')).toMatchObject({ userId: 43 })
     expect(pushMock).toHaveBeenCalledWith('/dashboard')
+    expect(sessionStorage.getItem('s2o:visit-suppressed:v1')).toBeNull()
+    expect(sessionStorage.getItem('s2o:progress:v1')).toBeNull()
     sessionStorage.removeItem('s2o:registration:v1')
+    sessionStorage.setItem('s2o:visit-suppressed:v1', '1')
+    sessionStorage.setItem('s2o:progress:v1', 'preserved progress')
     pushMock.mockReset()
     registerMock.mockRejectedValueOnce(new Error('invalid code'))
     await wrapper.get('form').trigger('submit.prevent')
     await flushPromises()
     expect(sessionStorage.getItem('s2o:registration:v1')).toBeNull()
     expect(pushMock).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('s2o:visit-suppressed:v1')).toBe('1')
+    expect(sessionStorage.getItem('s2o:progress:v1')).toBe('preserved progress')
     wrapper.unmount()
   })
 

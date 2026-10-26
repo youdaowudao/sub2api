@@ -22,6 +22,102 @@ describe('guide controller authentication and lifetime', () => {
     controller = createGuideController({ getState: () => state, getPublicSettings: () => ({ payment_enabled: false }), driverFactory: fakeDriver as any, ...overrides })
     return controller
   }
+  it('preserves B when its successful registration arrives before A account cleanup', async () => {
+    create(); recordGuideRegistration(state.user!); await settle()
+    const first = JSON.parse(sessionStorage.getItem(progressKey)!)
+    state.user = { id: 8, role: 'user' }; localStorage.setItem('auth_user', JSON.stringify(state.user))
+    recordGuideRegistration(state.user!); await settle()
+    expect(controller!.status().step).toBe('welcome')
+    expect(controller!.status().note).toBe(''); expect(controller!.status().reason).toBeNull()
+    const next = JSON.parse(sessionStorage.getItem(progressKey)!)
+    expect(next.userId).toBe(8); expect(next.registrationId).not.toBe(first.registrationId)
+    expect(JSON.parse(sessionStorage.getItem(historyKey)!).at(-1)).toMatchObject({ registrationId: first.registrationId, reason: 'cancelled:account-changed' })
+  })
+  it('adopts a legacy B registration with old suppression and stale A progress after rebuilding the controller', async () => {
+    create(); recordGuideRegistration(state.user!); await settle(); controller!.exit(); controller!.destroy()
+    state.user = { id: 8, role: 'user' }; localStorage.setItem('auth_user', JSON.stringify(state.user))
+    const next = { version: FLOW_VERSION, userId: 8, registrationId: 'b'.repeat(32), expiresAt: Date.now() + 10_000 }
+    sessionStorage.setItem(registrationKey, JSON.stringify(next)); sessionStorage.setItem(suppressedKey, '1')
+    sessionStorage.setItem(progressKey, JSON.stringify(progress({ path: '/old-route' })))
+    create(); await controller!.update(); await settle()
+    expect(controller!.status().step).toBe('welcome')
+    expect(JSON.parse(sessionStorage.getItem(progressKey)!)).toMatchObject(next)
+    expect(sessionStorage.getItem(suppressedKey)).toBeNull()
+    controller!.exit(); controller!.destroy(); create(); await controller!.update(); await settle()
+    expect(controller!.status().active).toBe(false)
+    expect(document.querySelector('[data-s2o-step="welcome"]')).toBeNull()
+  })
+  it('waits for B auth to match local storage without deleting B through stale A state', async () => {
+    create(); await controller!.update()
+    const next = { version: FLOW_VERSION, userId: 8, registrationId: 'b'.repeat(32), expiresAt: Date.now() + 10_000 }
+    sessionStorage.setItem(registrationKey, JSON.stringify(next))
+    localStorage.setItem('auth_user', JSON.stringify({ id: 8, role: 'user' }))
+    window.dispatchEvent(new StorageEvent('storage', { key: 'auth_user' }))
+    await controller!.update()
+    expect(JSON.parse(sessionStorage.getItem(registrationKey)!)).toEqual(next)
+    expect(controller!.status().active).toBe(false)
+    state.user = { id: 8, role: 'user' }; await controller!.update(); await settle()
+    expect(controller!.status().step).toBe('welcome')
+    expect(JSON.parse(sessionStorage.getItem(progressKey)!)).toMatchObject({ userId: 8 })
+  })
+  it.each(['launch', 'continue'])('hands a new registration to B after the old pending %s settles without a DOM wakeup', async kind => {
+    vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} takeRecords() { return [] } })
+    let pending: Promise<unknown>
+    if (kind === 'launch') {
+      state.path = '/custom/onboarding-quick-start'; history.replaceState({}, '', state.path)
+      sessionStorage.setItem(progressKey, JSON.stringify(progress({ moduleId: 'quick-start', step: 'quick-test', path: state.path })))
+      create({ getPublicSettings: () => ({ custom_menu_items: [{ id: 'onboarding-quick-start', visibility: 'user' }] }) })
+      pending = controller!.update(); await flushPromises()
+    } else {
+      document.querySelector('[role="dialog"]')!.remove()
+      create({ config: normalizeConfig({ schemaVersion: 1, modules: [{ id: 'more', enabled: true }, { id: 'keys', enabled: true }] }) })
+      recordGuideRegistration(state.user!); await settle()
+      await nextGuideStep(); await nextGuideStep(); await nextGuideStep()
+      expect(controller!.status().paused).toBe(true)
+      document.querySelector('[data-tour="keys-create-btn"]')!.remove()
+      pending = controller!.continue(); await flushPromises()
+    }
+    expect(controller!.status().launching).toBe(true)
+    state.user = { id: 8, role: 'user' }; localStorage.setItem('auth_user', JSON.stringify(state.user))
+    recordGuideRegistration(state.user!)
+    await pending; await settle()
+    expect(controller!.status().step).toBe('welcome')
+    expect(controller!.status().launching).toBe(false)
+    expect(JSON.parse(sessionStorage.getItem(progressKey)!)).toMatchObject({ userId: 8 })
+    expect(document.querySelectorAll('[data-s2o-step="welcome"]')).toHaveLength(1)
+  })
+  it('does not reopen an accepted registration when removing its record fails and the user exits', async () => {
+    create()
+    const remove = Storage.prototype.removeItem
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === registrationKey) throw new DOMException('Denied')
+      return remove.call(this, key)
+    })
+    recordGuideRegistration(state.user!); await settle()
+    expect(controller!.status().step).toBe('welcome'); controller!.exit()
+    expect(sessionStorage.getItem(registrationKey)).not.toBeNull()
+    for (let i = 0; i < 3; i++) { await controller!.update(); await settle() }
+    expect(controller!.status().active).toBe(false)
+    expect(document.querySelector('[data-s2o-step="welcome"]')).toBeNull()
+    expect(sessionStorage.getItem(suppressedKey)).toBe('1')
+  })
+  it('retains B registration until its old suppression can be cleared safely', async () => {
+    create(); await controller!.replay('more'); controller!.exit()
+    state.user = { id: 8, role: 'user' }; localStorage.setItem('auth_user', JSON.stringify(state.user))
+    const remove = Storage.prototype.removeItem
+    const denied = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === suppressedKey) throw new DOMException('Denied')
+      return remove.call(this, key)
+    })
+    try {
+      recordGuideRegistration(state.user!); await controller!.update(); await settle()
+      expect(controller!.status().active).toBe(false)
+      expect(JSON.parse(sessionStorage.getItem(registrationKey)!)).toMatchObject({ userId: 8 })
+    } finally { denied.mockRestore() }
+    await controller!.update(); await settle()
+    expect(controller!.status().step).toBe('welcome')
+    expect(JSON.parse(sessionStorage.getItem(progressKey)!)).toMatchObject({ userId: 8 })
+  })
   it('keeps viewed markers on guide exit and same-account refresh but clears them on account boundaries', async () => {
     create(); await controller!.replay('more'); controller!.exit()
     expect(controller!.status().viewedModules).toEqual(['more'])

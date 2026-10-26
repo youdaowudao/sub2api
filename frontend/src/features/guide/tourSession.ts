@@ -209,6 +209,12 @@ export function createTourSession(driverFactory: any, options: { storage?: Stora
     return show(selector, settings);
   }
   return { start, show, stop: (reason?: string) => active?.stop(reason), refresh: () => { active?.engine?.refresh(); active?.position.refresh(); active?.attention.refresh(); }, history, resources,
+    resetForRegistration() {
+      if (active || !zero()) return false;
+      try { storage?.removeItem(storageKey); } catch { return false; }
+      suppressed = false;
+      return true;
+    },
     pause() {
       if (!active) return false;
       active.stop('paused:chapter');

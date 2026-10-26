@@ -2,6 +2,7 @@ import { FLOW_VERSION } from './steps'
 
 export interface GuideUser { id: number; role: string }
 export interface RegistrationRecord { version: string; userId: number; registrationId: string; expiresAt: number }
+export interface RegistrationOwner { userId: number; registrationId?: string }
 export const registrationKey = 's2o:registration:v1'
 export const progressKey = 's2o:progress:v1'
 export const suppressedKey = 's2o:visit-suppressed:v1'
@@ -14,9 +15,16 @@ export function readSessionValue(key: string): string | null {
 export function writeSessionValue(key: string, value: string | null): void {
   try { value === null ? sessionStorage.removeItem(key) : sessionStorage.setItem(key, value) } catch { /* Business pages keep working without storage. */ }
 }
-export function clearRegistrationProgress(): void {
-  writeSessionValue(registrationKey, null)
-  writeSessionValue(progressKey, null)
+export function clearRegistrationProgress(owner: RegistrationOwner | null): void {
+  for (const key of [registrationKey, progressKey]) {
+    let stored: string | null
+    try { stored = sessionStorage.getItem(key) } catch { continue }
+    if (!stored) continue
+    let record: RegistrationOwner | null
+    try { record = JSON.parse(stored) } catch { record = null }
+    const bound = record && Number.isSafeInteger(record.userId) && record.userId > 0 && typeof record.registrationId === 'string' && /^[a-f0-9]{32}$/.test(record.registrationId)
+    if (!bound || (owner && record!.userId === owner.userId && (owner.registrationId === undefined || record!.registrationId === owner.registrationId))) writeSessionValue(key, null)
+  }
 }
 export function isRegistrationRecord(record: unknown, userId: number, now = Date.now()): record is RegistrationRecord {
   const value = record as RegistrationRecord | null
@@ -35,6 +43,8 @@ export function recordGuideRegistration(user: GuideUser): void {
     const registrationId = [...crypto.getRandomValues(new Uint8Array(16))].map(value => value.toString(16).padStart(2, '0')).join('')
     const record: RegistrationRecord = { version: FLOW_VERSION, userId: user.id, registrationId, expiresAt: Date.now() + 1_800_000 }
     sessionStorage.setItem(registrationKey, JSON.stringify(record))
+    writeSessionValue(progressKey, null)
+    writeSessionValue(suppressedKey, null)
     for (const listener of listeners) { try { listener() } catch { /* A guide callback cannot break signup. */ } }
   } catch { /* Registration success and navigation never depend on this optional guide. */ }
 }
