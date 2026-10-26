@@ -231,6 +231,7 @@ type UpdateSettingsRequest struct {
 	OpsMonitoringEnabled         *bool   `json:"ops_monitoring_enabled"`
 	OpsRealtimeMonitoringEnabled *bool   `json:"ops_realtime_monitoring_enabled"`
 	OpsQueryModeDefault          *string `json:"ops_query_mode_default"`
+	CacheHitRateDefaultRange     *string `json:"cache_hit_rate_default_range"`
 	OpsMetricsIntervalSeconds    *int    `json:"ops_metrics_interval_seconds"`
 
 	MinClaudeCodeVersion string `json:"min_claude_code_version"`
@@ -391,6 +392,7 @@ type UpdateSettingsRequest struct {
 	AuthSourceDingTalkPlatformQuotas map[string]*service.DefaultPlatformQuotaSetting `json:"auth_source_default_dingtalk_platform_quotas"`
 
 	AllowUserViewErrorRequests *bool `json:"allow_user_view_error_requests"`
+	AllowUserViewCacheHitRate  *bool `json:"allow_user_view_cache_hit_rate"`
 }
 
 // UpdateSettings 更新系统设置
@@ -560,6 +562,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		if !middleware.EnforceStepUpAlways(c, h.totpService, h.userService) {
 			return
 		}
+	}
+
+	if req.CacheHitRateDefaultRange != nil && *req.CacheHitRateDefaultRange != service.ParseCacheHitRateDefaultRange(*req.CacheHitRateDefaultRange) {
+		response.BadRequest(c, "cache_hit_rate_default_range must be today, yesterday or yesterdayAndToday")
+		return
 	}
 
 	// 验证参数
@@ -1681,6 +1688,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.AllowUserViewErrorRequests
 		}(),
+		AllowUserViewCacheHitRate: func() bool {
+			if req.AllowUserViewCacheHitRate != nil {
+				return *req.AllowUserViewCacheHitRate
+			}
+			return previousSettings.AllowUserViewCacheHitRate
+		}(),
 		OpsMonitoringEnabled: func() bool {
 			if req.OpsMonitoringEnabled != nil {
 				return *req.OpsMonitoringEnabled
@@ -1698,6 +1711,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.OpsQueryModeDefault
 			}
 			return previousSettings.OpsQueryModeDefault
+		}(),
+		CacheHitRateDefaultRange: func() string {
+			if req.CacheHitRateDefaultRange != nil {
+				return *req.CacheHitRateDefaultRange
+			}
+			return previousSettings.CacheHitRateDefaultRange
 		}(),
 		OpsMetricsIntervalSeconds: func() int {
 			if req.OpsMetricsIntervalSeconds != nil {
@@ -2338,6 +2357,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		OpsMonitoringEnabled:                                   updatedSettings.OpsMonitoringEnabled,
 		OpsRealtimeMonitoringEnabled:                           updatedSettings.OpsRealtimeMonitoringEnabled,
 		OpsQueryModeDefault:                                    updatedSettings.OpsQueryModeDefault,
+		CacheHitRateDefaultRange:                               updatedSettings.CacheHitRateDefaultRange,
 		OpsMetricsIntervalSeconds:                              updatedSettings.OpsMetricsIntervalSeconds,
 		MinClaudeCodeVersion:                                   updatedSettings.MinClaudeCodeVersion,
 		MaxClaudeCodeVersion:                                   updatedSettings.MaxClaudeCodeVersion,
@@ -2457,6 +2477,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		CyberSessionBlockTTLSeconds: updatedSettings.CyberSessionBlockTTLSeconds,
 		AccountSchedulingThresholds: updatedSettings.AccountSchedulingThresholds,
 		AllowUserViewErrorRequests:  updatedSettings.AllowUserViewErrorRequests,
+		AllowUserViewCacheHitRate:   updatedSettings.AllowUserViewCacheHitRate,
 	}
 	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
 		slog.Error("openai_fast_policy_settings_get_failed", "error", err)

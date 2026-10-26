@@ -722,3 +722,27 @@ func (h *UsageHandler) GetMyAPIKeyDailyUsage(c *gin.Context) {
 		"end_date":   endTime.AddDate(0, 0, -1).Format("2006-01-02"),
 	})
 }
+
+// CacheHitRate is opt-in and always scoped to the authenticated user.
+func (h *UsageHandler) CacheHitRate(c *gin.Context) {
+	if h.settingService == nil || !h.settingService.IsUserCacheHitRateViewAllowed(c.Request.Context()) {
+		response.Forbidden(c, "cache rate is not enabled by administrator")
+		return
+	}
+	start, end, err := service.ResolveCacheHitRateWindow(c.Query("start_date"), c.Query("end_date"), c.Query("timezone"), time.Now())
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	parsed, ok := h.parseUserUsageFilters(c, false)
+	if !ok {
+		return
+	}
+	parsed.Filters.StartTime, parsed.Filters.EndTime = &start, &end
+	items, err := h.usageService.GetCacheHitRateStats(c.Request.Context(), parsed.Filters, "total", nil)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, usagestats.CacheHitRateResult{StartDate: start.Format("2006-01-02"), EndDate: end.AddDate(0, 0, -1).Format("2006-01-02"), Items: items})
+}

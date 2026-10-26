@@ -7914,6 +7914,31 @@
           </div>
         </div>
 
+        <div class="card" data-testid="cache-rate-settings">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+            <h3 class="text-lg font-medium text-gray-900 dark:text-white">{{ t('admin.settings.features.cacheHitRate.title') }}</h3>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.cacheHitRate.description') }}</p>
+          </div>
+          <div class="space-y-6 p-6">
+            <label class="flex items-start gap-3">
+              <input v-model="form.allow_user_view_cache_hit_rate" type="checkbox" class="mt-1" data-testid="allow-user-cache-rate" />
+              <span>
+                <span class="block font-medium">{{ t('admin.settings.features.cacheHitRate.allowUser') }}</span>
+                <span class="mt-1 block text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.cacheHitRate.allowUserHint') }}</span>
+              </span>
+            </label>
+            <div>
+              <label class="input-label" for="cache-hit-rate-default-range">{{ t('admin.settings.features.cacheHitRate.defaultRange') }}</label>
+              <select id="cache-hit-rate-default-range" v-model="form.cache_hit_rate_default_range" class="input max-w-xs">
+                <option value="today">{{ t('dates.today') }}</option>
+                <option value="yesterday">{{ t('dates.yesterday') }}</option>
+                <option value="yesterdayAndToday">{{ t('dates.yesterdayAndToday') }}</option>
+              </select>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('admin.settings.features.cacheHitRate.defaultRangeHint') }}</p>
+            </div>
+          </div>
+        </div>
+
         </div><!-- /Tab: Features -->
 
         <!-- Tab: Email -->
@@ -8977,6 +9002,7 @@
 </template>
 
 <script setup lang="ts">
+import { normalizeCacheHitRateRange } from '@/utils/dateRange';
 import { sortGroupsForDisplay } from "@/utils/groupDisplayOrder";
 import GuideSettingsCard from '@/features/guide/components/GuideSettingsCard.vue';
 import { ref, reactive, computed, onMounted, watch } from "vue";
@@ -10074,6 +10100,8 @@ const form = reactive<SettingsForm>({
   affiliate_enabled: false,
   // Allow user view error requests
   allow_user_view_error_requests: false,
+  allow_user_view_cache_hit_rate: false,
+  cache_hit_rate_default_range: "today",
 });
 
 // 人机验证 UI 状态：单卡片「总开关 + 服务商单选」，落库仍是三个独立
@@ -11064,6 +11092,7 @@ async function loadSettings() {
     if (settings.openai_oauth_scheduling_rate_multiplier === null) {
       form.openai_oauth_scheduling_rate_multiplier = null;
     }
+    form.cache_hit_rate_default_range = normalizeCacheHitRateRange(form.cache_hit_rate_default_range);
     syncCaptchaProviderSelection();
     if (!form.claude_oauth_system_prompt_blocks?.trim()) {
       form.claude_oauth_system_prompt_blocks =
@@ -11807,6 +11836,8 @@ async function saveSettings() {
       // Affiliate (邀请返利) feature switch
       affiliate_enabled: form.affiliate_enabled,
       allow_user_view_error_requests: form.allow_user_view_error_requests,
+      allow_user_view_cache_hit_rate: form.allow_user_view_cache_hit_rate,
+      cache_hit_rate_default_range: form.cache_hit_rate_default_range,
     };
 
     // 仅当 openai_fast_policy_settings 已成功从后端加载时才回写，
@@ -11850,6 +11881,8 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
+    adminSettingsStore.setCacheHitRateDefaultRangeLocal(normalizeCacheHitRateRange(updated.cache_hit_rate_default_range ?? payload.cache_hit_rate_default_range));
+
     for (const [key, value] of Object.entries(updated)) {
       if (key === "openai_fast_policy_settings") continue;
       if (value !== null && value !== undefined) {

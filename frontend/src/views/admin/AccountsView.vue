@@ -296,6 +296,9 @@
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
           </template>
+          <template #cell-cache_hit_rate="{ row }">
+            <CacheHitRateCell :item="cacheHitRateByAccountId[row.id]" :loading="cacheHitRateLoading" :error="cacheHitRateError" />
+          </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
               :stats="todayStatsByAccountId[String(row.id)] ?? null"
@@ -496,6 +499,9 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
+import type { CacheHitRateItem } from '@/types'
+import CacheHitRateCell from '@/components/admin/usage/CacheHitRateCell.vue'
+import { useCacheHitRateDefaultRange } from '@/composables/useCacheHitRateDefaultRange'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
@@ -894,7 +900,31 @@ const queueBatchedUsage = (account: Account, options?: { force?: boolean }) => {
   }, 0)
 }
 
+const cacheHitRateByAccountId = ref<Record<number, CacheHitRateItem>>({})
+const cacheHitRateLoading = ref(false)
+const cacheHitRateError = ref<string | null>(null)
+let cacheHitRateReqSeq = 0
+const { dates: cacheHitRateDates } = useCacheHitRateDefaultRange(() => { void refreshCacheHitRateBatch() })
+const refreshCacheHitRateBatch = async () => {
+  const seq = ++cacheHitRateReqSeq
+  if (hiddenColumns.has('cache_hit_rate')) { cacheHitRateLoading.value = false; return }
+  const ids = accounts.value.map(account => account.id)
+  cacheHitRateByAccountId.value = {}; cacheHitRateError.value = null
+  if (!ids.length) { cacheHitRateLoading.value = false; return }
+  cacheHitRateLoading.value = true
+  const dates = cacheHitRateDates.value
+  try {
+    const result = await adminAPI.usage.getCacheHitRate({ dimension: 'account', account_ids: ids.join(','), start_date: dates.start, end_date: dates.end })
+    if (seq !== cacheHitRateReqSeq) return
+    cacheHitRateByAccountId.value = Object.fromEntries(result.items.map(item => [item.id, item]))
+  } catch (error) {
+    if (seq !== cacheHitRateReqSeq) return
+    cacheHitRateError.value = extractApiErrorMessage(error)
+  } finally { if (seq === cacheHitRateReqSeq) cacheHitRateLoading.value = false }
+}
+
 const refreshTodayStatsBatch = async () => {
+  void refreshCacheHitRateBatch()
   // Why this checks both columns:
   // - today_stats column shows dedicated today's metrics.
   // - usage column also embeds today's stats for Key/Bedrock rows.
@@ -1075,6 +1105,7 @@ const toggleColumn = (key: string) => {
     hiddenColumns.add(key)
   }
   saveColumnsToStorage()
+  if (key === 'cache_hit_rate') void refreshCacheHitRateBatch()
   if ((key === 'today_stats' || key === 'usage') && wasHidden) {
     refreshTodayStatsBatch().catch((error) => {
       console.error('Failed to load account today stats after showing column:', error)
@@ -1830,7 +1861,8 @@ const allColumns = computed(() => {
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
-    { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
+    { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false },
+    { key: 'cache_hit_rate', label: t('admin.accounts.columns.cacheHitRate'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
     c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
@@ -2603,6 +2635,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  cacheHitRateReqSeq++
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {
     clearTimeout(usageBatchFlushTimer)

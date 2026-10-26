@@ -33,6 +33,7 @@ const {
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    usage: { getCacheHitRate: vi.fn().mockResolvedValue({ items: [] }) },
     accounts: {
       list: listAccounts,
       listWithEtag,
@@ -580,3 +581,5 @@ describe('admin AccountsView — 账号行展示', () => {
     wrapper.unmount()
   })
 })
+
+vi.mock('@/composables/useCacheHitRateDefaultRange', () => ({ useCacheHitRateDefaultRange: () => ({ dates: { value: { start: '2026-10-26', end: '2026-10-26' } } }) }))

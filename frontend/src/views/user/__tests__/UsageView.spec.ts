@@ -5,9 +5,11 @@ import UsageView from '../UsageView.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'
+import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'
 
 const {
   query,
+  getCacheHitRate,
   getStats,
   getDashboardModels,
   getDashboardSnapshotV2,
@@ -20,6 +22,7 @@ const {
   showInfo,
 } = vi.hoisted(() => ({
   query: vi.fn(),
+  getCacheHitRate: vi.fn(),
   getStats: vi.fn(),
   getDashboardModels: vi.fn(),
   getDashboardSnapshotV2: vi.fn(),
@@ -78,6 +81,7 @@ const messages: Record<string, string> = {
 vi.mock('@/api', () => ({
   usageAPI: {
     query,
+    getCacheHitRate,
     getStats,
     getDashboardModels,
     getDashboardSnapshotV2,
@@ -113,6 +117,9 @@ vi.mock('vue-i18n', async () => {
     }),
   }
 })
+
+const { reactive: makeReactive } = await import('vue')
+appStoreState.cachedPublicSettings = makeReactive(appStoreState.cachedPublicSettings)
 
 const simpleStub = { template: '<div><slot /></div>' }
 const chartStub = { template: '<div />' }
@@ -158,7 +165,7 @@ function mountUsageView() {
         Select: true,
         DateRangePicker: true,
         Icon: true,
-        UsageStatsCards: chartStub,
+        UsageStatsCards: { ...chartStub, props: ['cacheHitRate'] },
         UsageTable: { ...chartStub, props: ['columns'] },
         UserErrorRequestsTable: chartStub,
         ModelDistributionChart: chartStub,
@@ -172,6 +179,9 @@ function mountUsageView() {
 
 describe('user UsageView', () => {
   beforeEach(() => {
+    getCacheHitRate.mockReset()
+    appStoreState.cachedPublicSettings.allow_user_view_cache_hit_rate = false
+    getCacheHitRate.mockResolvedValue({ items: [{ cache_hit_rate: 90 }] })
     query.mockReset()
     getStats.mockReset()
     getDashboardModels.mockReset()
@@ -230,7 +240,33 @@ describe('user UsageView', () => {
     wrapper.unmount(); vi.useRealTimers()
   })
 
-  it('loads logs, stats, model stats, and snapshot on first render', async () => {
+  it('supplements a late enabled cache-rate setting and clears late replies after disabling', async () => {
+    const wrapper = mountUsageView(); await flushPromises()
+    expect(getCacheHitRate).not.toHaveBeenCalled()
+    expect(wrapper.findComponent(UsageStatsCards).props('cacheHitRate')).toBeUndefined()
+    appStoreState.cachedPublicSettings.allow_user_view_cache_hit_rate = true
+    await flushPromises()
+    expect(getCacheHitRate).toHaveBeenCalledTimes(1)
+    expect(wrapper.findComponent(UsageStatsCards).props('cacheHitRate').rate).toBe(90)
+    let resolve!: (v: unknown) => void
+    getCacheHitRate.mockImplementationOnce(() => new Promise(r => { resolve = r }))
+    ;(wrapper.vm as any).refreshData(); await flushPromises()
+    appStoreState.cachedPublicSettings.allow_user_view_cache_hit_rate = false
+    await flushPromises(); resolve({ items: [{ cache_hit_rate: 55 }] }); await flushPromises()
+    expect(wrapper.findComponent(UsageStatsCards).props('cacheHitRate')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('silently hides the optional rate after a forbidden response', async () => {
+    appStoreState.cachedPublicSettings.allow_user_view_cache_hit_rate = true
+    getCacheHitRate.mockRejectedValueOnce({ status: 403, message: 'disabled' })
+    const wrapper = mountUsageView(); await flushPromises()
+    expect(wrapper.findComponent(UsageStatsCards).props('cacheHitRate')).toBeUndefined()
+    expect(showError).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('loads logs, stats, model stats, and snapshot on first render' , async () => {
     const wrapper = mountUsageView()
     await flushPromises()
 

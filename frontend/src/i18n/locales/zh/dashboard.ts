@@ -338,6 +338,15 @@ export default {
 
   // Usage
   usage: {
+    cacheRate: '缓存率',
+    cacheRateAccounts: '账号缓存率',
+    cacheRateAccount: '账号',
+    cacheRateRequests: '请求数',
+    cacheRateNoAccounts: '暂无账号调用记录',
+    cacheRateFormula: '缓存率 = 缓存读取 ÷（输入 + 缓存读取 + 缓存创建），最多统计到昨天和今天',
+    cacheRateLoadFailed: '缓存率读取失败：{reason}。其他统计不受影响，可点刷新重试。',
+    cacheRateAccountsFailed: '账号缓存率读取失败：{reason}。可点刷新重试。',
+
     title: '使用记录',
     description: '查看和分析您的 API 使用历史',
     costDetails: '费用明细',

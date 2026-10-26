@@ -406,6 +406,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpsMonitoringEnabled] = strconv.FormatBool(settings.OpsMonitoringEnabled)
 	updates[SettingKeyOpsRealtimeMonitoringEnabled] = strconv.FormatBool(settings.OpsRealtimeMonitoringEnabled)
 	updates[SettingKeyOpsQueryModeDefault] = string(ParseOpsQueryMode(settings.OpsQueryModeDefault))
+	updates[SettingKeyCacheHitRateDefaultRange] = ParseCacheHitRateDefaultRange(settings.CacheHitRateDefaultRange)
 	if settings.OpsMetricsIntervalSeconds > 0 {
 		updates[SettingKeyOpsMetricsIntervalSeconds] = strconv.Itoa(settings.OpsMetricsIntervalSeconds)
 	}
@@ -558,6 +559,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	}
 
 	updates[SettingKeyAllowUserViewErrorRequests] = strconv.FormatBool(settings.AllowUserViewErrorRequests)
+	updates[SettingKeyAllowUserViewCacheHitRate] = strconv.FormatBool(settings.AllowUserViewCacheHitRate)
 
 	return updates, nil
 }

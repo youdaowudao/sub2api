@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
+      <UsageStatsCards :cache-hit-rate="showCacheHitRate ? cacheHitRate : undefined" :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
 
       <div class="space-y-4">
         <div class="card p-4">
@@ -219,6 +219,7 @@
 </template>
 
 <script setup lang="ts">
+import { extractApiErrorMessage } from '@/utils/apiError'
 import { buildGroupSelectOptions } from '@/utils/groupDisplayOrder'
 import { getTodayRangeDates } from '@/utils/dateRange'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
@@ -458,7 +459,39 @@ const loadLogs = async () => {
   }
 }
 
+const cacheHitRateEnabled = computed(() => appStore.cachedPublicSettings?.allow_user_view_cache_hit_rate ?? false)
+const cacheHitRateForbidden = ref(false)
+const showCacheHitRate = computed(() => cacheHitRateEnabled.value && !cacheHitRateForbidden.value)
+const cacheHitRate = reactive({ loading: false, error: null as string | null, rate: null as number | null })
+let cacheHitRateReqSeq = 0
+const loadCacheHitRate = async () => {
+  if (!showCacheHitRate.value) return
+  const seq = ++cacheHitRateReqSeq
+  cacheHitRate.loading = true; cacheHitRate.error = null
+  try {
+    const result = await usageAPI.getCacheHitRate({ ...normalizedFilters.value })
+    if (seq !== cacheHitRateReqSeq) return
+    cacheHitRate.rate = result.items[0]?.cache_hit_rate ?? null
+  } catch (error) {
+    if (seq !== cacheHitRateReqSeq) return
+    const status = (error as { status?: number; response?: { status?: number } })?.status ?? (error as { response?: { status?: number } })?.response?.status
+    if (status === 403) { cacheHitRateForbidden.value = true; cacheHitRate.rate = null }
+    else cacheHitRate.error = extractApiErrorMessage(error)
+  } finally {
+    if (seq === cacheHitRateReqSeq) cacheHitRate.loading = false
+  }
+}
+watch(cacheHitRateEnabled, enabled => {
+  cacheHitRateForbidden.value = false
+  if (enabled) void loadCacheHitRate()
+  else {
+    cacheHitRateReqSeq++
+    cacheHitRate.rate = null; cacheHitRate.error = null; cacheHitRate.loading = false
+  }
+})
+
 const loadStats = async () => {
+  void loadCacheHitRate()
   const seq = ++statsReqSeq
   endpointStatsLoading.value = true
   try {
@@ -900,6 +933,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  cacheHitRateReqSeq++
   abortController?.abort()
   document.removeEventListener('click', handleColumnClickOutside)
 })

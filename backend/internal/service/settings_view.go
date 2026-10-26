@@ -195,6 +195,7 @@ type SystemSettings struct {
 	OpsMonitoringEnabled         bool
 	OpsRealtimeMonitoringEnabled bool
 	OpsQueryModeDefault          string
+	CacheHitRateDefaultRange     string
 	OpsMetricsIntervalSeconds    int
 
 	// Channel Monitor feature
@@ -319,6 +320,7 @@ type SystemSettings struct {
 
 	// 允许终端用户在用量页查看自己的失败请求
 	AllowUserViewErrorRequests bool
+	AllowUserViewCacheHitRate  bool
 }
 
 type DefaultSubscriptionSetting struct {
@@ -420,6 +422,7 @@ type PublicSettings struct {
 
 	// 允许终端用户在用量页查看自己的失败请求
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`
+	AllowUserViewCacheHitRate  bool `json:"allow_user_view_cache_hit_rate"`
 }
 
 type LoginAgreementDocument struct {

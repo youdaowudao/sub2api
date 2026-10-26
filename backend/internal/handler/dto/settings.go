@@ -190,6 +190,7 @@ type SystemSettings struct {
 	OpsMonitoringEnabled         bool   `json:"ops_monitoring_enabled"`
 	OpsRealtimeMonitoringEnabled bool   `json:"ops_realtime_monitoring_enabled"`
 	OpsQueryModeDefault          string `json:"ops_query_mode_default"`
+	CacheHitRateDefaultRange     string `json:"cache_hit_rate_default_range"`
 	OpsMetricsIntervalSeconds    int    `json:"ops_metrics_interval_seconds"`
 
 	MinClaudeCodeVersion string `json:"min_claude_code_version"`
@@ -357,6 +358,7 @@ type SystemSettings struct {
 
 	// 允许终端用户在用量页查看自己的失败请求
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`
+	AllowUserViewCacheHitRate  bool `json:"allow_user_view_cache_hit_rate"`
 }
 
 type DefaultSubscriptionSetting struct {
@@ -450,6 +452,7 @@ type PublicSettings struct {
 	RiskControlEnabled bool `json:"risk_control_enabled"`
 
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`
+	AllowUserViewCacheHitRate  bool `json:"allow_user_view_cache_hit_rate"`
 }
 
 type LoginAgreementDocument struct {

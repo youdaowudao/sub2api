@@ -5,6 +5,7 @@ import type { AdminGroup } from '@/types'
 import GroupsView from '../GroupsView.vue'
 
 const {
+  getCacheHitRate,
   listGroups,
   getAllGroups,
   getModelAllowlistCandidates,
@@ -18,6 +19,7 @@ const {
   nextStep,
   authState,
 } = vi.hoisted(() => ({
+  getCacheHitRate: vi.fn().mockResolvedValue({ items: [] }),
   listGroups: vi.fn(),
   getAllGroups: vi.fn(),
   getModelAllowlistCandidates: vi.fn(),
@@ -52,6 +54,7 @@ const messages: Record<string, string> = {
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    usage: { getCacheHitRate },
     groups: {
       list: listGroups,
       getAll: getAllGroups,
@@ -97,6 +100,8 @@ vi.mock('vue-i18n', async () => {
     }),
   }
 })
+
+vi.mock('@/composables/useCacheHitRateDefaultRange', () => ({ useCacheHitRateDefaultRange: () => ({ dates: { value: { start: '2026-10-26', end: '2026-10-26' } } }) }))
 
 const createGroup = (overrides: Partial<AdminGroup> = {}): AdminGroup => ({
   id: 1,
@@ -306,6 +311,7 @@ describe('admin GroupsView column settings', () => {
       'account_count',
       'capacity',
       'usage',
+      'cache_hit_rate',
       'status',
       'actions',
     ])
@@ -330,6 +336,7 @@ describe('admin GroupsView column settings', () => {
       'rate_multiplier',
       'is_exclusive',
       'account_count',
+      'cache_hit_rate',
       'status',
       'actions',
     ])
@@ -349,6 +356,7 @@ describe('admin GroupsView column settings', () => {
       'is_exclusive',
       'account_count',
       'capacity',
+      'cache_hit_rate',
       'status',
       'actions',
     ])
@@ -372,6 +380,7 @@ describe('admin GroupsView column settings', () => {
       'is_exclusive',
       'account_count',
       'capacity',
+      'cache_hit_rate',
       'status',
       'actions',
     ])
@@ -396,6 +405,7 @@ describe('admin GroupsView column settings', () => {
       'account_count',
       'capacity',
       'usage',
+      'cache_hit_rate',
       'status',
       'actions',
     ])
@@ -438,4 +448,14 @@ describe('admin GroupsView column settings', () => {
     expect(text.indexOf('Today')).toBeLessThan(text.indexOf('Yesterday'))
     expect(text.indexOf('Yesterday')).toBeLessThan(text.indexOf('Total'))
   })
+})
+
+it.each([false, true])('keeps the complete cache-rate column order in simple mode %s', async (simple) => {
+  authState.isSimpleMode = simple
+  const wrapper = await mountView(); await flushPromises()
+  const keys = (wrapper.vm as any).allColumns.map((c: { key: string }) => c.key)
+  expect(keys).toEqual(simple ? ['name','id','platform','account_count','cache_hit_rate','status','actions'] : ['name','id','platform','billing_type','rate_multiplier','is_exclusive','account_count','capacity','usage','cache_hit_rate','status','actions'])
+  expect(new Set(keys).size).toBe(keys.length)
+  expect((wrapper.vm as any).hiddenColumns.has('cache_hit_rate')).toBe(false)
+  wrapper.unmount(); authState.isSimpleMode = false
 })

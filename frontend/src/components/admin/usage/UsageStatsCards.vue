@@ -55,6 +55,10 @@
               </span>
             </span>
           </span>
+          <span v-if="cacheHitRate" data-testid="cache-hit-rate" class="inline-flex items-center gap-x-1">
+            <span>/</span>
+            <span :class="!cacheHitRate.loading && !cacheHitRate.error && cacheHitRate.rate != null ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'" :title="cacheHitRate.error ? t('usage.cacheRateLoadFailed', { reason: cacheHitRate.error }) : t('usage.cacheRateFormula')">{{ cacheHitRate.loading ? '…' : cacheHitRate.error ? '-' : formatCacheHitRate(cacheHitRate.rate) }}</span>
+          </span>
         </p>
       </div>
     </div>
@@ -93,11 +97,13 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import type { UsageStatsResponse } from '@/types'
+import { formatCacheHitRate } from '@/utils/format'
 import Icon from '@/components/icons/Icon.vue'
 
 const props = withDefaults(defineProps<{
   stats: (AdminUsageStatsResponse | UsageStatsResponse) | null
   showAccountCost?: boolean
+  cacheHitRate?: { loading: boolean; error: string | null; rate: number | null }
   strikeStandardCost?: boolean
 }>(), {
   showAccountCost: true,

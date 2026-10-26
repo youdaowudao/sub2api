@@ -43,6 +43,7 @@
             <tr class="text-gray-500 dark:text-gray-400">
               <th class="pb-2 text-left">{{ t('admin.dashboard.group') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.requests') }}</th>
+              <th v-if="cacheHitRate" class="pb-2 text-right" :title="cacheHitRate.error ? t('usage.cacheRateLoadFailed', { reason: cacheHitRate.error }) : t('usage.cacheRateFormula')">{{ t('usage.cacheRate') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.tokens') }}</th>
               <th class="pb-2 text-right">{{ t('admin.dashboard.actual') }}</th>
               <th v-if="showAccountCost" class="pb-2 text-right">{{ t('admin.dashboard.accountCost') }}</th>
@@ -70,6 +71,7 @@
                 <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
                   {{ formatNumber(group.requests) }}
                 </td>
+                <td v-if="cacheHitRate" data-testid="group-cache-hit-rate" class="py-1.5 text-right tabular-nums" :class="!cacheHitRate.loading && !cacheHitRate.error && cacheHitRate.byId[group.group_id] != null ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'" :title="t('usage.cacheRateFormula')">{{ cacheHitRate.loading ? '…' : cacheHitRate.error ? '-' : formatCacheHitRate(cacheHitRate.byId[group.group_id]) }}</td>
                 <td class="py-1.5 text-right text-gray-600 dark:text-gray-400">
                   {{ formatTokens(group.total_tokens) }}
                 </td>
@@ -112,6 +114,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
+import { formatCacheHitRate } from '@/utils/format'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
 import type { GroupStat, UserBreakdownItem } from '@/types'
@@ -125,6 +128,7 @@ type DistributionMetric = 'tokens' | 'actual_cost'
 
 const props = withDefaults(defineProps<{
   groupStats: GroupStat[]
+  cacheHitRate?: { loading: boolean; error: string | null; byId: Record<number, number | null> }
   loading?: boolean
   metric?: DistributionMetric
   showMetricToggle?: boolean
@@ -149,7 +153,7 @@ const expandedKey = ref<string | null>(null)
 const breakdownItems = ref<UserBreakdownItem[]>([])
 const breakdownLoading = ref(false)
 const showAccountCost = computed(() => props.showAccountCost)
-const distributionColspan = computed(() => showAccountCost.value ? 6 : 5)
+const distributionColspan = computed(() => (showAccountCost.value ? 6 : 5) + (props.cacheHitRate ? 1 : 0))
 
 const toggleBreakdown = async (type: string, id: number | string) => {
   const key = `${type}-${id}`

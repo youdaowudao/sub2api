@@ -9,6 +9,7 @@ const { listAccounts } = vi.hoisted(() => ({
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    usage: { getCacheHitRate: vi.fn().mockResolvedValue({ items: [] }) },
     accounts: {
       list: listAccounts,
       listWithEtag: vi.fn(),
@@ -150,3 +151,5 @@ describe('admin AccountsView priority column preferences', () => {
     expect(JSON.parse(localStorage.getItem('account-hidden-columns') || '[]')).not.toContain('priority')
   })
 })
+
+vi.mock('@/composables/useCacheHitRateDefaultRange', () => ({ useCacheHitRateDefaultRange: () => ({ dates: { value: { start: '2026-10-26', end: '2026-10-26' } } }) }))

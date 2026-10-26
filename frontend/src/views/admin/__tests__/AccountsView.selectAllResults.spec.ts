@@ -25,6 +25,7 @@ const {
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    usage: { getCacheHitRate: vi.fn().mockResolvedValue({ items: [] }) },
     accounts: {
       list: listAccounts,
       listWithEtag,
@@ -265,3 +266,5 @@ describe('admin AccountsView select all filtered results', () => {
     expect(showError).toHaveBeenCalledWith('admin.accounts.bulkActions.selectAllFailed')
   })
 })
+
+vi.mock('@/composables/useCacheHitRateDefaultRange', () => ({ useCacheHitRateDefaultRange: () => ({ dates: { value: { start: '2026-10-26', end: '2026-10-26' } } }) }))

@@ -4,7 +4,7 @@ import { defineComponent, ref } from 'vue'
 
 import UsageView from '../UsageView.vue'
 
-const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
+const { list, exportList, getCacheHitRate, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -14,6 +14,7 @@ const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listE
   return {
     list: vi.fn(),
 		exportList: vi.fn(),
+    getCacheHitRate: vi.fn().mockResolvedValue({ items: [] }),
     getStats: vi.fn(),
     getSnapshotV2: vi.fn(),
     getById: vi.fn(),
@@ -54,6 +55,7 @@ vi.mock('@/api/admin', () => ({
     usage: {
       list,
       getStats,
+      getCacheHitRate,
     },
     dashboard: {
       getSnapshotV2,
@@ -199,6 +201,42 @@ describe('admin UsageView route filters', () => {
   afterEach(() => {
     Object.keys(routeQuery).forEach((key) => delete routeQuery[key])
     vi.useRealTimers()
+  })
+
+  it('aligns cache-rate filters with the stats card and bypasses on refresh', async () => {
+    const wrapper = mountRouteFilteredUsageView(); await flushPromises()
+    const vm = wrapper.vm as any
+    getCacheHitRate.mockClear()
+    vm.filters = { ...vm.filters, group_id: 3, account_id: 7, model: 'fixture', billing_mode: 'token', request_type: 'stream', native_compaction_v2: true, billing_type: 1, upstream_model_mismatch: true }
+    vm.applyFilters(); await flushPromises()
+    for (const dimension of ['total', 'group', 'account']) {
+      expect(getCacheHitRate).toHaveBeenCalledWith(expect.objectContaining({ dimension, group_id: 3, account_id: 7, model: 'fixture', billing_mode: 'token', native_compaction_v2: true, upstream_model_mismatch: true }))
+    }
+    vm.refreshData(); await flushPromises()
+    expect(getCacheHitRate).toHaveBeenLastCalledWith(expect.objectContaining({ nocache: 1 }))
+    wrapper.unmount()
+  })
+
+  it('rejects stale replies and keeps each cache-rate failure independent', async () => {
+    const pending: Array<{ dimension: string; resolve: (value: unknown) => void; reject: (error: unknown) => void }> = []
+    getCacheHitRate.mockImplementationOnce(({ dimension }) => new Promise((resolve, reject) => { pending.push({ dimension, resolve, reject }) }))
+      .mockImplementationOnce(({ dimension }) => new Promise((resolve, reject) => { pending.push({ dimension, resolve, reject }) }))
+      .mockImplementationOnce(({ dimension }) => new Promise((resolve, reject) => { pending.push({ dimension, resolve, reject }) }))
+    const wrapper = mountRouteFilteredUsageView(); await flushPromises()
+    getCacheHitRate.mockImplementation(async ({ dimension }) => {
+      if (dimension === 'group') throw { message: 'fixture query unavailable' }
+      return { items: [{ id: 7, name: 'Latest', requests: 2, cache_hit_rate: 80 }] }
+    })
+    ;(wrapper.vm as any).applyFilters(); await flushPromises()
+    expect((wrapper.vm as any).cacheHitRateTotal.rate).toBe(80)
+    expect((wrapper.vm as any).cacheHitRateGroups.error).toBe('fixture query unavailable')
+    expect(wrapper.text()).toContain('Latest')
+    for (const reply of pending) reply.resolve({ items: [{ id: 9, name: 'Stale', cache_hit_rate: 10 }] })
+    await flushPromises()
+    expect((wrapper.vm as any).cacheHitRateTotal.rate).toBe(80)
+    expect(wrapper.text()).not.toContain('Stale')
+    expect((wrapper.vm as any).usageStats.total_requests).toBe(0)
+    getCacheHitRate.mockReset().mockResolvedValue({ items: [] }); wrapper.unmount()
   })
 
   it('keeps routed historical dates, then resets every range consumer to the new local today', async () => {

@@ -817,6 +817,7 @@ func TestAPIContracts(t *testing.T) {
 						"ops_monitoring_enabled": false,
 						"ops_realtime_monitoring_enabled": true,
 						"ops_query_mode_default": "auto",
+						"cache_hit_rate_default_range": "today",
 						"ops_metrics_interval_seconds": 60,
 						"site_name": "Sub2API",
 						"site_logo": "",
@@ -1028,7 +1029,8 @@ func TestAPIContracts(t *testing.T) {
 					"wechat_connect_redirect_url": "",
 					"wechat_connect_frontend_redirect_url": "/auth/wechat/callback",
 					"wechat_connect_scopes": "snsapi_login",
-					"allow_user_view_error_requests": false
+					"allow_user_view_error_requests": false,
+					"allow_user_view_cache_hit_rate": false
 				}
 			}`,
 		},
@@ -1219,6 +1221,7 @@ func TestAPIContracts(t *testing.T) {
 					"ops_monitoring_enabled": false,
 					"ops_realtime_monitoring_enabled": true,
 					"ops_query_mode_default": "auto",
+					"cache_hit_rate_default_range": "today",
 					"ops_metrics_interval_seconds": 60,
 					"min_claude_code_version": "",
 					"max_claude_code_version": "",
@@ -1386,7 +1389,8 @@ func TestAPIContracts(t *testing.T) {
 					"auth_source_default_dingtalk_grant_on_signup": false,
 					"auth_source_default_dingtalk_grant_on_first_bind": false,
 					"force_email_on_third_party_signup": false,
-					"allow_user_view_error_requests": false
+					"allow_user_view_error_requests": false,
+					"allow_user_view_cache_hit_rate": false
 				}
 			}`,
 		},

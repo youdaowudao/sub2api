@@ -183,6 +183,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpsMonitoringEnabled:         "true",
 		SettingKeyOpsRealtimeMonitoringEnabled: "true",
 		SettingKeyOpsQueryModeDefault:          "auto",
+		SettingKeyCacheHitRateDefaultRange:     "today",
 		SettingKeyOpsMetricsIntervalSeconds:    "60",
 
 		// Channel monitor defaults (enabled, 60s)
@@ -270,6 +271,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky:         "",
 
 		SettingKeyAllowUserViewErrorRequests: "false",
+		SettingKeyAllowUserViewCacheHitRate:  "false",
 	}
 
 	return s.settingRepo.SetMultiple(ctx, defaults)
@@ -787,6 +789,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpsMonitoringEnabled = !isFalseSettingValue(settings[SettingKeyOpsMonitoringEnabled])
 	result.OpsRealtimeMonitoringEnabled = !isFalseSettingValue(settings[SettingKeyOpsRealtimeMonitoringEnabled])
 	result.OpsQueryModeDefault = string(ParseOpsQueryMode(settings[SettingKeyOpsQueryModeDefault]))
+	result.CacheHitRateDefaultRange = ParseCacheHitRateDefaultRange(settings[SettingKeyCacheHitRateDefaultRange])
 	result.OpsMetricsIntervalSeconds = 60
 	if raw := strings.TrimSpace(settings[SettingKeyOpsMetricsIntervalSeconds]); raw != "" {
 		if v, err := strconv.Atoi(raw); err == nil {
@@ -992,6 +995,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 
 	result.AllowUserViewErrorRequests = settings[SettingKeyAllowUserViewErrorRequests] == "true" // default false
+	result.AllowUserViewCacheHitRate = settings[SettingKeyAllowUserViewCacheHitRate] == "true"   // default false
 
 	// Publish Grok default model_mapping options for accounts with empty mapping.
 	xai.SetRuntimeModelMappingOptions(xai.ModelMappingOptions{

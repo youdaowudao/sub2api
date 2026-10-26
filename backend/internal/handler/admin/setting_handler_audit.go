@@ -395,6 +395,12 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.OpsRealtimeMonitoringEnabled != after.OpsRealtimeMonitoringEnabled {
 		changed = append(changed, "ops_realtime_monitoring_enabled")
 	}
+	if before.AllowUserViewCacheHitRate != after.AllowUserViewCacheHitRate {
+		changed = append(changed, "allow_user_view_cache_hit_rate")
+	}
+	if before.CacheHitRateDefaultRange != after.CacheHitRateDefaultRange {
+		changed = append(changed, "cache_hit_rate_default_range")
+	}
 	if before.OpsQueryModeDefault != after.OpsQueryModeDefault {
 		changed = append(changed, "ops_query_mode_default")
 	}

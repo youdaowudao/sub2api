@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { adminAPI } from '@/api'
+import { normalizeCacheHitRateRange } from '@/utils/dateRange'
 import type { CustomMenuItem } from '@/types'
 
 export const useAdminSettingsStore = defineStore('adminSettings', () => {
@@ -48,6 +49,8 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
   const opsMonitoringEnabled = ref(readCachedBool('ops_monitoring_enabled_cached', true))
   const opsRealtimeMonitoringEnabled = ref(readCachedBool('ops_realtime_monitoring_enabled_cached', true))
   const opsQueryModeDefault = ref(readCachedString('ops_query_mode_default_cached', 'auto'))
+  const cacheHitRateDefaultRange = ref(normalizeCacheHitRateRange(readCachedString('cache_hit_rate_default_range_cached', 'today')))
+  let cacheHitRateDefaultRangeLocalVersion = 0
   const paymentEnabled = ref(readCachedBool('payment_enabled_cached', false))
   const customMenuItems = ref<CustomMenuItem[]>([])
 
@@ -55,6 +58,7 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
     if (loaded.value && !force) return
     if (loading.value) return
 
+    const rangeVersion = cacheHitRateDefaultRangeLocalVersion
     loading.value = true
     try {
       const [settings, paymentConfigResp] = await Promise.all([
@@ -69,6 +73,11 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
 
       opsQueryModeDefault.value = settings.ops_query_mode_default || 'auto'
       writeCachedString('ops_query_mode_default_cached', opsQueryModeDefault.value)
+
+      if (rangeVersion === cacheHitRateDefaultRangeLocalVersion) {
+        cacheHitRateDefaultRange.value = normalizeCacheHitRateRange(settings.cache_hit_rate_default_range)
+        writeCachedString('cache_hit_rate_default_range_cached', cacheHitRateDefaultRange.value)
+      }
 
       customMenuItems.value = Array.isArray(settings.custom_menu_items) ? settings.custom_menu_items : []
 
@@ -108,6 +117,13 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
     loaded.value = true
   }
 
+  function setCacheHitRateDefaultRangeLocal(value: string) {
+    cacheHitRateDefaultRangeLocalVersion++
+    cacheHitRateDefaultRange.value = normalizeCacheHitRateRange(value)
+    writeCachedString('cache_hit_rate_default_range_cached', cacheHitRateDefaultRange.value)
+    loaded.value = true
+  }
+
   // Keep UI consistent if we learn that ops is disabled via feature-gated 404s.
   // (event is dispatched from the axios interceptor)
   let eventHandlerCleanup: (() => void) | null = null
@@ -138,6 +154,8 @@ export const useAdminSettingsStore = defineStore('adminSettings', () => {
     opsMonitoringEnabled,
     opsRealtimeMonitoringEnabled,
     opsQueryModeDefault,
+    cacheHitRateDefaultRange,
+    setCacheHitRateDefaultRangeLocal,
     paymentEnabled,
     customMenuItems,
     fetch,

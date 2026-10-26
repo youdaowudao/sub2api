@@ -87,3 +87,21 @@ describe('UsageStatsCards', () => {
     expect(tooltip?.classes()).not.toContain('opacity-0')
   })
 })
+
+
+describe('optional cache rate', () => {
+  it('keeps the old card DOM when the option is absent', () => {
+    const wrapper = mount(UsageStatsCards, { props: { stats } })
+    expect(wrapper.find('[data-testid="cache-hit-rate"]').exists()).toBe(false)
+    expect(wrapper.findAll('span').filter(el => el.text() === '/')).toHaveLength(2)
+  })
+  it('shows the optional blue rate, loading and independent failure', async () => {
+    const wrapper = mount(UsageStatsCards, { props: { stats, cacheHitRate: { loading: false, error: null, rate: 90.3 } } })
+    expect(wrapper.find('[data-testid="cache-hit-rate"] .text-blue-600').text()).toBe('90.3%')
+    await wrapper.setProps({ cacheHitRate: { loading: true, error: null, rate: null } })
+    expect(wrapper.find('[data-testid="cache-hit-rate"]').text()).toContain('…')
+    await wrapper.setProps({ cacheHitRate: { loading: false, error: 'fixture offline', rate: null } })
+    expect(wrapper.find('[data-testid="cache-hit-rate"] [title]').attributes('title')).toContain('usage.cacheRateLoadFailed')
+    expect(wrapper.text()).toContain('Cache: 34')
+  })
+})

@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" />
+      <UsageStatsCards :stats="usageStats" :cache-hit-rate="cacheHitRateTotal" />
       <!-- Charts Section -->
       <div class="space-y-4">
         <div class="card p-4">
@@ -39,6 +39,7 @@
           <GroupDistributionChart
             v-model:metric="groupDistributionMetric"
             :group-stats="groupStats"
+            :cache-hit-rate="cacheHitRateGroups"
             :loading="chartsLoading"
             :show-metric-toggle="true"
             :start-date="startDate"
@@ -64,6 +65,7 @@
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
       </div>
+      <AccountCacheHitRateTable :loading="cacheHitRateAccounts.loading" :error="cacheHitRateAccounts.error" :items="cacheHitRateAccounts.items" />
       <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
       <div class="card">
         <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
@@ -185,6 +187,9 @@
 
 <script setup lang="ts">
 import { getTodayRangeDates } from '@/utils/dateRange'
+import type { CacheHitRateItem } from '@/types'
+import AccountCacheHitRateTable from '@/components/admin/usage/AccountCacheHitRateTable.vue'
+import { extractApiErrorMessage } from '@/utils/apiError'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { saveAs } from 'file-saver'
@@ -385,7 +390,34 @@ const loadLogs = async () => {
     if(!c.signal.aborted) { usageLogs.value = res.items; pagination.total = res.total }
   } catch (error: any) { if(error?.name !== 'AbortError') console.error('Failed to load usage logs:', error) } finally { if(abortController === c) loading.value = false }
 }
+const cacheHitRateTotal = reactive({ loading: false, error: null as string | null, rate: null as number | null })
+const cacheHitRateGroups = reactive({ loading: false, error: null as string | null, byId: {} as Record<number, number | null> })
+const cacheHitRateAccounts = reactive({ loading: false, error: null as string | null, items: [] as CacheHitRateItem[] })
+let cacheHitRateReqSeq = 0
+const loadCacheHitRates = async (force = false) => {
+  const seq = ++cacheHitRateReqSeq
+  const params = { ...filters.value, ...(force ? { nocache: 1 } : {}) }
+  const states = { total: cacheHitRateTotal, group: cacheHitRateGroups, account: cacheHitRateAccounts }
+  await Promise.all((['total', 'group', 'account'] as const).map(async dimension => {
+    const state = states[dimension]
+    state.loading = true; state.error = null
+    try {
+      const result = await adminAPI.usage.getCacheHitRate({ ...params, dimension })
+      if (seq !== cacheHitRateReqSeq) return
+      if (dimension === 'total') cacheHitRateTotal.rate = result.items[0]?.cache_hit_rate ?? null
+      if (dimension === 'group') cacheHitRateGroups.byId = Object.fromEntries(result.items.map(item => [item.id, item.cache_hit_rate]))
+      if (dimension === 'account') cacheHitRateAccounts.items = result.items
+    } catch (error) {
+      if (seq !== cacheHitRateReqSeq) return
+      state.error = extractApiErrorMessage(error)
+    } finally {
+      if (seq === cacheHitRateReqSeq) state.loading = false
+    }
+  }))
+}
+
 const loadStats = async (force = false) => {
+  void loadCacheHitRates(force)
   const seq = ++statsReqSeq
   endpointStatsLoading.value = true
   try {
@@ -864,7 +896,7 @@ onMounted(() => {
   loadSavedErrColumns()
   document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
+onUnmounted(() => { cacheHitRateReqSeq++; abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)

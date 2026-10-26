@@ -59,6 +59,7 @@ const messages: Record<string, string> = {
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    usage: { getCacheHitRate: vi.fn().mockResolvedValue({ items: [] }) },
     groups: {
       list: listGroups,
       listAllForDisplay,
@@ -374,3 +375,5 @@ describe('group order editor and isolated candidates', () => {
     expect(wrapper.get('button[form="edit-group-form"]').attributes('disabled')).toBeUndefined()
   })
 })
+
+vi.mock('@/composables/useCacheHitRateDefaultRange', () => ({ useCacheHitRateDefaultRange: () => ({ dates: { value: { start: '2026-10-26', end: '2026-10-26' } } }) }))

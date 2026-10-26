@@ -333,6 +333,15 @@ export default {
 
   // Usage
   usage: {
+    cacheRate: 'Cache rate',
+    cacheRateAccounts: 'Account cache rate',
+    cacheRateAccount: 'Account',
+    cacheRateRequests: 'Requests',
+    cacheRateNoAccounts: 'No account usage',
+    cacheRateFormula: 'Cache rate = cache read ÷ (input + cache read + cache creation), counting at most yesterday and today',
+    cacheRateLoadFailed: 'Failed to load cache rate: {reason}. Other statistics are unaffected; click refresh to retry.',
+    cacheRateAccountsFailed: 'Failed to load account cache rates: {reason}. Click refresh to retry.',
+
     title: 'Usage Records',
     description: 'View and analyze your API usage history',
     costDetails: 'Cost Breakdown',

@@ -14,6 +14,14 @@ export default {
         payment: 'Payment',
       },
       features: {
+        cacheHitRate: {
+          title: 'Cache rate',
+          description: 'Cache rate = cache read ÷ (input + cache read + cache creation), counting at most yesterday and today.',
+          allowUser: 'Allow users to view cache rate',
+          allowUserHint: "When enabled, the user's usage page shows the cache rate next to the cache data in the stats card. When disabled, the user page stays unchanged. Off by default.",
+          defaultRange: 'Default period for admin pages',
+          defaultRangeHint: 'The "Cache rate" columns in Accounts and Groups use this period. The usage page follows its own time range.',
+        },
         channelMonitor: {
           title: 'Channel Monitor',
           description: 'Choose either V1 active probes or V2 passive usage monitoring. When disabled, both background jobs stop and the user entry is hidden.',

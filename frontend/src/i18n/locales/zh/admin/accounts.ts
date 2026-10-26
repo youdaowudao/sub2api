@@ -102,6 +102,7 @@ export default {
       },
       groupCountTotal: '共 {count} 个分组',
       columns: {
+        cacheHitRate: '缓存率',
         name: '名称',
         id: '账号ID',
         platformType: '平台/类型',

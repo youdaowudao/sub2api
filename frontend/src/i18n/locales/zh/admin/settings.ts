@@ -14,6 +14,14 @@ export default {
         payment: '支付设置',
       },
       features: {
+        cacheHitRate: {
+          title: '缓存率',
+          description: '缓存率 = 缓存读取 ÷（输入 + 缓存读取 + 缓存创建），最多统计到昨天和今天。',
+          allowUser: '允许用户查看缓存率',
+          allowUserHint: '开启后，用户的使用记录页会在统计卡片的缓存数据旁显示缓存率。关闭时用户页面保持原样。默认关闭。',
+          defaultRange: '管理页面默认统计时间',
+          defaultRangeHint: '账号管理、分组管理里的‘缓存率’列按这里的时间统计。使用记录页跟随页面的时间范围。',
+        },
         channelMonitor: {
           title: '渠道监控',
           description: '启用后在 V1 主动探测与 V2 被动用量监控中二选一。关闭后两种模式的后台任务均停止，用户端入口隐藏。',
