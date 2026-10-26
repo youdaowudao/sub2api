@@ -72,7 +72,7 @@ describe('guide controller authentication and lifetime', () => {
       document.querySelector('[role="dialog"]')!.remove()
       create({ config: normalizeConfig({ schemaVersion: 1, modules: [{ id: 'more', enabled: true }, { id: 'keys', enabled: true }] }) })
       recordGuideRegistration(state.user!); await settle()
-      await nextGuideStep(); await nextGuideStep(); await nextGuideStep()
+      await nextGuideStep(); await nextGuideStep()
       expect(controller!.status().paused).toBe(true)
       document.querySelector('[data-tour="keys-create-btn"]')!.remove()
       pending = controller!.continue(); await flushPromises()
@@ -214,12 +214,12 @@ describe('guide controller authentication and lifetime', () => {
     recordGuideRegistration(state.user!); await controller!.update(); await settle()
     expect(controller!.status().step).toBe('welcome')
     expect(sessionStorage.getItem(registrationKey)).toBeNull()
-    await nextGuideStep(); expect(controller!.status().step).toBe('more-help')
-    await nextGuideStep(); await nextGuideStep(); await nextGuideStep()
+    await nextGuideStep(); expect(controller!.status().step).toBe('more-unavailable')
+    await nextGuideStep(); await nextGuideStep()
     expect(JSON.parse(sessionStorage.getItem(historyKey)!).at(-1)).toMatchObject({ trigger: 'registration', reason: 'completed:tour_viewed' })
     expect(await controller!.replay('more')).toBe(true)
-    expect(controller!.status().step).toBe('more-help')
-    await nextGuideStep(); await nextGuideStep(); await nextGuideStep()
+    expect(controller!.status().step).toBe('more-unavailable')
+    await nextGuideStep(); await nextGuideStep()
     const result = JSON.parse(sessionStorage.getItem(historyKey)!).at(-1)
     expect(result).toMatchObject({ trigger: 'manual', reason: 'completed:tour_viewed', result: 'completed' })
     expect(result).not.toHaveProperty('confirmation')
@@ -304,7 +304,7 @@ describe('guide controller authentication and lifetime', () => {
     await vi.advanceTimersByTimeAsync(4700)
     expect(controller!.status().paused).toBe(true)
     await vi.advanceTimersByTimeAsync(300)
-    expect(controller!.status().step).toBe('more-help')
+    expect(controller!.status().step).toBe('more-unavailable')
     expect(controller!.status().viewedModules).toEqual(['more'])
     expect(JSON.parse(sessionStorage.getItem(progressKey)!).expiresAt).toBe(saved.expiresAt)
   })
@@ -318,7 +318,7 @@ describe('guide controller authentication and lifetime', () => {
     await vi.advanceTimersByTimeAsync(6000)
     expect(controller!.status().paused).toBe(true)
     expect(await controller!.continue()).toBe(true)
-    expect(controller!.status().step).toBe('more-help')
+    expect(controller!.status().step).toBe('more-unavailable')
   })
   it.each(['exit', 'destroy', 'logout', 'pagehide'])('cancels a pending automatic transition on %s', async action => {
     sessionStorage.setItem(progressKey, JSON.stringify(progress({ moduleId: 'more', step: 'chapter-break' })))
@@ -333,8 +333,8 @@ describe('guide controller authentication and lifetime', () => {
   })
   it.each([
     ['key-use', 'usage-pick', 'usage-row'], ['recharge', 'balance', 'balance'],
-    ['more', 'more-help', 'more-help'], ['more', 'more-tools', 'more-tools'], ['more', 'finish', 'finish'],
-    ['more', 'balance', 'more-help'],
+    ['more', 'more-help', 'more-unavailable'], ['more', 'more-tools', 'more-unavailable'], ['more', 'finish', 'finish'],
+    ['more', 'balance', 'more-unavailable'],
   ])('restores %s checkpoint %s to %s without marking earlier chapters', async (moduleId, step, expected) => {
     document.querySelector('[role="dialog"]')!.remove()
     document.body.insertAdjacentHTML('beforeend', '<div data-tour="header-balance"></div>')
@@ -342,6 +342,20 @@ describe('guide controller authentication and lifetime', () => {
     create(); await controller!.update(); await settle()
     expect(controller!.status().step).toBe(expected)
     expect(controller!.status().viewedModules).toEqual([moduleId])
+  })
+  it('persists and restores a real sidebar introduction in a rebuilt controller', async () => {
+    document.querySelector('[role="dialog"]')!.remove()
+    document.body.insertAdjacentHTML('beforeend', '<aside class="sidebar"><a data-tour="sidebar-custom-guide-other-page"></a></aside>')
+    const settings = () => ({ custom_menu_items: [{ id: 'guide-other-page', visibility: 'user' }] })
+    sessionStorage.setItem(progressKey, JSON.stringify(progress({ moduleId: 'more', step: 'more-tutorial' })))
+    create({ getPublicSettings: settings }); await controller!.update(); await settle()
+    expect(controller!.status().step).toBe('more-tutorial')
+    expect(JSON.parse(sessionStorage.getItem(progressKey)!).step).toBe('more-tutorial')
+    window.dispatchEvent(new Event('pagehide')); expect(controller!.status().clean).toBe(true)
+    expect(JSON.parse(sessionStorage.getItem(progressKey)!).step).toBe('more-tutorial')
+    controller!.destroy(); create({ getPublicSettings: settings }); await controller!.update(); await settle()
+    expect(controller!.status().step).toBe('more-tutorial')
+    expect(vi.mocked(Element.prototype.animate).mock.instances.at(-1)).toBe(document.querySelector('[data-tour="sidebar-custom-guide-other-page"]'))
   })
   it('discards the previous two-chapter checkpoint without inventing a new registration', async () => {
     sessionStorage.setItem(progressKey, JSON.stringify(progress({ modules: ['keys', 'quick-start'] })))

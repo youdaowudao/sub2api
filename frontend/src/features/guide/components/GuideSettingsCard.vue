@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useAppStore } from '@/stores'
-import { buildConfiguration, moduleCatalog, normalizeConfig, previewConfigKey, type GuideConfig } from '../config'
+import { buildConfiguration, moduleCatalog, moreMenuCatalog, normalizeConfig, previewConfigKey, type GuideConfig, type MoreMenuRole } from '../config'
 
 const appStore = useAppStore()
 function readBuildConfiguration() {
@@ -25,6 +25,22 @@ const selectedMenu = computed({ get: () => draftQuickStart.value?.menuId || '', 
   else delete draftQuickStart.value.menuId
 } })
 const keepBoundOption = computed(() => !!selectedMenu.value && (!canJudgeBinding.value || !menus.value.some(item => item.id === selectedMenu.value)))
+const draftMore = computed(() => draft.modules.find(item => item.id === 'more'))
+function setMoreMenu(role: MoreMenuRole, value: string) {
+  if (!draftMore.value) return
+  if (value) (draftMore.value.menuIds ||= {})[role] = value
+  else if (draftMore.value.menuIds) {
+    delete draftMore.value.menuIds[role]
+    if (!Object.keys(draftMore.value.menuIds).length) delete draftMore.value.menuIds
+  }
+}
+function moreBindingLabel(role: MoreMenuRole) {
+  const id = current?.modules.find(item => item.id === 'more')?.menuIds?.[role]
+  if (!id) return '未绑定'
+  if (!canJudgeBinding.value) return `当前绑定（ID：${id}），尚未确认菜单是否存在`
+  const menu = menus.value.find(item => item.id === id)
+  return menu ? `${menu.label}（${id}）` : `已保存的用户菜单中找不到（ID：${id}）`
+}
 
 async function readMenus(force = false) {
   state.value = 'loading'
@@ -82,6 +98,7 @@ function exportConfig() {
         <p v-else-if="canJudgeBinding && !boundMenu" class="mt-2 text-sm">当前配置绑定的菜单（ID：{{ bound }}）在已保存的自定义菜单中找不到，用户打开不到快速开始正文。</p>
         <p v-else-if="boundMenu" class="mt-2 text-sm">打开“{{ boundMenu.label }}”时显示网站内置的快速开始正文，这个菜单里填写的 URL 不生效。<span>（ID：{{ bound }}）</span></p>
         <p v-else class="mt-2 text-sm">当前绑定（ID：{{ bound }}）</p>
+        <ul class="mt-2 text-sm" data-guide-more-current><li v-for="role in moreMenuCatalog" :key="role.id">{{ role.title }}：{{ moreBindingLabel(role.id) }}</li></ul>
       </div>
       <div class="flex flex-wrap items-center gap-3 text-sm" role="status">
         <span v-if="state === 'loading'">正在读取已保存的自定义菜单…</span>
@@ -100,6 +117,17 @@ function exportConfig() {
           <option v-for="item in canJudgeBinding ? menus : []" :key="item.id" :value="item.id">{{ item.label }}（{{ item.id }}）</option>
         </select>
       </label>
+      <fieldset class="space-y-3" data-guide-more-bindings>
+        <legend class="font-medium">更多功能与帮助：左侧入口</legend>
+        <p class="text-sm text-gray-500">只介绍左侧入口，不打开页面。邀请返利按本站开关显示；快速开始沿用上面的绑定，简短介绍。未绑定或已删除的入口不介绍。</p>
+        <label v-for="role in moreMenuCatalog" :key="role.id" class="block text-sm">{{ role.title }}对应的自定义菜单
+          <select :value="draftMore?.menuIds?.[role.id] || ''" class="input mt-2" :data-guide-more-menu="role.id" @change="setMoreMenu(role.id, ($event.target as HTMLSelectElement).value)">
+            <option value="">不介绍此入口</option>
+            <option v-if="draftMore?.menuIds?.[role.id] && (!canJudgeBinding || !menus.some(item => item.id === draftMore?.menuIds?.[role.id]))" :value="draftMore.menuIds[role.id]">当前绑定（ID：{{ draftMore.menuIds[role.id] }}）</option>
+            <option v-for="item in canJudgeBinding ? menus : []" :key="item.id" :value="item.id">{{ item.label }}（{{ item.id }}）</option>
+          </select>
+        </label>
+      </fieldset>
       <div class="flex flex-wrap gap-3">
         <button type="button" class="btn btn-primary" @click="preview">仅当前浏览器试用</button>
         <button type="button" class="btn btn-secondary" @click="exportConfig">导出配置文件</button>

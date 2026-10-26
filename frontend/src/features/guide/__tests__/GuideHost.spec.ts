@@ -90,7 +90,7 @@ describe('ordinary guide host and replay picker', () => {
       expect(document.querySelector('#s2o-launcher')).not.toBeNull()
       document.querySelector<HTMLButtonElement>('#s2o-launcher')!.click(); await flushPromises()
       document.querySelector<HTMLButtonElement>('[data-s2o-module="more"]')!.click(); await settle()
-      expect(document.querySelector('[data-s2o-step="more-help"]')).not.toBeNull()
+      expect(document.querySelector('[data-s2o-step="more-unavailable"]')).not.toBeNull()
       expect(sessionStorage.getItem(registrationKey)).toBeNull()
     } finally { denied.mockRestore() }
   })
@@ -190,15 +190,15 @@ describe('ordinary guide host and replay picker', () => {
     expect(document.querySelector('#s2o-replay-title')?.textContent).toBe('选择要查看的内容')
     expect([...document.querySelectorAll('[data-s2o-module]')].at(-1)?.getAttribute('data-s2o-module')).toBe('more')
     document.querySelector<HTMLButtonElement>('[data-s2o-module="more"]')!.click(); await settle()
-    expect(document.querySelector('[data-s2o-step="more-help"]')).not.toBeNull()
+    expect(document.querySelector('[data-s2o-step="more-unavailable"]')).not.toBeNull()
     expect(document.querySelector('#s2o-launcher, #s2o-replay-picker')).toBeNull()
-    await nextGuideStep(); await nextGuideStep(); await nextGuideStep()
+    await nextGuideStep(); await nextGuideStep()
     expect(document.querySelector('.s2o-popover, #s2o-exit, #s2o-attention-wait')).toBeNull()
     expect(document.querySelector('#s2o-note')?.textContent).toBe('已看完本次内容。')
     expect(document.querySelector('#s2o-note')?.textContent).not.toContain('重播')
     document.querySelector<HTMLButtonElement>('#s2o-launcher')!.click(); await flushPromises()
     document.querySelector<HTMLButtonElement>('[data-s2o-module="more"]')!.click(); await settle()
-    expect(document.querySelector('[data-s2o-step="more-help"]')).not.toBeNull()
+    expect(document.querySelector('[data-s2o-step="more-unavailable"]')).not.toBeNull()
   })
   it.each(['admin', 'guest'])('does not render ordinary replay for %s', async role => {
     stores.auth.user.role = role

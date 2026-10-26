@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFlow } from '../flow'
 import { beginGuideAction, completeGuideAction } from '../businessEvents'
 import { steps } from '../steps'
+import { resolveMoreTargets } from '../moreTargets'
+import type { GuideModule } from '../config'
 import { fakeDriver, installGuideDOM, keyPage, nextGuideStep, settle } from './fixture'
 
 describe('ordinary user guide flows', () => {
@@ -21,9 +23,9 @@ describe('ordinary user guide flows', () => {
   })
   it('keeps a paused parent registration intact when its display layer is already idle', async () => {
     document.querySelector('[role="dialog"]')!.remove()
-    flow = createFlow(fakeDriver, { modules: ['more', 'keys'] })
+    flow = createFlow(fakeDriver, { modules: ['more', 'keys'], getPublicSettings: () => ({}) })
     await flow.start({ userId: 7 }, { manual: true })
-    await nextGuideStep(); await nextGuideStep(); await nextGuideStep()
+    await nextGuideStep(); await nextGuideStep()
     expect(flow.paused).toBe(true)
     expect(flow.resetForRegistration()).toBe(false)
     expect(flow.paused).toBe(true)
@@ -47,7 +49,7 @@ describe('ordinary user guide flows', () => {
     document.querySelector('[role="dialog"]')!.remove()
     document.body.insertAdjacentHTML('beforeend', '<input id="practice" value="draft" /><div data-tour="header-balance"></div>')
     flow = createFlow(fakeDriver, { modules: ['more', 'recharge'], getPublicSettings: () => ({ payment_enabled: false }), onStop: stopped })
-    await flow.start({ userId: 7 }, { manual: true }); await nextGuideStep(); await nextGuideStep(); await nextGuideStep()
+    await flow.start({ userId: 7 }, { manual: true }); await nextGuideStep(); await nextGuideStep()
     expect(flow.step).toBe('chapter-break')
     const practice = document.querySelector<HTMLInputElement>('#practice')!
     practice.focus(); practice.value = 'user edit'
@@ -69,7 +71,7 @@ describe('ordinary user guide flows', () => {
     flow = createFlow(fakeDriver, { modules: ['more', 'recharge'], getPublicSettings: () => ({ payment_enabled: false }), onStep: (step: string) => {
       shown.push(step); if (step === 'chapter-break') boundary = Date.now()
     } })
-    await flow.start({ userId: 7 }, { manual: true }); await nextGuideStep(); await nextGuideStep(); await nextGuideStep()
+    await flow.start({ userId: 7 }, { manual: true }); await nextGuideStep(); await nextGuideStep()
     expect(flow.step).toBe('chapter-break'); expect(flow.resources.timers).toBe(1)
     await vi.advanceTimersByTimeAsync(4999 - (Date.now() - boundary))
     expect(flow.step).toBe('chapter-break')
@@ -80,32 +82,174 @@ describe('ordinary user guide flows', () => {
     expect(shown.filter(step => step === 'balance')).toHaveLength(1)
     flow.stop(); expect(flow.clean).toBe(true)
   })
-  it('reads the two overview screens without a welcome, business targets, navigation or requests', async () => {
+  it('points to all six real sidebar entries in sequence with an empty right pane', async () => {
     history.replaceState({}, '', '/profile')
-    document.body.innerHTML = '<main><input id="business-value" value="unchanged" /></main>'
-    const fetch = vi.fn(), open = vi.spyOn(window, 'open'), navigate = vi.spyOn(history, 'pushState')
+    const ids = ['onboarding-quick-start', 'guide-other-page', 'c906a4e429133b3b', '7490c34132b758a2', 'c601441edd4d3c0d']
+    const labels = ['邀请返利', '新用户快速开始', '使用教程', '联系客服（新用户福利）', '模型价格', '智商雷达']
+    const selectors = ['[data-tour="sidebar-affiliate"]', ...ids.map(id => `[data-tour="sidebar-custom-${id}"]`)]
+    document.body.innerHTML = '<aside class="sidebar">' + selectors.map((selector, index) => `<a ${selector.slice(1, -1)}>${labels[index]}</a>`).join('') + '</aside><main></main>'
+    const navigate = vi.spyOn(history, 'pushState'), fetch = vi.fn(), open = vi.spyOn(window, 'open')
     vi.stubGlobal('fetch', fetch)
-    flow = createFlow(fakeDriver, { modules: ['more'], onStop: stopped })
+    const factory = vi.fn(fakeDriver)
+    flow = createFlow(factory, { modules: ['more'], moduleConfig: [
+      { id: 'quick-start', enabled: false, menuId: ids[0] },
+      { id: 'more', enabled: true, menuIds: { tutorial: ids[1], support: ids[2], pricing: ids[3], radar: ids[4] } },
+    ], getPublicSettings: () => ({ affiliate_enabled: true, model_plaza_enabled: false, custom_menu_items: ids.map((id, i) => ({ id, label: labels[i + 1], visibility: 'user' })) }) })
     expect(await flow.start({ userId: 7 }, { manual: true, module: 'more' })).toBe(true)
-    expect(flow.step).toBe('more-help')
-    for (const text of ['邀请返利', '使用教程', '联系客服（新用户福利）']) expect(document.querySelector('.s2o-popover')?.textContent).toContain(text)
-    expect(document.querySelector('.s2o-popover')?.textContent).not.toContain('开始引导')
-    await nextGuideStep(); expect(flow.step).toBe('more-tools')
-    for (const text of ['模型价格', '智商雷达', 'GPT生图']) expect(document.querySelector('.s2o-popover')?.textContent).toContain(text)
-    document.querySelector<HTMLButtonElement>('.s2o-driver-popover-prev-btn')!.click(); await settle()
-    expect(flow.step).toBe('more-help')
-    await nextGuideStep(); await nextGuideStep(); expect(flow.step).toBe('finish')
-    expect(document.querySelector('.s2o-popover')?.textContent).toContain('需要时，点右下角「使用引导」选择章节再次查看。')
-    expect(document.querySelector('.s2o-popover')?.textContent).not.toMatch(/重播|你已了解|已完成全部/)
-    await nextGuideStep()
-    expect(stopped).toHaveBeenCalledOnce(); expect(stopped).toHaveBeenCalledWith('completed:tour_viewed', 'finish')
-    expect(flow.clean).toBe(true)
+    for (const [index, selector] of selectors.entries()) {
+      const target = document.querySelector(selector)
+      expect(factory.mock.results[0].value.getActiveElement(), labels[index]).toBe(target)
+      expect(vi.mocked(Element.prototype.animate).mock.instances.at(-1), labels[index]).toBe(target)
+      expect(document.querySelector('.s2o-popover')?.textContent).toContain(labels[index])
+      expect(document.querySelector('.s2o-popover')?.textContent).not.toContain('GPT生图')
+      if (index === 1) {
+        document.querySelector<HTMLButtonElement>('.s2o-driver-popover-prev-btn')!.click(); await settle()
+        expect(factory.mock.results[0].value.getActiveElement()).toBe(document.querySelector(selectors[0]))
+        await nextGuideStep()
+      }
+      await nextGuideStep()
+    }
+    expect(flow.step).toBe('finish')
+    await nextGuideStep(); expect(flow.clean).toBe(true)
+    expect(document.querySelector('main')?.childElementCount).toBe(0)
     expect(location.pathname).toBe('/profile')
-    expect((document.querySelector('#business-value') as HTMLInputElement).value).toBe('unchanged')
-    expect(fetch).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled()
+  })
+  it('waits for unknown settings and stops after eight seconds instead of claiming entries are disabled', async () => {
+    flow = createFlow(fakeDriver, { modules: ['more'], onStop: stopped })
+    await flow.start({ userId: 7 }, { manual: true, module: 'more' })
+    expect(flow.step).toBe('more-loading')
+    expect(document.querySelector('.s2o-popover')?.textContent).not.toContain('没有可介绍')
+    await vi.advanceTimersByTimeAsync(8100)
+    expect(stopped).toHaveBeenCalledWith('error:more-settings', 'more-loading')
+    expect(flow.clean).toBe(true)
+  })
+  it('continues when cached settings arrive without making a request', async () => {
+    let settings: any = null
+    document.body.innerHTML = '<aside class="sidebar"><a data-tour="sidebar-affiliate">邀请返利</a></aside><main></main>'
+    flow = createFlow(fakeDriver, { modules: ['more'], getPublicSettings: () => settings })
+    await flow.start({ userId: 7 }, { manual: true, module: 'more' })
+    expect(flow.step).toBe('more-loading')
+    settings = { affiliate_enabled: true }; await settle()
+    expect(flow.step).toBe('more-affiliate')
+    expect(vi.mocked(Element.prototype.animate).mock.instances.at(-1)).toBe(document.querySelector('[data-tour="sidebar-affiliate"]'))
+  })
+  it('opens and reopens the mobile sidebar at the same entry without visiting its page', async () => {
+    vi.stubGlobal('innerWidth', 390)
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) { return this.matches('.s2o-popover') ? new DOMRect(12, 80, 300, 180) : new DOMRect(12, 400, 220, 32) })
+    document.body.innerHTML = '<button data-tour="header-menu">菜单</button><aside class="sidebar -translate-x-full"><a data-tour="sidebar-affiliate">邀请返利</a></aside><main></main>'
+    const sidebar = document.querySelector('.sidebar')!
+    document.querySelector('button')!.onclick = () => sidebar.classList.remove('-translate-x-full')
+    flow = createFlow(fakeDriver, { modules: ['more'], getPublicSettings: () => ({ affiliate_enabled: true }) })
+    await flow.start({ userId: 7 }, { manual: true, module: 'more' })
+    expect(flow.step).toBe('more-open-affiliate')
+    expect(vi.mocked(Element.prototype.animate).mock.instances.at(-1)).toBe(document.querySelector('[data-tour="header-menu"]'))
+    document.querySelector<HTMLButtonElement>('[data-tour="header-menu"]')!.click(); await settle()
+    expect(flow.step).toBe('more-affiliate')
+    sidebar.classList.add('-translate-x-full'); await settle()
+    expect(flow.step).toBe('more-open-affiliate')
+    document.querySelector<HTMLButtonElement>('[data-tour="header-menu"]')!.click(); await settle()
+    expect(flow.step).toBe('more-affiliate'); expect(location.pathname).toBe('/keys')
+    flow.stop(); expect(flow.clean).toBe(true)
+  })
+  it.each(['manual', 'continue'])('returns to the same opener when the sidebar closes during the opening wait via %s, then reopens cleanly', async kind => {
+    vi.stubGlobal('innerWidth', 390)
+    let left = -40
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.matches('.sidebar')) return new DOMRect(left, 0, 256, 844)
+      return this.matches('.s2o-popover') ? new DOMRect(12, 80, 300, 180) : new DOMRect(12, 400, 220, 32)
+    })
+    document.body.innerHTML = '<button data-tour="header-menu">菜单</button><aside class="sidebar -translate-x-full"><a data-tour="sidebar-affiliate"></a></aside><main></main>'
+    const sidebar = document.querySelector('.sidebar')!
+    document.querySelector('button')!.onclick = () => sidebar.classList.remove('-translate-x-full')
+    flow = createFlow(fakeDriver, { modules: ['more'], getPublicSettings: () => ({ affiliate_enabled: true }), onStop: stopped })
+    let continuing: Promise<boolean> | undefined
+    if (kind === 'manual') {
+      await flow.start({ userId: 7 }, { manual: true, module: 'more' })
+      document.querySelector<HTMLButtonElement>('button')!.click(); await settle()
+    } else {
+      await flow.start({ userId: 7 }, { manual: true, resume: { moduleId: 'more', step: 'chapter-break' } })
+      sidebar.classList.remove('-translate-x-full')
+      continuing = flow.continue(); await settle()
+    }
+    expect(flow.step).toBe('more-affiliate') // Target wait is still pending during the slide.
+    sidebar.classList.add('-translate-x-full'); await settle()
+    expect(flow.step).toBe('more-open-affiliate')
+    if (continuing) expect(await continuing).toBe(true)
+    expect(stopped).not.toHaveBeenCalled()
+    expect(vi.mocked(Element.prototype.animate).mock.instances.at(-1)).toBe(document.querySelector('[data-tour="header-menu"]'))
+    left = 0
+    document.querySelector<HTMLButtonElement>('[data-tour="header-menu"]')!.click(); await settle()
+    expect(flow.step).toBe('more-affiliate')
+    expect(vi.mocked(Element.prototype.animate).mock.instances.at(-1)).toBe(document.querySelector('[data-tour="sidebar-affiliate"]'))
+    await vi.advanceTimersByTimeAsync(8100)
+    expect(flow.active).toBe(true); expect(stopped).not.toHaveBeenCalled()
+    flow.stop(); expect(flow.clean).toBe(true)
+  })
+  it.each(['missing', 'duplicate'])('stops on a %s expected sidebar target instead of presenting a centered substitute', async kind => {
+    document.body.innerHTML = kind === 'missing' ? '<main></main>' : '<a data-tour="sidebar-affiliate"></a><a data-tour="sidebar-affiliate"></a><main></main>'
+    flow = createFlow(fakeDriver, { modules: ['more'], getPublicSettings: () => ({ affiliate_enabled: true }), onStop: stopped })
+    const pending = flow.start({ userId: 7 }, { manual: true, module: 'more' })
+    await vi.advanceTimersByTimeAsync(8100)
+    expect(await pending).toBe(false); expect(stopped).toHaveBeenCalledWith('error:more-target', 'more-affiliate')
+    expect(document.querySelector('.s2o-popover')).toBeNull(); expect(flow.clean).toBe(true)
+  })
+  it('cancels a waiting menu target without a late highlight or affecting the next session', async () => {
+    document.body.innerHTML = '<main></main>'
+    flow = createFlow(fakeDriver, { modules: ['more'], getPublicSettings: () => ({ affiliate_enabled: true }) })
+    const pending = flow.start({ userId: 7 }, { manual: true, module: 'more' })
+    await vi.advanceTimersByTimeAsync(100)
+    flow.stop(); expect(await pending).toBe(false); expect(flow.clean).toBe(true)
+    document.body.insertAdjacentHTML('afterbegin', '<aside class="sidebar"><a data-tour="sidebar-affiliate"></a></aside>')
+    expect(await flow.start({ userId: 8 }, { manual: true, module: 'more' })).toBe(true)
+    await vi.advanceTimersByTimeAsync(8100); expect(flow.step).toBe('more-affiliate'); expect(flow.active).toBe(true)
+  })
+  it('keeps ID bindings through renaming and sorting, skips unavailable entries and never guesses a GPT entry', () => {
+    const modules: GuideModule[] = [{ id: 'quick-start', enabled: false, menuId: 'quick' }, { id: 'more', enabled: true, menuIds: { tutorial: 'help', support: 'admin', pricing: 'price', radar: 'deleted' } }]
+    const settings = { affiliate_enabled: false, model_plaza_enabled: false, custom_menu_items: [{ id: 'price', label: '改过的标题', visibility: 'user' }, { id: 'help', label: '改名', visibility: 'user' }, { id: 'admin', visibility: 'admin' }, { id: 'gpt', label: '智商雷达', visibility: 'user' }, { id: 'quick', visibility: 'user' }] }
+    expect(resolveMoreTargets(modules, settings)).toEqual([
+      { role: 'quick-start', selector: '[data-tour="sidebar-custom-quick"]' },
+      { role: 'tutorial', selector: '[data-tour="sidebar-custom-help"]' },
+      { role: 'pricing', selector: '[data-tour="sidebar-custom-price"]' },
+    ])
+    expect(() => resolveMoreTargets(modules, { ...settings, custom_menu_items: [...settings.custom_menu_items, { id: 'help', visibility: 'user' }] })).toThrow('ambiguous')
+    expect(() => resolveMoreTargets(modules, { custom_menu_items: {} })).toThrow('invalid-menu-settings')
+    expect(resolveMoreTargets(modules, null)).toBeNull()
+    expect(resolveMoreTargets(modules, { custom_menu_items: [] })).toEqual([])
+  })
+  it('moves to the next available entry when current metadata is removed and restores a selected entry', async () => {
+    const modules: GuideModule[] = [{ id: 'more', enabled: true, menuIds: { tutorial: 'help', support: 'contact', pricing: 'price' } }]
+    const settings = { custom_menu_items: [{ id: 'help', visibility: 'user' }, { id: 'contact', visibility: 'user' }, { id: 'price', visibility: 'user' }] }
+    document.body.innerHTML = '<aside class="sidebar"><a data-tour="sidebar-custom-help"></a><a data-tour="sidebar-custom-contact"></a><a data-tour="sidebar-custom-price"></a></aside><main></main>'
+    flow = createFlow(fakeDriver, { modules: ['more'], moduleConfig: modules, getPublicSettings: () => settings })
+    await flow.start({ userId: 7 }, { manual: true, resume: { moduleId: 'more', step: 'more-support' } })
+    expect(flow.step).toBe('more-support')
+    settings.custom_menu_items.splice(1, 1); document.querySelector('[data-tour="sidebar-custom-contact"]')!.remove(); await settle()
+    expect(flow.step).toBe('more-pricing')
+    document.querySelector<HTMLButtonElement>('.s2o-driver-popover-prev-btn')!.click(); await settle()
+    expect(flow.step).toBe('more-tutorial')
+  })
+  it('does not skip an introduction when Next is clicked twice during a transition', async () => {
+    document.body.innerHTML = '<aside class="sidebar"><a data-tour="sidebar-affiliate"></a><a data-tour="sidebar-custom-help"></a><a data-tour="sidebar-custom-price"></a></aside><main></main>'
+    flow = createFlow(fakeDriver, { modules: ['more'], moduleConfig: [{ id: 'more', enabled: true, menuIds: { tutorial: 'help', pricing: 'price' } }], getPublicSettings: () => ({ affiliate_enabled: true, custom_menu_items: [{ id: 'help', visibility: 'user' }, { id: 'price', visibility: 'user' }] }) })
+    await flow.start({ userId: 7 }, { manual: true, module: 'more' })
+    const next = document.querySelector<HTMLButtonElement>('.s2o-driver-popover-next-btn')!
+    next.click(); next.click(); await settle()
+    expect(flow.step).toBe('more-tutorial')
+  })
+  it('honestly reports no available entries without inventing features or navigating', async () => {
+    history.replaceState({}, '', '/profile'); document.body.innerHTML = '<main></main>'
+    flow = createFlow(fakeDriver, { modules: ['more'], getPublicSettings: () => ({ affiliate_enabled: false, custom_menu_items: [] }), onStop: stopped })
+    expect(await flow.start({ userId: 7 }, { manual: true, module: 'more' })).toBe(true)
+    expect(flow.step).toBe('more-unavailable')
+    expect(document.querySelector('.s2o-popover')?.textContent).toContain('当前没有可介绍的入口')
+    expect(document.querySelector('.s2o-popover')?.textContent).not.toContain('邀请返利')
+    await nextGuideStep(); expect(flow.step).toBe('finish')
+    await nextGuideStep(); expect(stopped).toHaveBeenCalledWith('completed:tour_viewed', 'finish')
+    expect(flow.clean).toBe(true); expect(location.pathname).toBe('/profile')
   })
   it('hands creation to the overview without claiming the combined flow has ended', async () => {
-    flow = createFlow(fakeDriver, { modules: ['keys', 'more'], onStop: stopped })
+    flow = createFlow(fakeDriver, { modules: ['keys', 'more'], getPublicSettings: () => ({}), onStop: stopped })
     await flow.start({ userId: 7 }, { manual: true }); await nextGuideStep()
     completeGuideAction(beginGuideAction('key-create'), { keyId: 72 })
     document.querySelector('[role="dialog"]')!.remove(); await settle()
@@ -113,8 +257,8 @@ describe('ordinary user guide flows', () => {
     expect(document.querySelector('.s2o-popover')?.textContent).toContain('请确认创建结果')
     expect(document.querySelector('.s2o-popover')?.textContent).not.toContain('结束引导')
     expect(document.querySelector('.s2o-driver-popover-next-btn')?.textContent).toBe('已创建，继续')
-    await nextGuideStep(); await continueChapter('more-help')
-    await nextGuideStep(); await nextGuideStep(); expect(flow.step).toBe('finish')
+    await nextGuideStep(); await continueChapter('more-unavailable')
+    await nextGuideStep(); expect(flow.step).toBe('finish')
     expect(stopped).not.toHaveBeenCalled()
     await nextGuideStep(); expect(stopped).toHaveBeenCalledWith('completed:user_confirmed', 'finish')
   })
@@ -124,8 +268,8 @@ describe('ordinary user guide flows', () => {
     flow = createFlow(fakeDriver, { modules: ['more', 'recharge'], getPublicSettings: () => ({ payment_enabled: false }), onStop: stopped })
     await flow.start({ userId: 7 }, { manual: true })
     expect(flow.step).toBe('welcome')
-    await nextGuideStep(); expect(flow.step).toBe('more-help')
-    await nextGuideStep(); await nextGuideStep()
+    await nextGuideStep(); expect(flow.step).toBe('more-unavailable')
+    await nextGuideStep()
     expect(flow.moduleId).toBe('recharge'); await continueChapter('balance')
     expect(stopped).not.toHaveBeenCalled()
     await nextGuideStep(); expect(flow.step).toBe('recharge-unavailable')
@@ -164,8 +308,7 @@ describe('ordinary user guide flows', () => {
     }
     await continueChapter('balance')
     await nextGuideStep(); expect(flow.step).toBe('recharge-unavailable')
-    await nextGuideStep(); await continueChapter('more-help')
-    await nextGuideStep(); expect(flow.step).toBe('more-tools')
+    await nextGuideStep(); await continueChapter('more-quick-start')
     await nextGuideStep(); expect(flow.step).toBe('finish')
     expect(visited.filter(step => step === 'welcome')).toHaveLength(1)
     expect(visited.filter(step => step === 'finish')).toHaveLength(1)

@@ -24,6 +24,8 @@ export interface ControllerOptions {
   driverFactory?: typeof driver
 }
 export const stopMessages: Record<string, string> = {
+  'error:more-settings': '菜单信息暂时没有读取成功，本章引导已停止，页面可以继续使用。可从右下角「使用引导」重试。',
+  'error:more-target': '左侧菜单入口缺失、重复或暂时无法显示，本章引导已停止，页面可以继续使用。展开菜单后可从右下角「使用引导」重试；仍失败时请联系网站管理员。',
   'error:target-timeout': '等待页面控件超时，引导已停止。页面可以继续使用。',
   'error:engine-frame': '引导显示发生异常，已停止。页面可以继续使用。',
   'error:popover-position': '提示位置暂不可用，引导已停止。调整窗口后，可从右下角「使用引导」重新开始。',
@@ -110,7 +112,7 @@ export function createGuideController(options: ControllerOptions) {
   }
   function validProgress(value: unknown, userId: number): value is ProgressRecord {
     const progress = value as ProgressRecord | null
-    return isRegistrationRecord(progress, userId) && progress.configuration === configIdentity && JSON.stringify(progress.modules) === JSON.stringify(automaticModules) && automaticModules.includes(progress.moduleId) && (progress.step === 'chapter-break' || Object.prototype.hasOwnProperty.call(steps, progress.step)) && typeof progress.path === 'string'
+    return isRegistrationRecord(progress, userId) && progress.configuration === configIdentity && JSON.stringify(progress.modules) === JSON.stringify(automaticModules) && automaticModules.includes(progress.moduleId) && (progress.step === 'chapter-break' || Object.prototype.hasOwnProperty.call(steps, progress.step) || progress.moduleId === 'more' && ['more-help', 'more-tools'].includes(progress.step)) && typeof progress.path === 'string'
   }
   async function update() {
     if (destroyed) return

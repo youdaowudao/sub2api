@@ -11,7 +11,7 @@ export function createTourSession(driverFactory: any, options: { storage?: Stora
   const saved = () => { try { return storage?.getItem(storageKey) === '1'; } catch { return false; } };
   const zero = () => Object.values(resources).every(n => n === 0);
 
-  function waitTarget(selector: any, signal: AbortSignal, timeout: number, allowDisabled = false): Promise<any> {
+  function waitTarget(selector: any, signal: AbortSignal, timeout: number, allowDisabled = false, ensureInView = false): Promise<any> {
     if (!selector) return Promise.resolve(undefined); // A centered introduction/confirmation.
     return new Promise<any>((resolve, reject) => {
       let done = false, frame: number | undefined;
@@ -36,6 +36,15 @@ export function createTourSession(driverFactory: any, options: { storage?: Stora
           const target = candidates[0];
           if (!target) return;
           const rect = target.getBoundingClientRect(), style = getComputedStyle(target);
+          // During the mobile slide the link can already be visible while its
+          // sidebar is still moving. Driver would freeze a stale mask position.
+          if (ensureInView) {
+            const sidebar = target.closest('.sidebar');
+            if (innerWidth < 1024 && sidebar) {
+              const bounds = sidebar.getBoundingClientRect();
+              if (sidebar.classList.contains('-translate-x-full') || bounds.left < 0 || bounds.right > innerWidth) return;
+            }
+          }
           if (rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.left < innerWidth && style.visibility !== 'hidden' && style.display !== 'none' && (allowDisabled || !target.disabled)) finish(null, target);
         } catch { finish(new Error('invalid-target')); }
       }
@@ -58,7 +67,7 @@ export function createTourSession(driverFactory: any, options: { storage?: Stora
     mine.controller.signal.addEventListener('abort', abort, { once: true });
     const layoutDeadline = performance.now() + Math.min(Math.max(settings.timeout ?? 8000, 1), 8000);
     try {
-      const element = await waitTarget(selector, waiting.signal, settings.timeout ?? 8000, settings.allowDisabled);
+      const element = await waitTarget(selector, waiting.signal, settings.timeout ?? 8000, settings.allowDisabled, settings.ensureInView);
       if (active !== mine || waiting.signal.aborted) return false;
       const horizontal: [HTMLElement, number][] = [];
       for (let parent = element?.parentElement; parent; parent = parent.parentElement) {
@@ -66,6 +75,7 @@ export function createTourSession(driverFactory: any, options: { storage?: Stora
         if (settings.alignRowStart) horizontal.push([parent, parent === element.closest('.table-wrapper') ? 0 : parent.scrollLeft]);
       }
       const horizontalWindow = scrollX;
+      if (settings.ensureInView) element?.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'nearest' });
       mine.next = settings.onNext;
       mine.previous = settings.onPrevious;
       mine.step = settings.id || '';

@@ -81,6 +81,33 @@ describe('guide exit and resources', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(tour.clean).toBe(true); expect(input.value).toBe('未完成草稿')
   })
+  it('captures sidebar scroll before bringing an informational menu into view and restores it on exit', async () => {
+    document.body.innerHTML = '<aside><nav><a data-tour="sidebar-affiliate"></a></nav></aside>'
+    const nav = document.querySelector('nav')!, target = document.querySelector('a')!
+    nav.scrollTop = 73
+    const scroll = vi.spyOn(target, 'scrollIntoView').mockImplementation(() => { nav.scrollTop = 211 })
+    tour = createTourSession(fakeDriver)
+    await tour.start('[data-tour="sidebar-affiliate"]', { id: 'more-affiliate', ensureInView: true })
+    expect(scroll).toHaveBeenCalledOnce(); expect(nav.scrollTop).toBe(211)
+    tour.stop(); expect(nav.scrollTo).toHaveBeenCalledWith(0, 73); expect(tour.clean).toBe(true)
+  })
+  it('waits for the mobile sidebar slide to finish before measuring its first highlighted entry', async () => {
+    vi.stubGlobal('innerWidth', 390)
+    document.body.innerHTML = '<aside class="sidebar"><a data-tour="sidebar-affiliate"></a></aside>'
+    let left = -40
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      if (this.matches('.sidebar')) return new DOMRect(left, 0, 256, 844)
+      return this.matches('.s2o-popover') ? new DOMRect(12, 80, 300, 180) : new DOMRect(12, 400, 220, 32)
+    })
+    tour = createTourSession(fakeDriver)
+    const pending = tour.start('[data-tour="sidebar-affiliate"]', { id: 'more-affiliate', ensureInView: true })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(tour.state).toBe('waiting')
+    expect(document.querySelector('.s2o-popover')).toBeNull()
+    left = 0; await vi.advanceTimersByTimeAsync(32)
+    expect(await pending).toBe(true); expect(tour.state).toBe('active')
+    tour.stop(); expect(tour.clean).toBe(true)
+  })
   it('bounds missing targets to eight seconds and cancels a pending wait immediately', async () => {
     tour = createTourSession(fakeDriver, { onStop: stopped })
     const pending = tour.start('[data-tour="missing"]', { id: 'missing', timeout: 60_000 })
