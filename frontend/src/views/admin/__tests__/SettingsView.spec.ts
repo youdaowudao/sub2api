@@ -33,6 +33,7 @@ const {
   createProvider,
   deleteProvider,
   fetchPublicSettings,
+  setCacheHitRateDefaultRangeLocal,
   adminSettingsFetch,
   showError,
   showSuccess,
@@ -74,6 +75,7 @@ const {
   createProvider: vi.fn(),
   deleteProvider: vi.fn(),
   fetchPublicSettings: vi.fn(),
+  setCacheHitRateDefaultRangeLocal: vi.fn(),
   adminSettingsFetch: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -132,6 +134,7 @@ vi.mock("@/stores", () => ({
 vi.mock("@/stores/adminSettings", () => ({
   useAdminSettingsStore: () => ({
     fetch: adminSettingsFetch,
+    setCacheHitRateDefaultRangeLocal,
   }),
 }));
 
@@ -731,6 +734,16 @@ describe("admin SettingsView payment visible method controls", () => {
     const guide = wrapper.get('[data-guide-settings]').element;
     expect(guide.previousElementSibling?.textContent).toContain('admin.settings.customMenu.add');
     expect(guide.parentElement?.style.display).not.toBe('none');
+    wrapper.unmount();
+  });
+
+  it("saves cache rate settings and updates the local default immediately", async () => {
+    const wrapper = mountView(); await flushPromises();
+    (wrapper.vm as any).form.allow_user_view_cache_hit_rate = true;
+    (wrapper.vm as any).form.cache_hit_rate_default_range = 'yesterday';
+    await wrapper.find('form').trigger('submit.prevent'); await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({ allow_user_view_cache_hit_rate: true, cache_hit_rate_default_range: 'yesterday' }));
+    expect(setCacheHitRateDefaultRangeLocal).toHaveBeenCalledWith('yesterday');
     wrapper.unmount();
   });
 

@@ -287,6 +287,7 @@ export interface PublicSettings {
   service_quota_enabled: boolean
   affiliate_enabled: boolean
   allow_user_view_error_requests?: boolean
+  allow_user_view_cache_hit_rate?: boolean
 }
 
 export interface AuthResponse {
@@ -2521,3 +2522,21 @@ export type {
   PlatformQuotaWindow,
   PlatformQuotasResponse,
 } from '@/api/admin/users'
+
+
+export interface CacheHitRateItem {
+  id: number
+  name: string
+  platform: string
+  requests: number
+  input_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+  cache_hit_rate: number | null
+}
+
+export interface CacheHitRateResult {
+  start_date: string
+  end_date: string
+  items: CacheHitRateItem[]
+}

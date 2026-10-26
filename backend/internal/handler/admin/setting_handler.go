@@ -284,6 +284,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		OpsMonitoringEnabled:                                   opsEnabled && settings.OpsMonitoringEnabled,
 		OpsRealtimeMonitoringEnabled:                           settings.OpsRealtimeMonitoringEnabled,
 		OpsQueryModeDefault:                                    settings.OpsQueryModeDefault,
+		CacheHitRateDefaultRange:                               settings.CacheHitRateDefaultRange,
 		OpsMetricsIntervalSeconds:                              settings.OpsMetricsIntervalSeconds,
 		MinClaudeCodeVersion:                                   settings.MinClaudeCodeVersion,
 		MaxClaudeCodeVersion:                                   settings.MaxClaudeCodeVersion,
@@ -401,6 +402,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 
 		AccountSchedulingThresholds: settings.AccountSchedulingThresholds,
 		AllowUserViewErrorRequests:  settings.AllowUserViewErrorRequests,
+		AllowUserViewCacheHitRate:   settings.AllowUserViewCacheHitRate,
 	}
 
 	// OpenAI fast policy (stored under a dedicated setting key)

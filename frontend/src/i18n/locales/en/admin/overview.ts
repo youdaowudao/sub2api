@@ -881,6 +881,7 @@ export default {
       nonExclusive: 'Non-Exclusive',
       public: 'Public',
       columns: {
+        cacheHitRate: 'Cache rate',
         name: 'Name',
         id: 'ID',
         platform: 'Platform',

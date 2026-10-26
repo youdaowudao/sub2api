@@ -131,3 +131,14 @@ describe('GroupDistributionChart', () => {
     expect(wrapper.findAll('tbody tr')[0].findAll('td')).toHaveLength(5)
   })
 })
+
+it('adds a cache rate column only when supplied and retains the old columns', async () => {
+  const wrapper = mount(GroupDistributionChart, { props: { groupStats: [{ group_id: 3, group_name: 'Fixture', requests: 4, total_tokens: 100, cost: 1, actual_cost: 1 }] } })
+  expect(wrapper.findAll('thead th')).toHaveLength(6)
+  await wrapper.setProps({ cacheHitRate: { loading: false, error: null, byId: { 3: 90 } } })
+  expect(wrapper.findAll('thead th')).toHaveLength(7)
+  expect(wrapper.findAll('thead th')[2].text()).toBe('usage.cacheRate')
+  expect(wrapper.find('[data-testid="group-cache-hit-rate"]').text()).toBe('90.0%')
+  await wrapper.setProps({ cacheHitRate: { loading: true, error: null, byId: {} } })
+  expect(wrapper.findAll('tbody tr')[0].findAll('td')[2].text()).toBe('…')
+})

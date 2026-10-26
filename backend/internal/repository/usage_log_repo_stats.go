@@ -656,44 +656,7 @@ func (r *usageLogRepository) GetGlobalStats(ctx context.Context, startTime, endT
 
 // GetStatsWithFilters gets usage statistics with optional filters
 func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters UsageLogFilters) (*UsageStats, error) {
-	conditions := make([]string, 0, 9)
-	args := make([]any, 0, 9)
-
-	if filters.UserID > 0 {
-		conditions = append(conditions, fmt.Sprintf("user_id = $%d", len(args)+1))
-		args = append(args, filters.UserID)
-	}
-	if filters.APIKeyID > 0 {
-		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", len(args)+1))
-		args = append(args, filters.APIKeyID)
-	}
-	if filters.AccountID > 0 {
-		conditions = append(conditions, fmt.Sprintf("account_id = $%d", len(args)+1))
-		args = append(args, filters.AccountID)
-	}
-	if filters.GroupID > 0 {
-		conditions = append(conditions, fmt.Sprintf("group_id = $%d", len(args)+1))
-		args = append(args, filters.GroupID)
-	}
-	conditions, args = appendUsageLogModelWhereCondition(conditions, args, filters.Model, filters.ModelFilterSource)
-	conditions, args = appendRequestTypeOrStreamWhereCondition(conditions, args, filters.RequestType, filters.Stream)
-	conditions, args = appendNativeCompactionV2WhereCondition(conditions, args, filters.NativeCompactionV2, "")
-	if filters.BillingType != nil {
-		conditions = append(conditions, fmt.Sprintf("billing_type = $%d", len(args)+1))
-		args = append(args, int16(*filters.BillingType))
-	}
-	conditions, args = appendUsageLogBillingModeWhereCondition(conditions, args, filters.BillingMode)
-	if filters.UpstreamModelMismatch != nil {
-		conditions = append(conditions, upstreamModelMismatchCondition("upstream_model_mismatch", *filters.UpstreamModelMismatch))
-	}
-	if filters.StartTime != nil {
-		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", len(args)+1))
-		args = append(args, *filters.StartTime)
-	}
-	if filters.EndTime != nil {
-		conditions = append(conditions, fmt.Sprintf("created_at < $%d", len(args)+1))
-		args = append(args, *filters.EndTime)
-	}
+	conditions, args := buildUsageLogStatsConditions(filters)
 
 	query := fmt.Sprintf(`
 		WITH scoped AS (
@@ -1096,4 +1059,98 @@ func (r *usageLogRepository) GetAccountUsageStats(ctx context.Context, accountID
 		UpstreamEndpoints: upstreamEndpoints,
 	}
 	return resp, nil
+}
+
+// buildUsageLogStatsConditions shares the original stats-card predicates unchanged.
+func buildUsageLogStatsConditions(filters UsageLogFilters) ([]string, []any) {
+	conditions := make([]string, 0, 9)
+	args := make([]any, 0, 9)
+
+	if filters.UserID > 0 {
+		conditions = append(conditions, fmt.Sprintf("user_id = $%d", len(args)+1))
+		args = append(args, filters.UserID)
+	}
+	if filters.APIKeyID > 0 {
+		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", len(args)+1))
+		args = append(args, filters.APIKeyID)
+	}
+	if filters.AccountID > 0 {
+		conditions = append(conditions, fmt.Sprintf("account_id = $%d", len(args)+1))
+		args = append(args, filters.AccountID)
+	}
+	if filters.GroupID > 0 {
+		conditions = append(conditions, fmt.Sprintf("group_id = $%d", len(args)+1))
+		args = append(args, filters.GroupID)
+	}
+	conditions, args = appendUsageLogModelWhereCondition(conditions, args, filters.Model, filters.ModelFilterSource)
+	conditions, args = appendRequestTypeOrStreamWhereCondition(conditions, args, filters.RequestType, filters.Stream)
+	conditions, args = appendNativeCompactionV2WhereCondition(conditions, args, filters.NativeCompactionV2, "")
+	if filters.BillingType != nil {
+		conditions = append(conditions, fmt.Sprintf("billing_type = $%d", len(args)+1))
+		args = append(args, int16(*filters.BillingType))
+	}
+	conditions, args = appendUsageLogBillingModeWhereCondition(conditions, args, filters.BillingMode)
+	if filters.UpstreamModelMismatch != nil {
+		conditions = append(conditions, upstreamModelMismatchCondition("upstream_model_mismatch", *filters.UpstreamModelMismatch))
+	}
+	if filters.StartTime != nil {
+		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", len(args)+1))
+		args = append(args, *filters.StartTime)
+	}
+	if filters.EndTime != nil {
+		conditions = append(conditions, fmt.Sprintf("created_at < $%d", len(args)+1))
+		args = append(args, *filters.EndTime)
+	}
+
+	return conditions, args
+}
+
+// GetCacheHitRateStats aggregates the usage table before joining display names.
+func (r *usageLogRepository) GetCacheHitRateStats(ctx context.Context, filters UsageLogFilters, dimension string, accountIDs []int64) ([]usagestats.CacheHitRateItem, error) {
+	conditions, args := buildUsageLogStatsConditions(filters)
+	idExpr, groupBy, display, join, order := "0::bigint", "", "'' AS name, '' AS platform", "", "s.id ASC"
+	switch dimension {
+	case "total":
+	case "group":
+		idExpr, groupBy = "COALESCE(group_id, 0)", "GROUP BY COALESCE(group_id, 0)"
+		display, join = "COALESCE(g.name, '') AS name, '' AS platform", "LEFT JOIN groups g ON g.id = s.id"
+	case "account":
+		idExpr, groupBy = "account_id", "GROUP BY account_id"
+		display, join, order = "COALESCE(a.name, '') AS name, COALESCE(a.platform, '') AS platform", "LEFT JOIN accounts a ON a.id = s.id", "s.requests DESC, s.id ASC"
+		if len(accountIDs) > 0 {
+			conditions = append(conditions, fmt.Sprintf("account_id = ANY($%d)", len(args)+1))
+			args = append(args, pq.Array(accountIDs))
+		}
+	default:
+		return nil, fmt.Errorf("invalid cache rate dimension: %s", dimension)
+	}
+	query := fmt.Sprintf(`WITH scoped AS (
+        SELECT %s AS id, COUNT(*) AS requests,
+            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+            COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens,
+            COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens
+        FROM usage_logs %s %s
+    ) SELECT s.id, %s, s.requests, s.input_tokens, s.cache_creation_tokens, s.cache_read_tokens
+      FROM scoped s %s ORDER BY %s`, idExpr, buildWhere(conditions), groupBy, display, join, order)
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	items := make([]usagestats.CacheHitRateItem, 0)
+	for rows.Next() {
+		var item usagestats.CacheHitRateItem
+		if err := rows.Scan(&item.ID, &item.Name, &item.Platform, &item.Requests, &item.InputTokens, &item.CacheCreationTokens, &item.CacheReadTokens); err != nil {
+			return nil, err
+		}
+		item.CacheHitRate = usagestats.CalculateCacheHitRate(item.InputTokens, item.CacheCreationTokens, item.CacheReadTokens)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if dimension == "total" && len(items) == 0 {
+		items = append(items, usagestats.CacheHitRateItem{})
+	}
+	return items, nil
 }

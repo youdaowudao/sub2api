@@ -447,3 +447,8 @@ export function formatRelativeWithDateTime(date: string | Date | null | undefine
 
   return `${relativeTime} · ${dateTime}`
 }
+
+
+export function formatCacheHitRate(rate: number | null | undefined): string {
+  return rate == null ? '-' : `${rate.toFixed(1)}%`
+}

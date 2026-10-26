@@ -1,3 +1,4 @@
+import type { CacheHitRateResult } from '@/types'
 /**
  * Usage tracking API endpoints
  * Handles usage logs and statistics retrieval
@@ -370,7 +371,13 @@ export async function getMyErrorDetail(id: number): Promise<UserErrorRequestDeta
   return data
 }
 
+export async function getCacheHitRate(params: UsageQueryParams): Promise<CacheHitRateResult> {
+  const { data } = await apiClient.get<CacheHitRateResult>('/usage/cache-hit-rate', { params })
+  return data
+}
+
 export const usageAPI = {
+  getCacheHitRate,
   list,
   query,
   getStats,

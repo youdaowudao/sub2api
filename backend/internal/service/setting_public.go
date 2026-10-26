@@ -242,6 +242,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyAffiliateEnabled,
 		SettingKeyRiskControlEnabled,
 		SettingKeyAllowUserViewErrorRequests,
+		SettingKeyAllowUserViewCacheHitRate,
 	}
 
 	settings, err := s.settingRepo.GetMultiple(ctx, keys)
@@ -377,6 +378,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		RiskControlEnabled: settings[SettingKeyRiskControlEnabled] == "true",
 
 		AllowUserViewErrorRequests: settings[SettingKeyAllowUserViewErrorRequests] == "true",
+		AllowUserViewCacheHitRate:  settings[SettingKeyAllowUserViewCacheHitRate] == "true",
 	}, nil
 }
 
@@ -643,6 +645,7 @@ type PublicSettingsInjectionPayload struct {
 	AffiliateEnabled              bool `json:"affiliate_enabled"`
 	RiskControlEnabled            bool `json:"risk_control_enabled"`
 	AllowUserViewErrorRequests    bool `json:"allow_user_view_error_requests"`
+	AllowUserViewCacheHitRate     bool `json:"allow_user_view_cache_hit_rate"`
 }
 
 // GetPublicSettingsForInjection returns public settings in a format suitable for HTML injection.
@@ -727,6 +730,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		AffiliateEnabled:                     settings.AffiliateEnabled,
 		RiskControlEnabled:                   settings.RiskControlEnabled,
 		AllowUserViewErrorRequests:           settings.AllowUserViewErrorRequests,
+		AllowUserViewCacheHitRate:            settings.AllowUserViewCacheHitRate,
 	}, nil
 }
 
@@ -850,4 +854,13 @@ func parseCustomMenuItemURLs(raw string) []string {
 		}
 	}
 	return urls
+}
+
+func (s *SettingService) IsUserCacheHitRateViewAllowed(ctx context.Context) bool {
+	vals, err := s.settingRepo.GetMultiple(ctx, []string{SettingKeyAllowUserViewCacheHitRate})
+	if err != nil {
+		slog.Warn("failed to get allow_user_view_cache_hit_rate setting, defaulting to false", "error", err)
+		return false
+	}
+	return vals[SettingKeyAllowUserViewCacheHitRate] == "true"
 }

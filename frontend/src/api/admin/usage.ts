@@ -1,3 +1,4 @@
+import type { CacheHitRateResult } from '@/types'
 /**
  * Admin Usage API endpoints
  * Handles admin-level usage logs and statistics retrieval
@@ -207,7 +208,13 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
   return data
 }
 
+export async function getCacheHitRate(params: AdminUsageQueryParams & { dimension: 'total' | 'group' | 'account'; account_ids?: string; nocache?: number }): Promise<CacheHitRateResult> {
+  const { data } = await apiClient.get<CacheHitRateResult>('/admin/usage/cache-hit-rate', { params })
+  return data
+}
+
 export const adminUsageAPI = {
+  getCacheHitRate,
   list,
   getStats,
   searchUsers,

@@ -32,6 +32,7 @@ const authState = vi.hoisted(() => ({ isSimpleMode: false }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
+    usage: { getCacheHitRate: vi.fn().mockResolvedValue({ items: [] }) },
     groups: {
       list: listGroups,
       duplicate: duplicateGroup,
@@ -452,3 +453,5 @@ describe('GroupsView duplicate action', () => {
   })
 
 })
+
+vi.mock('@/composables/useCacheHitRateDefaultRange', () => ({ useCacheHitRateDefaultRange: () => ({ dates: { value: { start: '2026-10-26', end: '2026-10-26' } } }) }))

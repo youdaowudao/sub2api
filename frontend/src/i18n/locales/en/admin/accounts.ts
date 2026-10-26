@@ -256,6 +256,7 @@ export default {
         tempUnschedulableUntil: 'Resumes {time}'
       },
       columns: {
+        cacheHitRate: 'Cache rate',
         name: 'Name',
         id: 'Account ID',
         platformType: 'Platform/Type',

@@ -275,6 +275,9 @@
             </span>
           </template>
 
+          <template #cell-cache_hit_rate="{ row }">
+            <CacheHitRateCell :item="cacheHitRateByGroupId[row.id]" :loading="cacheHitRateLoading" :error="cacheHitRateError" />
+          </template>
           <template #cell-account_count="{ row }">
             <div class="space-y-0.5 text-xs">
               <div>
@@ -4266,6 +4269,9 @@ import { useAppStore } from "@/stores/app";
 import { useAuthStore } from "@/stores/auth";
 import { useOnboardingStore } from "@/stores/onboarding";
 import { adminAPI } from "@/api/admin";
+import type { CacheHitRateItem } from '@/types';
+import CacheHitRateCell from '@/components/admin/usage/CacheHitRateCell.vue';
+import { useCacheHitRateDefaultRange } from '@/composables/useCacheHitRateDefaultRange';
 import type {
   AdminGroup,
   CodexModelsManifestConfig,
@@ -4472,7 +4478,8 @@ const allColumns = computed<Column[]>(() => {
     { key: "status", label: t("admin.groups.columns.status"), sortable: true },
     { key: "actions", label: t("admin.groups.columns.actions"), sortable: false },
   ];
-  if (authStore.isSimpleMode) return basic;
+  const cacheRateColumn: Column = { key: 'cache_hit_rate', label: t('admin.groups.columns.cacheHitRate'), sortable: false };
+  if (authStore.isSimpleMode) return [...basic.slice(0, 4), cacheRateColumn, ...basic.slice(4)];
   return [
     ...basic.slice(0, 3),
     { key: "billing_type", label: t("admin.groups.columns.billingType"), sortable: true },
@@ -4481,6 +4488,7 @@ const allColumns = computed<Column[]>(() => {
     basic[3],
     { key: "capacity", label: t("admin.groups.columns.capacity"), sortable: false },
     { key: "usage", label: t("admin.groups.columns.usage"), sortable: false },
+    cacheRateColumn,
     ...basic.slice(4),
   ];
 });
@@ -4567,6 +4575,26 @@ const hasVisibleUsageSummaryConsumer = computed(
 );
 const hasVisibleCapacityColumn = computed(() => !authStore.isSimpleMode && isColumnVisible("capacity"));
 
+const cacheHitRateByGroupId = ref<Record<number, CacheHitRateItem>>({});
+const cacheHitRateLoading = ref(false);
+const cacheHitRateError = ref<string | null>(null);
+let cacheHitRateReqSeq = 0;
+const { dates: cacheHitRateDates } = useCacheHitRateDefaultRange(() => { void loadCacheHitRates(); });
+const loadCacheHitRates = async () => {
+  const seq = ++cacheHitRateReqSeq;
+  if (hiddenColumns.has('cache_hit_rate')) { cacheHitRateLoading.value = false; return; }
+  cacheHitRateLoading.value = true; cacheHitRateError.value = null; cacheHitRateByGroupId.value = {};
+  const dates = cacheHitRateDates.value;
+  try {
+    const result = await adminAPI.usage.getCacheHitRate({ dimension: 'group', start_date: dates.start, end_date: dates.end });
+    if (seq !== cacheHitRateReqSeq) return;
+    cacheHitRateByGroupId.value = Object.fromEntries(result.items.map(item => [item.id, item]));
+  } catch (error) {
+    if (seq !== cacheHitRateReqSeq) return;
+    cacheHitRateError.value = extractApiErrorMessage(error);
+  } finally { if (seq === cacheHitRateReqSeq) cacheHitRateLoading.value = false; }
+};
+
 const toggleColumn = (key: string) => {
   const validKeys = getValidHiddenColumnKeys();
   if (!validKeys.has(key)) return;
@@ -4578,6 +4606,7 @@ const toggleColumn = (key: string) => {
     hiddenColumns.add(key);
   }
   saveColumnsToStorage();
+  if (key === "cache_hit_rate") void loadCacheHitRates();
 
   if (wasHidden && (key === "usage" || key === "billing_type")) {
     loadUsageSummary();
@@ -5657,6 +5686,7 @@ const loadGroups = async () => {
     );
     if (signal.aborted) return;
     groups.value = response.items;
+    void loadCacheHitRates();
     pagination.total = response.total;
     pagination.pages = response.pages;
     if (hasVisibleUsageSummaryConsumer.value) {
@@ -6942,6 +6972,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  cacheHitRateReqSeq++;
   clearTimeout(searchTimeout);
   invalidateFormCandidates();
   ++sortLoadSeq;
