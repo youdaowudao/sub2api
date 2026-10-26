@@ -31,7 +31,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 		if apiKeyHeadersTooLarge(c) {
 			recordInvalidAuthFailure(c, apiKeyService)
 			MarkIngressRejected(c, IngressRejectInvalidAPIKey)
-			abortWithGoogleError(c, 401, "Invalid API key")
+			abortWithGoogleError(c, 401, "Invalid API key（API Key 无效，请检查是否填写正确）")
 			return
 		}
 		if v := strings.TrimSpace(c.Query("api_key")); v != "" {
@@ -54,7 +54,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 		if len(apiKeyString) > service.MaxAPIKeyCredentialBytes {
 			recordInvalidAuthFailure(c, apiKeyService)
 			MarkIngressRejected(c, IngressRejectInvalidAPIKey)
-			abortWithGoogleError(c, 401, "Invalid API key")
+			abortWithGoogleError(c, 401, "Invalid API key（API Key 无效，请检查是否填写正确）")
 			return
 		}
 
@@ -63,7 +63,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			if errors.Is(err, service.ErrAPIKeyNotFound) {
 				recordInvalidAuthFailure(c, apiKeyService)
 				MarkIngressRejected(c, IngressRejectInvalidAPIKey)
-				abortWithGoogleError(c, 401, "Invalid API key")
+				abortWithGoogleError(c, 401, "Invalid API key（API Key 无效，请检查是否填写正确）")
 				return
 			}
 			if errors.Is(err, service.ErrAPIKeyAuthOverloaded) {
@@ -85,7 +85,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			apiKey.Status != service.StatusAPIKeyExpired &&
 			apiKey.Status != service.StatusAPIKeyQuotaExhausted {
 			MarkIngressRejected(c, IngressRejectAPIKeyDisabled)
-			abortWithGoogleError(c, 401, "API key is disabled")
+			abortWithGoogleError(c, 401, "API key is disabled（API Key 已被停用）")
 			return
 		}
 
@@ -110,7 +110,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 		}
 		if !apiKey.User.IsActive() {
 			MarkIngressRejected(c, IngressRejectUserInactive)
-			abortWithGoogleError(c, 401, "User account is not active")
+			abortWithGoogleError(c, 401, "User account is not active（账户已停用，请联系管理员）")
 			return
 		}
 		if code, message, ok := validateAPIKeyGroupAvailable(apiKey); !ok {
@@ -173,7 +173,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 				apiKey.Group.ID,
 			)
 			if err != nil {
-				abortWithGoogleError(c, 403, "No active subscription found for this group")
+				abortWithGoogleError(c, 403, "No active subscription found for this group（当前分组没有有效订阅）")
 				return
 			}
 
@@ -201,7 +201,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			c.Set(string(ContextKeySubscription), subscription)
 		} else {
 			if apiKeyBalanceBelowAuthThreshold(apiKey.User.Balance, cfg) {
-				abortWithGoogleError(c, 403, "Insufficient account balance")
+				abortWithGoogleError(c, 403, "Insufficient account balance（账户余额不足，请及时充值）")
 				return
 			}
 		}

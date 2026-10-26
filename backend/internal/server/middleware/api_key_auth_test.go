@@ -46,6 +46,7 @@ func TestAPIKeyAuthRejectsOversizedCredentialsBeforeLookup(t *testing.T) {
 		}
 		r.ServeHTTP(w, req)
 		require.Equal(t, http.StatusUnauthorized, w.Code)
+		requireAPIKeyAuthError(t, w, "INVALID_API_KEY", "Invalid API key（API Key 无效，请检查是否填写正确）")
 	}
 	require.Zero(t, calls.Load())
 }
@@ -1424,7 +1425,60 @@ func TestAPIKeyAuthRejectsExhaustedBalance(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusForbidden, w.Code)
-	requireAPIKeyAuthError(t, w, "INSUFFICIENT_BALANCE", "Insufficient account balance")
+	requireAPIKeyAuthError(t, w, "INSUFFICIENT_BALANCE", "Insufficient account balance（账户余额不足，请及时充值）")
+}
+
+func TestAPIKeyAuth_ChineseHints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name                string
+		keyStatus           string
+		userStatus          string
+		repoErr             error
+		missingSubscription bool
+		wantStatus          int
+		code                string
+		message             string
+	}{
+		{"invalid key", service.StatusActive, service.StatusActive, service.ErrAPIKeyNotFound, false, http.StatusUnauthorized, "INVALID_API_KEY", "Invalid API key（API Key 无效，请检查是否填写正确）"},
+		{"disabled key", service.StatusDisabled, service.StatusActive, nil, false, http.StatusUnauthorized, "API_KEY_DISABLED", "API key is disabled（API Key 已被停用）"},
+		{"inactive user", service.StatusActive, service.StatusDisabled, nil, false, http.StatusUnauthorized, "USER_INACTIVE", "User account is not active（账户已停用，请联系管理员）"},
+		{"missing subscription", service.StatusActive, service.StatusActive, nil, true, http.StatusForbidden, "SUBSCRIPTION_NOT_FOUND", "No active subscription found for this group（当前分组没有有效订阅）"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{RunMode: config.RunModeStandard}
+			apiKey := &service.APIKey{
+				ID: 101, Key: "test-chinese-hints", Status: tt.keyStatus,
+				User: &service.User{ID: 7, Status: tt.userStatus, Balance: 10},
+			}
+			var subscriptionService *service.SubscriptionService
+			if tt.missingSubscription {
+				apiKey.Group = &service.Group{
+					ID: 42, Status: service.StatusActive, Hydrated: true,
+					SubscriptionType: service.SubscriptionTypeSubscription,
+				}
+				apiKey.GroupID = &apiKey.Group.ID
+				subscriptionService = service.NewSubscriptionService(nil, &stubUserSubscriptionRepo{
+					getActive: func(context.Context, int64, int64) (*service.UserSubscription, error) {
+						return nil, service.ErrSubscriptionNotFound
+					},
+				}, nil, nil, cfg)
+				t.Cleanup(subscriptionService.Stop)
+			}
+			repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) {
+				return apiKey, tt.repoErr
+			}}
+			svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+			router := newAuthTestRouter(svc, subscriptionService, cfg)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/t", nil)
+			req.Header.Set("x-api-key", apiKey.Key)
+			router.ServeHTTP(w, req)
+			require.Equal(t, tt.wantStatus, w.Code)
+			requireAPIKeyAuthError(t, w, tt.code, tt.message)
+		})
+	}
 }
 
 func TestAPIKeyAuthOpenAIQuotaErrorFormat(t *testing.T) {

@@ -109,7 +109,7 @@ func classifyNoAccountError(
 	fallback := noAccountErrorClassification{
 		Status:  http.StatusServiceUnavailable,
 		ErrType: "api_error",
-		Message: "Service temporarily unavailable",
+		Message: "Service temporarily unavailable（服务暂时不可用，请稍后重试）",
 	}
 
 	routingModel = strings.TrimSpace(routingModel)
