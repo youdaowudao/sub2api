@@ -32,6 +32,14 @@ describe('guide configuration', () => {
     { schemaVersion: 1, modules: [{ id: 'quick-start', enabled: false, menuId: '../private' }] },
     { schemaVersion: 1, modules: [{ id: 'keys', enabled: true, menuId: 'other' }] },
   ])('rejects invalid or ambiguous configuration %j', value => { expect(() => normalizeConfig(value)).toThrow() })
+  it('validates and retains four optional sidebar bindings without changing the legacy schema', () => {
+    const value = { schemaVersion: 1, modules: [{ id: 'quick-start', enabled: false, menuId: 'quick' }, { id: 'more', enabled: true, menuIds: { tutorial: 'help', support: 'support', pricing: 'prices', radar: 'radar' } }] }
+    expect(normalizeConfig(value)).toEqual(value)
+    expect(normalizeConfig({ schemaVersion: 1, modules: [{ id: 'more', enabled: false, menuIds: value.modules[1].menuIds }] }).modules[0].menuIds).toEqual(value.modules[1].menuIds)
+    for (const menuIds of [{ unknown: 'x' }, { tutorial: '../x' }, { tutorial: '' }, { tutorial: 1 }, [], null, { tutorial: 'same', support: 'same' }, { tutorial: 'quick' }]) {
+      expect(() => normalizeConfig({ ...value, modules: [value.modules[0], { id: 'more', enabled: true, menuIds }] })).toThrow()
+    }
+  })
   it('binds the article even with the quick-start chapter disabled or the tour opted out', async () => {
     const draft = { schemaVersion: 1, modules: [{ id: 'quick-start', enabled: false, menuId: 'local-doc' }] }
     localStorage.setItem('s2o:configuration-preview:v1', JSON.stringify(draft))

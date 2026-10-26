@@ -3,6 +3,7 @@ import { anchors, steps } from './steps';
 import { createKeyUse } from './keyUse';
 import { createKeyFormGuide } from './keyForm';
 import { bindGuideBusinessSession } from './businessEvents';
+import { moreRoleForStep, moreRoles, resolveMoreTargets, type MoreRole } from './moreTargets';
 
 const editSteps = ['usage-edit-name', 'usage-edit-group', 'usage-edit-save'];
 const documentTargets: Record<string, string[]> = { 'quick-command': ['windows-step', 'windows-command'], 'quick-wait': ['windows-step', 'windows-run'], 'quick-test': ['codex-test'], 'quick-prices': ['models'], 'quick-problems': ['problems'], 'quick-support': ['support'] };
@@ -91,13 +92,17 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
     document.removeEventListener('keydown', owned.pickKey, true);
     resources.listeners -= 2;
     document.body.classList.remove('s2o-active');
+    if (owned.modules[owned.index] === 'more' && ['error:target-timeout', 'error:invalid-target', 'error:ambiguous-target'].includes(reason)) reason = 'error:more-target';
     onStop(reason, step);
   }
   function stop(reason = 'cancelled') { if (session) { if (reason.startsWith('completed') && session.quickCompleted) tour.preserveQuickStartScroll(); tour.stop(reason); if (session) finish(reason); } }
   const moduleId = () => session?.modules[session.index];
-  async function go(id: string, firstStep = false, manual = false) {
+  async function go(id: string, firstStep = false, manual = false, replacePending = false) {
     const owned = session;
-    if (!owned || changing) return;
+    if (!owned || changing && !replacePending) return;
+    // show() aborts its previous target wait. Only the replacing transition may
+    // publish or clear the busy flag after that old promise settles.
+    const transition = owned.transition = {};
     changing = true; step = id; owned.deadline = 0;
     try {
       if (!['usage-pick', 'quick-key-pick'].includes(id)) owned.keyUse.restoreNames();
@@ -106,6 +111,13 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
       if (['name', 'provider', 'group', 'submit', ...editSteps].includes(id)) owned.keyForm.showWarning({ scroll: ['submit', 'usage-edit-save'].includes(id) });
       else owned.keyForm.remove();
       const popover = { ...steps[id] };
+      const moreRole = moreRoleForStep(id);
+      const moreOpen = id.startsWith('more-open-');
+      const moreTargets = moreRole ? resolveMoreTargets(moduleConfig, getPublicSettings()) : null;
+      const moreTarget = moreTargets?.find(item => item.role === moreRole);
+      if (moreRole && !moreTarget) throw new Error('more-target-unavailable');
+      const moreSelector = moreRole ? moreOpen ? anchors.menu : moreTarget!.selector : undefined;
+      if (moreRole && !moreOpen && moreTargets?.[0].role === moreRole) popover.showButtons = ['next'];
       if (id === 'review' && owned.index + 1 < owned.modules.length) {
         popover.description = '请在列表里核对刚创建的密钥名称和分组。';
         popover.nextBtnText = '已创建，继续';
@@ -133,7 +145,8 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
         'quick-key-copy': () => { const copy = usage.copy(), rect = copy?.getBoundingClientRect(); return copy && !copy.disabled && rect.width > 0 && rect.height > 0 && getComputedStyle(copy).visibility !== 'hidden' ? usage.overview() : undefined; },
         'quick-key-close': usage.group, 'quick-key-empty': usage.empty,
       };
-      const selector = documentTargets[id] ? () => owned.quick.target() : quickTargets[id] || usageTargets[id] || rechargeTargets[id] || (id === 'submit' ? owned.keyForm.dialog : anchors[id]);
+      const selector = moreSelector || (documentTargets[id] ? () => owned.quick.target() : quickTargets[id] || usageTargets[id] || rechargeTargets[id] || (id === 'submit' ? owned.keyForm.dialog : anchors[id]));
+      const moreAnchor = moreSelector ? () => visible(moreSelector) ? one(moreSelector) : undefined : undefined;
       const informational = ['balance', 'balance-mobile', 'recharge-amount', 'recharge-method', 'recharge-confirm', 'orders-list'].includes(id);
       const nextButton = () => first('.s2o-popover .s2o-driver-popover-next-btn');
       const usageAttention: Record<string, any> = {
@@ -153,13 +166,14 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
         'quick-key-copy': () => usage.popup() ? usage.group() : usage.copy(),
       };
       const settings = { id, manual, popover, onNext: next, onPrevious: previous,
-        placement: { anchor: documentTargets[id] ? owned.quick.attention : placementAnchors[id],
-          required: id === 'quick-command',
+        placement: { anchor: moreAnchor || (documentTargets[id] ? owned.quick.attention : placementAnchors[id]),
+          required: id === 'quick-command' || !!moreRole,
           side: ['submit', 'usage-edit-save'].includes(id) ? 'top' : popover.side,
           align: ['submit', 'usage-edit-save'].includes(id) ? 'end' : 'center' },
         alignRowStart: ['usage-row', 'quick-key-copy'].includes(id),
+        ensureInView: !!moreRole && !moreOpen,
         allowDisabled: id === 'recharge-confirm',
-        attention: id.startsWith('more-') ? { mode: 'next' } : id.startsWith('quick-') ? { selector: id === 'quick-command' ? () => owned.quick.state.copyGesture ? nextButton() : owned.quick.attention()
+        attention: id.startsWith('more-') ? moreRole ? { selector: moreAnchor } : { mode: 'next' } : id.startsWith('quick-') ? { selector: id === 'quick-command' ? () => owned.quick.state.copyGesture ? nextButton() : owned.quick.attention()
           : id === 'quick-wait' ? () => owned.quick.attention()
           : id === 'quick-key-pick' ? usage.pickTarget
           : id === 'quick-key-copy' ? () => usage.popup() ? usage.firstGroup() : owned.quickCopySeen ? nextButton() : usage.copy()
@@ -167,11 +181,11 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
           : id.startsWith('usage-') ? { selector: usageAttention[id] || (['usage-menu', 'usage-nav'].includes(id) ? selector : nextButton) }
           : selector && (id.startsWith('recharge-') || id.startsWith('balance') || id.startsWith('orders-')) ? { selector, mode: informational ? 'next' : 'target' } : undefined };
       const result = firstStep || tour.state === 'idle' ? await tour.start(selector, { ...settings, manual: owned.manual }) : await tour.show(selector, settings);
-      if (session !== owned) return;
+      if (session !== owned || owned.transition !== transition) return;
       if (!result) { stop('error:engine-unavailable'); if (session) finish('error:engine-unavailable'); return; }
       onStep(id, moduleId());
-    } catch { stop('error:step-target');
-    } finally { if (session === owned) changing = false; }
+    } catch { if (session === owned && owned.transition === transition) stop(moduleId() === 'more' ? 'error:more-target' : 'error:step-target');
+    } finally { if (session === owned && owned.transition === transition) changing = false; }
   }
   function beginModule() {
     if (!session) return;
@@ -184,10 +198,37 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
       return go(location.pathname === '/keys' ? 'usage-pick' : visible(anchors.navigate) ? 'usage-nav' : 'usage-menu');
     }
     if (moduleId() === 'quick-start') return beginQuick();
-    if (moduleId() === 'more') return go('more-help');
+    if (moduleId() === 'more') return beginMore();
     if (visible(anchors.name)) return stop('cancelled:dialog-open');
     if (visible(desktopBalance)) return go('balance');
     return go(visible(mobileBalance) ? 'balance-mobile' : 'balance-menu');
+  }
+  async function beginMore(role?: MoreRole) {
+    const owned = session; if (!owned) return;
+    try {
+      const targets = resolveMoreTargets(moduleConfig, getPublicSettings());
+      if (targets === null) {
+        owned.moreResume = role;
+        await go('more-loading');
+        if (session === owned) owned.deadline = Date.now() + 8000;
+        return;
+      }
+      const target = targets.find(item => moreRoles.indexOf(item.role) >= (role ? moreRoles.indexOf(role) : 0));
+      if (!target) return targets.length ? completeModule() : go('more-unavailable');
+      const closed = innerWidth < 1024 && document.querySelector('.sidebar')?.classList.contains('-translate-x-full');
+      return go(`more-${closed ? 'open-' : ''}${target.role}`);
+    } catch { if (session === owned) stop('error:more-target'); }
+  }
+  function adjacentMore(direction: 1 | -1) {
+    const role = moreRoleForStep(step); if (!role || !session) return;
+    try {
+      const targets = resolveMoreTargets(moduleConfig, getPublicSettings());
+      if (targets === null) return beginMore(role);
+      const ordered = direction === 1 ? targets : [...targets].reverse();
+      const target = ordered.find(item => direction * (moreRoles.indexOf(item.role) - moreRoles.indexOf(role)) > 0);
+      if (target) return beginMore(target.role);
+      if (direction === 1) return completeModule();
+    } catch { stop('error:more-target'); }
   }
   async function beginQuick(resumeStep = 'quick-command') {
     const owned = session; if (!owned) return;
@@ -266,8 +307,8 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
   async function next() {
     if (!session || changing) return;
     if (step === 'welcome') return beginModule();
-    if (step === 'more-help') return go('more-tools');
-    if (step === 'more-tools') return completeModule();
+    if (moreRoleForStep(step) && !step.startsWith('more-open-')) return adjacentMore(1);
+    if (step === 'more-unavailable') return completeModule();
     if (step === 'name') { if (!first(anchors.name)?.value.trim()) { first(anchors.name)?.focus(); return; } return go('provider'); }
     if (step === 'provider') {
       if (!first(anchors.provider + ' input[value="openai"]:checked:not(:disabled)')) { first(anchors.provider + ' input[value="openai"]:not(:disabled)')?.focus({ preventScroll: true }); return; }
@@ -301,11 +342,18 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
     if (step === 'finish') return stop(session.confirmed ? 'completed:user_confirmed' : session.quickConfirmed ? 'completed:quickstart_user_confirmed' : 'completed:tour_viewed');
   }
   function previous() {
-    return go(({ provider: 'name', group: 'provider', submit: 'group', review: visible(anchors.name) ? 'name' : 'create', 'usage-edit-save': 'usage-edit-name', 'quick-wait': 'quick-command', 'quick-test': 'quick-problems', 'recharge-method': 'recharge-amount', 'recharge-confirm': 'recharge-method', 'more-tools': 'more-help' } as Record<string, string>)[step] || 'welcome');
+    if (moreRoleForStep(step)) return adjacentMore(-1);
+    return go(({ provider: 'name', group: 'provider', submit: 'group', review: visible(anchors.name) ? 'name' : 'create', 'usage-edit-save': 'usage-edit-name', 'quick-wait': 'quick-command', 'quick-test': 'quick-problems', 'recharge-method': 'recharge-amount', 'recharge-confirm': 'recharge-method' } as Record<string, string>)[step] || 'welcome');
   }
   function inspect() {
     const owned = session;
-    if (!owned || changing || owned.checking) return;
+    if (!owned) return;
+    if (changing) {
+      const role = moreRoleForStep(step);
+      if (moduleId() === 'more' && role && !step.startsWith('more-open-') && innerWidth < 1024 && document.querySelector('.sidebar')?.classList.contains('-translate-x-full')) void go(`more-open-${role}`, false, false, true);
+      return;
+    }
+    if (owned.checking) return;
     try {
     if (/^\/(login|register|email-verify|auth|setup)(\/|$)/.test(location.pathname)) return stop('cancelled:account-route');
     if (paused()) {
@@ -315,6 +363,20 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
         else void continueChapter();
       }
       return;
+    }
+    if (step === 'more-loading') {
+      if (getPublicSettings() != null) return void beginMore(owned.moreResume);
+      if (owned.deadline && Date.now() >= owned.deadline) return stop('error:more-settings');
+      return;
+    }
+    const moreRole = moreRoleForStep(step);
+    if (moduleId() === 'more' && moreRole) {
+      const targets = resolveMoreTargets(moduleConfig, getPublicSettings());
+      const target = targets?.find(item => item.role === moreRole);
+      if (!target) return void beginMore(moreRole);
+      const closed = innerWidth < 1024 && document.querySelector('.sidebar')?.classList.contains('-translate-x-full');
+      if (closed && !step.startsWith('more-open-')) return void go(`more-open-${moreRole}`);
+      if (step.startsWith('more-open-') && !closed) return void go(`more-${moreRole}`);
     }
     if (['create', 'name', 'provider', 'group', 'submit', 'review'].includes(step) && location.pathname !== '/keys') return stop('cancelled:route-changed');
     if (['recharge-amount', 'recharge-method', 'recharge-confirm'].includes(step) && location.pathname !== '/purchase') return stop('cancelled:route-changed');
@@ -448,6 +510,7 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
       if (['usage-menu', 'usage-nav'].includes(step) && target.closest(step === 'usage-menu' ? anchors.menu : anchors.navigate)) owned.deadline = Date.now() + 8000;
       if (step === 'quick-nav' && owned.quick.entry()?.contains(target) || step === 'quick-menu' && target.closest(anchors.menu)) owned.deadline = Date.now() + 8000;
       if (step === 'quick-return-nav' && owned.quick.entry()?.contains(target) || ['quick-return-menu', 'quick-keys-menu'].includes(step) && target.closest(anchors.menu) || step === 'quick-keys-nav' && target.closest(anchors.navigate)) owned.deadline = Date.now() + 8000;
+      if (step.startsWith('more-open-') && target.closest(anchors.menu)) owned.deadline = Date.now() + 8000;
     };
     document.addEventListener('click', owned.click, true); document.addEventListener('keydown', owned.pickKey, true); resources.listeners += 2;
     owned.observer = new MutationObserver(inspect); owned.observer.observe(document.body, { childList: true, subtree: true }); resources.observers++;
@@ -458,7 +521,8 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
       return true;
     }
     document.body.classList.add('s2o-active');
-    await go(manual && selected.length === 1 && selected[0] === 'more' ? 'more-help' : 'welcome', true, manual);
+    if (manual && selected.length === 1 && selected[0] === 'more') await beginMore();
+    else await go('welcome', true, manual);
     if (session === owned && resume) {
       const index = owned.modules.indexOf(resume.moduleId);
       if (index >= 0) {
@@ -467,7 +531,7 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
         else if (resume.moduleId === 'key-use') await go(location.pathname === '/keys' ? 'usage-pick' : visible(anchors.navigate) ? 'usage-nav' : 'usage-menu');
         else if (resume.moduleId === 'quick-start') await beginQuick(resume.step);
         else if (resume.moduleId === 'recharge') await (location.pathname === '/purchase' ? openRecharge() : go(location.pathname === '/orders' ? 'orders-list' : visible(desktopBalance) ? 'balance' : 'balance-menu'));
-        else if (resume.moduleId === 'more') await go(['more-help', 'more-tools', 'finish'].includes(resume.step) ? resume.step : 'more-help');
+        else if (resume.moduleId === 'more') await (resume.step === 'finish' ? go('finish') : beginMore(moreRoleForStep(resume.step)));
       }
     }
     return session === owned;

@@ -1,7 +1,12 @@
 import bundledConfiguration from './config/onboarding.json'
 
 export type ModuleId = 'keys' | 'key-use' | 'quick-start' | 'recharge' | 'more'
-export interface GuideModule { id: ModuleId; enabled: boolean; menuId?: string }
+export const moreMenuCatalog = [
+  { id: 'tutorial', title: '使用教程' }, { id: 'support', title: '联系客服（新用户福利）' },
+  { id: 'pricing', title: '模型价格' }, { id: 'radar', title: '智商雷达' },
+] as const
+export type MoreMenuRole = typeof moreMenuCatalog[number]['id']
+export interface GuideModule { id: ModuleId; enabled: boolean; menuId?: string; menuIds?: Partial<Record<MoreMenuRole, string>> }
 export interface GuideConfig { schemaVersion: 1; modules: GuideModule[] }
 export const moduleCatalog: { id: ModuleId; title: string; description: string; needsMenu?: boolean }[] = [
   { id: 'keys', title: '创建密钥', description: '填写名称、选择分组，创建密钥。' },
@@ -17,13 +22,16 @@ export function normalizeConfig(value: unknown): GuideConfig {
   if (!input || input.schemaVersion !== 1 || !Array.isArray(input.modules) || input.modules.length > moduleCatalog.length || Object.keys(input).some(key => !['schemaVersion', 'modules'].includes(key))) throw new Error('配置格式不正确。')
   const seen = new Set<string>()
   const modules = input.modules.map((item: GuideModule) => {
-    const fields = item?.id === 'quick-start' ? ['id', 'enabled', 'menuId'] : ['id', 'enabled']
+    const fields = item?.id === 'quick-start' ? ['id', 'enabled', 'menuId'] : item?.id === 'more' ? ['id', 'enabled', 'menuIds'] : ['id', 'enabled']
     if (!item || !moduleCatalog.some(module => module.id === item.id) || typeof item.enabled !== 'boolean' || seen.has(item.id) || Object.keys(item).some(key => !fields.includes(key))) throw new Error('章节配置不正确。')
     if (item.menuId !== undefined && (typeof item.menuId !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(item.menuId))) throw new Error('请选择有效的快速开始菜单。')
     if (item.id === 'quick-start' && item.enabled && !item.menuId) throw new Error('启用快速开始时，需要选择一个自定义菜单。')
+    if (item.menuIds !== undefined && (!item.menuIds || typeof item.menuIds !== 'object' || Array.isArray(item.menuIds) || Object.entries(item.menuIds).some(([role, id]) => !moreMenuCatalog.some(item => item.id === role) || typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(id)))) throw new Error('请选择有效的更多功能菜单。')
     seen.add(item.id)
-    return { id: item.id, enabled: item.enabled, ...(item.menuId ? { menuId: item.menuId } : {}) }
+    return { id: item.id, enabled: item.enabled, ...(item.menuId ? { menuId: item.menuId } : {}), ...(item.menuIds && Object.keys(item.menuIds).length ? { menuIds: { ...item.menuIds } } : {}) }
   })
+  const boundIds = modules.flatMap(item => [...(item.menuId ? [item.menuId] : []), ...Object.values(item.menuIds || {})])
+  if (new Set(boundIds).size !== boundIds.length) throw new Error('不同用途需要选择不同的自定义菜单。')
   return { schemaVersion: 1, modules }
 }
 

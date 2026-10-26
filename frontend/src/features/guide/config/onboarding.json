@@ -5,6 +5,6 @@
     { "id": "key-use", "enabled": true },
     { "id": "quick-start", "enabled": true, "menuId": "onboarding-quick-start" },
     { "id": "recharge", "enabled": true },
-    { "id": "more", "enabled": true }
+    { "id": "more", "enabled": true, "menuIds": { "tutorial": "guide-other-page", "support": "c906a4e429133b3b", "pricing": "7490c34132b758a2", "radar": "c601441edd4d3c0d" } }
   ]
 }

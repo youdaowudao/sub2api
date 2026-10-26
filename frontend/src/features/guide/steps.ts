@@ -1,3 +1,5 @@
+import { moreIntroductions, moreRoles } from './moreTargets'
+
 // Versioned public DOM contract. Copy/order can change without changing the engine.
 export const FLOW_VERSION = 'ordinary-source-v1';
 export const anchors: Record<string, string> = {
@@ -64,12 +66,18 @@ export const steps: Record<string, any> = {
   'orders-nav': { title: '打开我的订单', description: '请点击“我的订单”，查看最近的付款记录和订单状态。这次不用付款，没有订单也可以继续。', side: 'right', showButtons: [] },
   'orders-list': { title: '最近的付款与订单状态', description: '以后可以在这里查看最近的订单，核对付款金额、支付方式和订单状态。尚未支付的订单也可能显示，请留意状态。还没有订单时显示空列表，之后有付款记录再来查看即可。', side: 'top', nextBtnText: '我已了解' },
   'recharge-unavailable': { title: '在线充值暂未开放', description: '本站当前未开启在线充值，余额仍可在账户区域查看。充值入口开放后，这段引导会带你认识金额和支付方式。', nextBtnText: '我已了解' },
-  'more-help': { title: '更多功能与帮助', description: '<p>这里介绍几个常用功能。</p><ul><li><strong>邀请返利</strong>：邀请好友，查看返利规则和记录。</li><li><strong>使用教程</strong>：查看使用方法和常见操作说明。</li><li><strong>联系客服（新用户福利）</strong>：查看客服联系方式和新用户福利。</li></ul><p><strong>遇到问题怎么办</strong>：先查看使用教程和使用记录；仍无法解决时，联系客服，说明所用客户端、模型和出错时间，并提供报错截图。截图中请隐藏密钥等敏感信息。</p>', nextBtnText: '继续' },
-  'more-tools': { title: '模型与工具', description: '<ul><li><strong>模型价格</strong>：查看模型和分组价格。</li><li><strong>智商雷达</strong>：查看 GPT 表现相关工具及说明。</li><li><strong>GPT生图</strong>：在线使用 GPT 生成图片。</li></ul><p>具体入口以当前菜单为准。</p>', nextBtnText: '继续', prevBtnText: '上一步', showButtons: ['previous', 'next'] },
+  'more-loading': { title: '正在读取菜单', description: '读取完成后，会依次介绍左侧入口。', showButtons: [] },
+  'more-unavailable': { title: '当前没有可介绍的入口', description: '这些入口尚未开放或没有绑定到当前菜单。稍后可从右下角「使用引导」再次查看。', nextBtnText: '我已了解' },
   finish: { title: '本次引导结束', description: '需要时，点右下角「使用引导」选择章节再次查看。', nextBtnText: '完成' },
 };
 
+for (const role of moreRoles) {
+  steps[`more-${role}`] = { ...moreIntroductions[role], side: 'right', nextBtnText: '继续', prevBtnText: '上一步', showButtons: ['previous', 'next'] }
+  steps[`more-open-${role}`] = { title: '展开左侧菜单', description: `请点击这里展开菜单，接着认识“${moreIntroductions[role].title}”入口。`, side: 'bottom', showButtons: [] }
+}
+
 export function sidebarTourId(path: string): string | undefined {
+  if (path === '/affiliate') return 'sidebar-affiliate'
   if (path === '/keys') return 'sidebar-my-keys'
   if (path === '/purchase') return 'sidebar-purchase'
   if (path === '/orders') return 'sidebar-orders'

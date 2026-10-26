@@ -32,13 +32,13 @@ describe('admin guide configuration card', () => {
     store.value.cachedPublicSettings = { custom_menu_items: [menu(), menu('saved', '已保存'), { ...menu('admin'), visibility: 'admin' }, menu('', '未保存')] }
     resolve(store.value.cachedPublicSettings); await flushPromises()
     expect(wrapper!.text()).toContain('这个菜单里填写的 URL 不生效')
-    expect(wrapper!.findAll('option').map(option => option.attributes('value'))).toEqual(['', 'onboarding-quick-start', 'saved'])
+    expect(wrapper!.get('[data-guide-menu]').findAll('option').map(option => option.attributes('value'))).toEqual(['', 'onboarding-quick-start', 'saved'])
     expect(wrapper!.get('[data-guide-current]').findAll('input')).toHaveLength(0)
     const unsaved = [menu('draft', '未保存草稿')]
     unsaved[0].label = '修改但没保存'; await nextTick()
-    expect(wrapper!.findAll('option').map(option => option.attributes('value'))).not.toContain('draft')
+    expect(wrapper!.get('[data-guide-menu]').findAll('option').map(option => option.attributes('value'))).not.toContain('draft')
     store.value.cachedPublicSettings = { custom_menu_items: [menu('saved-after', '保存后')] }; await nextTick()
-    expect(wrapper!.findAll('option').map(option => option.attributes('value'))).toContain('saved-after')
+    expect(wrapper!.get('[data-guide-menu]').findAll('option').map(option => option.attributes('value'))).toContain('saved-after')
   })
   it.each([false, true])('distinguishes a failed read with cached=%s and retains the selected binding for export/preview', async cached => {
     if (cached) store.value.cachedPublicSettings = { custom_menu_items: [menu()] }
@@ -110,6 +110,28 @@ describe('admin guide configuration card', () => {
     await button('清除试用').trigger('click')
     expect(wrapper!.get('[role="alert"]').text()).toBe('当前浏览器无法清除试用配置，试用配置仍然保留。')
     expect(localStorage.getItem(previewConfigKey)).toBe('existing')
+  })
+  it('selects and previews all four sidebar bindings, retaining them on failed menu reload', async () => {
+    store.value.cachedPublicSettings = { custom_menu_items: [menu(), menu('help', '教程改名'), menu('contact', '客服'), menu('price', '价格'), menu('radar', '雷达')] }
+    fetchPublicSettings.mockResolvedValue(store.value.cachedPublicSettings)
+    create(); await flushPromises()
+    for (const [role, id] of [['tutorial', 'help'], ['support', 'contact'], ['pricing', 'price'], ['radar', 'radar']]) await wrapper!.get(`[data-guide-more-menu="${role}"]`).setValue(id)
+    await button('仅当前浏览器试用').trigger('click')
+    const saved = normalizeConfig(JSON.parse(localStorage.getItem(previewConfigKey)!))
+    expect(saved.modules.find(item => item.id === 'more')?.menuIds).toEqual({ tutorial: 'help', support: 'contact', pricing: 'price', radar: 'radar' })
+    expect(saved.modules.find(item => item.id === 'quick-start')?.menuId).toBe('onboarding-quick-start')
+    expect(wrapper!.get('[data-guide-more-current]').text()).toContain('guide-other-page') // Draft is separate from the build.
+    store.value.cachedPublicSettings = null; fetchPublicSettings.mockResolvedValue(null)
+    await button('重新读取').trigger('click'); await flushPromises()
+    expect(wrapper!.get('[data-guide-more-menu="tutorial"]').element.value).toBe('help')
+    await button('仅当前浏览器试用').trigger('click')
+    expect(JSON.parse(localStorage.getItem(previewConfigKey)!)).toEqual(saved)
+    store.value.cachedPublicSettings = { custom_menu_items: [menu(), menu('help'), menu('contact'), menu('price'), menu('radar')] }
+    await nextTick()
+    await wrapper!.get('[data-guide-more-menu="support"]').setValue('help')
+    await button('仅当前浏览器试用').trigger('click')
+    expect(wrapper!.get('[role="alert"]').text()).toBe('不同用途需要选择不同的自定义菜单。')
+    expect(JSON.parse(localStorage.getItem(previewConfigKey)!)).toEqual(saved)
   })
   it.each([false, true])('isolates invalid build configuration while other settings work and preview clearing fails=%s', async clearFails => {
     vi.resetModules()
