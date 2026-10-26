@@ -10,6 +10,27 @@ describe('guide exit and resources', () => {
   const stopped = vi.fn()
   beforeEach(() => { animations = installGuideDOM(); sessionStorage.clear(); history.replaceState({}, '', '/keys'); keyPage(); stopped.mockReset() })
   afterEach(() => { tour?.stop(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = '' })
+  it('requires an explicit new registration reset to allow automatic playback after an exit in the same tour', async () => {
+    tour = createTourSession(fakeDriver, { onStop: stopped })
+    expect(await tour.start(undefined, { id: 'welcome', manual: false })).toBe(true)
+    expect(tour.resetForRegistration()).toBe(false)
+    tour.stop('cancelled:exit-button')
+    sessionStorage.removeItem('s2o:visit-suppressed:v1')
+    expect(await tour.start(undefined, { id: 'welcome', manual: false })).toBe(false)
+    const count = stopped.mock.calls.length
+    expect(tour.resetForRegistration()).toBe(true)
+    expect(stopped).toHaveBeenCalledTimes(count)
+    expect(await tour.start(undefined, { id: 'welcome', manual: false })).toBe(true)
+    tour.stop(); expect(tour.clean).toBe(true)
+  })
+  it('preserves suppression when the new registration reset cannot clear storage', async () => {
+    tour = createTourSession(fakeDriver)
+    await tour.start(undefined, { id: 'welcome', manual: false }); tour.stop()
+    const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new DOMException('Denied') })
+    try { expect(tour.resetForRegistration()).toBe(false) } finally { remove.mockRestore() }
+    sessionStorage.removeItem('s2o:visit-suppressed:v1')
+    expect(await tour.start(undefined, { id: 'welcome', manual: false })).toBe(false)
+  })
   it('pauses the real Driver without suppression or returning to the old scroll position, then can start again', async () => {
     const input = document.querySelector<HTMLInputElement>('[data-tour="key-form-name"]')!
     const container = input.parentElement!

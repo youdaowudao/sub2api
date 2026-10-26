@@ -3,7 +3,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { reactive } from 'vue'
 import GuideHost from '../components/GuideHost.vue'
 import { installGuideDOM, keyPage, nextGuideStep, settle } from './fixture'
-import { recordGuideRegistration } from '../registration'
+import { progressKey, recordGuideRegistration, registrationKey, suppressedKey } from '../registration'
 import { beginGuideAction, completeGuideAction } from '../businessEvents'
 
 const { stores } = vi.hoisted(() => ({ stores: { auth: null as any, app: null as any, route: null as any } }))
@@ -30,6 +30,70 @@ describe('ordinary guide host and replay picker', () => {
     expect(document.querySelector('#s2o-replay-picker')).not.toBeNull()
     return launcher
   }
+  it.each(['/register', '/email-verify'])('automatically welcomes B after A exits and logs out in the same host through %s', async registrationPath => {
+    const navigate = (path: string, requiresAuth: boolean) => {
+      history.replaceState({}, '', path)
+      Object.assign(stores.route, { path, fullPath: path, meta: { requiresAuth, requiresAdmin: false } })
+    }
+    wrapper = mount(GuideHost, { attachTo: document.body }); await flushPromises()
+    recordGuideRegistration(stores.auth.user); await settle()
+    expect(document.querySelectorAll('[data-s2o-step="welcome"]')).toHaveLength(1)
+    const firstRegistration = JSON.parse(sessionStorage.getItem(progressKey)!).registrationId
+    document.querySelector<HTMLButtonElement>('#s2o-exit')!.click(); await settle()
+    expect(document.querySelector('#s2o-launcher')).not.toBeNull()
+    stores.auth.user = null; stores.auth.isAuthenticated = false
+    localStorage.removeItem('auth_token'); localStorage.removeItem('auth_user')
+    navigate(registrationPath, false); await settle()
+    stores.auth.user = { id: 8, role: 'user' }; stores.auth.isAuthenticated = true
+    localStorage.setItem('auth_token', 'second-test-session')
+    localStorage.setItem('auth_user', JSON.stringify(stores.auth.user))
+    recordGuideRegistration(stores.auth.user); await settle()
+    expect(document.querySelector('[data-s2o-step="welcome"]')).toBeNull()
+    expect(JSON.parse(sessionStorage.getItem(registrationKey)!)).toMatchObject({ userId: 8 })
+    navigate('/keys', true); await settle()
+    expect(document.querySelectorAll('[data-s2o-step="welcome"]')).toHaveLength(1)
+    expect(document.querySelector('#s2o-launcher, #s2o-note')).toBeNull()
+    const progress = JSON.parse(sessionStorage.getItem(progressKey)!)
+    expect(progress.userId).toBe(8); expect(progress.registrationId).not.toBe(firstRegistration)
+    expect(progress.modules).toEqual(['keys', 'key-use', 'quick-start', 'recharge', 'more'])
+    document.querySelector<HTMLButtonElement>('#s2o-exit')!.click(); await settle()
+    localStorage.setItem('auth_token', 'renewed-second-test-session')
+    window.dispatchEvent(new StorageEvent('storage', { key: 'auth_token' }))
+    document.body.append(document.createElement('span')); await settle()
+    expect(document.querySelector('[data-s2o-step="welcome"]')).toBeNull()
+    expect(document.querySelector('#s2o-launcher')).not.toBeNull()
+  })
+  it('keeps manual replay available to B when storage denies the new automatic registration reset', async () => {
+    wrapper = mount(GuideHost, { attachTo: document.body }); await flushPromises()
+    recordGuideRegistration(stores.auth.user); await settle()
+    document.querySelector<HTMLButtonElement>('#s2o-exit')!.click(); await settle()
+    stores.auth.user = null; stores.auth.isAuthenticated = false
+    localStorage.removeItem('auth_token'); localStorage.removeItem('auth_user')
+    history.replaceState({}, '', '/register')
+    Object.assign(stores.route, { path: '/register', fullPath: '/register', meta: { requiresAuth: false, requiresAdmin: false } })
+    await settle(); expect(document.querySelector('#s2o-launcher')).toBeNull()
+    const remove = Storage.prototype.removeItem
+    const denied = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === suppressedKey) throw new DOMException('Denied')
+      return remove.call(this, key)
+    })
+    try {
+      stores.auth.user = { id: 8, role: 'user' }; stores.auth.isAuthenticated = true
+      localStorage.setItem('auth_token', 'second-test-session')
+      localStorage.setItem('auth_user', JSON.stringify(stores.auth.user))
+      recordGuideRegistration(stores.auth.user); await settle()
+      history.replaceState({}, '', '/keys')
+      Object.assign(stores.route, { path: '/keys', fullPath: '/keys', meta: { requiresAuth: true, requiresAdmin: false } })
+      await settle()
+      expect(document.querySelector('[data-s2o-step="welcome"]')).toBeNull()
+      expect(JSON.parse(sessionStorage.getItem(registrationKey)!)).toMatchObject({ userId: 8 })
+      expect(document.querySelector('#s2o-launcher')).not.toBeNull()
+      document.querySelector<HTMLButtonElement>('#s2o-launcher')!.click(); await flushPromises()
+      document.querySelector<HTMLButtonElement>('[data-s2o-module="more"]')!.click(); await settle()
+      expect(document.querySelector('[data-s2o-step="more-help"]')).not.toBeNull()
+      expect(sessionStorage.getItem(registrationKey)).toBeNull()
+    } finally { denied.mockRestore() }
+  })
   it.each(['continue', 'automatic', 'end'])('releases the page at a registration chapter break and supports %s', async action => {
     stores.app.cachedPublicSettings.custom_menu_items = [{ id: 'onboarding-quick-start', visibility: 'user' }]
     document.body.insertAdjacentHTML('beforeend', '<a data-tour="sidebar-custom-onboarding-quick-start"></a><input id="practice" value="draft" />')

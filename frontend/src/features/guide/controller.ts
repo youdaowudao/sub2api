@@ -2,7 +2,7 @@ import { driver } from './driver/driver.mjs'
 import { createFlow } from './flow'
 import { configuration, configPreview, enabledModules, initialOptOut, registrationModules, type GuideConfig, type ModuleId } from './config'
 import { steps } from './steps'
-import { clearRegistrationProgress, historyKey, isRegistrationRecord, onGuideRegistration, progressKey, readGuideRegistration, readSessionValue, registrationKey, suppressedKey, writeSessionValue, type GuideUser, type RegistrationRecord } from './registration'
+import { clearRegistrationProgress, historyKey, isRegistrationRecord, onGuideRegistration, progressKey, readGuideRegistration, readSessionValue, registrationKey, suppressedKey, writeSessionValue, type GuideUser, type RegistrationOwner, type RegistrationRecord } from './registration'
 
 export interface GuideState {
   user: GuideUser | null
@@ -44,6 +44,8 @@ export function createGuideController(options: ControllerOptions) {
   let destroyed = false, launching = false, pageHidden = false, suppressed = readSessionValue(suppressedKey) === '1'
   let proof: RegistrationRecord | null = null, manual = false, lastReason: string | null = null, note = ''
   let identity: string | null = null
+  let acceptedRegistration: RegistrationOwner | null = null
+  const registrationOwner = (): RegistrationOwner | null => proof || (identity ? { userId: Number(identity.split(':')[0]) } : null)
   const viewedModules = new Set<ModuleId>()
   const publish = () => { try { options.onChange?.() } catch { /* Optional UI must not affect the site. */ } }
   const flow = createFlow(options.driverFactory || driver, {
@@ -64,7 +66,7 @@ export function createGuideController(options: ControllerOptions) {
     onStop(reason: string, step: string) {
       lastReason = reason
       if (reason === 'suspended') { proof = null; publish(); return }
-      suppressed = true; writeSessionValue(suppressedKey, '1'); clearRegistrationProgress()
+      suppressed = true; writeSessionValue(suppressedKey, '1'); clearRegistrationProgress(registrationOwner())
       let history: any[] = []
       try { const saved = JSON.parse(readSessionValue(historyKey) || '[]'); if (Array.isArray(saved)) history = saved } catch { /* Ignore malformed diagnostics. */ }
       const result = reason.startsWith('completed') ? 'completed' : reason.startsWith('error') ? 'error' : 'cancelled'
@@ -93,16 +95,18 @@ export function createGuideController(options: ControllerOptions) {
   }
   async function launch(record: RegistrationRecord | null, module?: ModuleId, resume?: ProgressRecord) {
     if (launching || flow.active || !available()) return false
+    const user = options.getState().user!
+    identity = `${user.id}:${user.role}`
     launching = true
     manual = !!module
     proof = record
-    if (manual) { suppressed = true; writeSessionValue(suppressedKey, '1'); clearRegistrationProgress() }
+    if (manual) { suppressed = true; writeSessionValue(suppressedKey, '1'); clearRegistrationProgress({ userId: user.id }) }
     else writeSessionValue(registrationKey, null)
     publish()
     try {
-      return await flow.start({ userId: options.getState().user!.id }, { manual, module, resume })
+      return await flow.start({ userId: user.id }, { manual, module, resume })
     } catch { flow.stop('error:engine-frame'); return false }
-    finally { launching = false; publish() }
+    finally { launching = false; publish(); void update() }
   }
   function validProgress(value: unknown, userId: number): value is ProgressRecord {
     const progress = value as ProgressRecord | null
@@ -112,12 +116,27 @@ export function createGuideController(options: ControllerOptions) {
     if (destroyed) return
     try {
       const state = options.getState()
+      // The signup callback runs after auth is persisted, even while the route is still an auth page.
+      const record = state.authenticated && state.user?.role === 'user' && storedIdentityMatches() ? readGuideRegistration(state.user.id) : null
       const current = state.authenticated && state.user ? `${state.user.id}:${state.user.role}` : null
-      if (identity && identity !== current) { viewedModules.clear(); clearRegistrationProgress(); flow.stop('cancelled:account-changed') }
+      if (identity && identity !== current) { viewedModules.clear(); clearRegistrationProgress(registrationOwner()); flow.stop('cancelled:account-changed'); proof = null }
       identity = current
       if (flow.active && !available()) {
-        clearRegistrationProgress()
+        clearRegistrationProgress(registrationOwner())
         flow.stop(/^\/(login|register|email-verify|auth|setup)(\/|$)/.test(state.path) ? 'cancelled:account-route' : 'cancelled:account-changed')
+      }
+      if (record && (acceptedRegistration?.userId !== record.userId || acceptedRegistration.registrationId !== record.registrationId)) {
+        const user = options.getState().user
+        if (!options.getState().authenticated || user?.id !== record.userId || user.role !== 'user' || !storedIdentityMatches() || !isRegistrationRecord(record, user.id)) { publish(); return }
+        const pending = readGuideRegistration(user.id)
+        if (pending?.registrationId !== record.registrationId || !flow.resetForRegistration()) { publish(); return }
+        // Stop callbacks above may have reinstated the old visit suppression. Reset only after they finish.
+        suppressed = false; writeSessionValue(suppressedKey, null)
+        acceptedRegistration = { userId: record.userId, registrationId: record.registrationId }
+        lastReason = null; note = ''; viewedModules.clear()
+        let progress: RegistrationRecord | null
+        try { progress = JSON.parse(readSessionValue(progressKey) || 'null') } catch { progress = null }
+        if (progress && (progress.userId !== record.userId || progress.registrationId !== record.registrationId)) writeSessionValue(progressKey, null)
       }
       publish()
       if (launching || flow.active || suppressed || !available()) return
@@ -131,14 +150,13 @@ export function createGuideController(options: ControllerOptions) {
           if (routeMatches) { await launch(progress, undefined, progress); return }
           proof = progress; manual = false
           // Record a rejected resume through the same completion path, without starting Driver.
-          lastReason = 'cancelled:route-changed'; suppressed = true; writeSessionValue(suppressedKey, '1'); clearRegistrationProgress()
+          lastReason = 'cancelled:route-changed'; suppressed = true; writeSessionValue(suppressedKey, '1'); clearRegistrationProgress(progress)
           let history: any[] = []
           try { const value = JSON.parse(readSessionValue(historyKey) || '[]'); if (Array.isArray(value)) history = value } catch { /* Ignore invalid history. */ }
           writeSessionValue(historyKey, JSON.stringify([...history.slice(-19), { at: Date.now(), result: 'cancelled', reason: lastReason, step: progress.step, trigger: 'registration', registrationId: progress.registrationId }]))
           proof = null; note = '已退出引导。'; publish(); return
         }
       }
-      const record = readGuideRegistration(state.user!.id)
       if (!record) return
       if (!automaticModules.length) { writeSessionValue(registrationKey, null); return }
       await launch(record)
@@ -148,7 +166,7 @@ export function createGuideController(options: ControllerOptions) {
     if (event.storageArea && event.storageArea !== localStorage) return
     if (event.key !== null && !['auth_token', 'auth_user', 'refresh_token'].includes(event.key)) return
     if (storedIdentityMatches()) return
-    viewedModules.clear(); clearRegistrationProgress(); flow.stop('cancelled:account-changed'); publish()
+    viewedModules.clear(); clearRegistrationProgress(registrationOwner()); flow.stop('cancelled:account-changed'); publish()
   }
   async function continueChapter() {
     if (launching || !available() || !flow.paused) return false
@@ -156,7 +174,7 @@ export function createGuideController(options: ControllerOptions) {
     launching = true; note = ''; publish()
     try { return await flow.continue() }
     catch { flow.stop('error:engine-frame'); return false }
-    finally { launching = false; publish() }
+    finally { launching = false; publish(); void update() }
   }
   const registered = onGuideRegistration(() => { void update() })
   const observer = new MutationObserver(() => { void update() })

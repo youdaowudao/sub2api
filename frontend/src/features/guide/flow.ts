@@ -472,7 +472,8 @@ export function createFlow(driver: any, { modules = ['keys'], registrationModule
     }
     return session === owned;
   }
-  return { start, stop, continue: continueChapter, get paused() { return paused(); }, get dialogOpen() { return dialogOpen(); }, get step() { return step; }, get moduleId() { return moduleId(); }, get modules() { return session ? [...session.modules] : []; }, get active() { return Boolean(session); },
-    get clean() { return !session && tour.clean && (!lastQuick || lastQuick.clean) && Object.values(resources).every(v => v === 0); },
+  const clean = () => !session && tour.clean && (!lastQuick || lastQuick.clean) && Object.values(resources).every(v => v === 0);
+  return { start, stop, continue: continueChapter, resetForRegistration() { return clean() && tour.resetForRegistration(); }, get paused() { return paused(); }, get dialogOpen() { return dialogOpen(); }, get step() { return step; }, get moduleId() { return moduleId(); }, get modules() { return session ? [...session.modules] : []; }, get active() { return Boolean(session); },
+    get clean() { return clean(); },
     get resources() { return { ...resources, engineSession: { ...tour.resources }, document: { ...(lastQuick?.resources || { listeners: 0, timers: 0, nodes: 0 }) } }; } };
 }
