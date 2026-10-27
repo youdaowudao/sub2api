@@ -7,10 +7,11 @@ import (
 )
 
 // 重构前各处手写的平台列表，作为平台清单派生结果的等价基准；重构后新登记的平台
-// （Command Code、Cline）按同类平台（OpenCode）的位置补入。
+// （Command Code、Cline）按同类平台（OpenCode）的位置补入。展示顺序按需求优先 OpenAI，
+// 组合路由优先级继续保留原有次序。
 var (
 	legacyDisplayOrder = []string{
-		PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok,
+		PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok,
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
 		PlatformCline,
@@ -70,5 +71,5 @@ func TestPlatformListPredicates(t *testing.T) {
 func TestPlatformsReturnsCopy(t *testing.T) {
 	platforms := Platforms()
 	platforms[0].ID = "mutated"
-	require.Equal(t, PlatformAnthropic, Platforms()[0].ID)
+	require.Equal(t, PlatformOpenAI, Platforms()[0].ID)
 }

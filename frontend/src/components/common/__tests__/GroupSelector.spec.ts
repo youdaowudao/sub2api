@@ -54,7 +54,7 @@ describe('GroupSelector rendering and business IDs', () => {
     const wrapper = mount(GroupSelector, { props: { groups: rows, modelValue: selected }, global: {
       stubs: { GroupBadge: { props: ['name'], template: '<span>{{ name }}</span>' }, Icon: true },
     } })
-    expect(wrapper.findAll('input[type="checkbox"]').map(n => Number(n.element.value))).toEqual([1, 2, 3])
+    expect(wrapper.findAll('input[type="checkbox"]').map(n => Number(n.element.value))).toEqual([3, 1, 2])
     await wrapper.get('input[value="1"]').setValue(true)
     expect(wrapper.emitted('update:modelValue')).toEqual([[[3, 2, 1]]])
     expect(rows.map((g: any) => g.id)).toEqual([3, 2, 1])

@@ -28,7 +28,7 @@ describe('UsersView group column and replacement menu', () => {
     } })
     await (w.vm as any).loadAllGroups(); await flushPromises()
     const exclusive = w.get('[class~="group/ex"]')
-    expect(exclusive.findAll('div.flex-col > span').map(n => n.text())).toEqual(['First exclusive', 'Later exclusive', 'OpenAI exclusive'])
+    expect(exclusive.findAll('div.flex-col > span').map(n => n.text())).toEqual(['OpenAI exclusive', 'First exclusive', 'Later exclusive'])
     expect(w.get('[class~="group/pub"]').text()).toContain('Public')
     await exclusive.trigger('click')
     const item = exclusive.findAll('div.cursor-pointer').find(n => n.text() === 'Later exclusive')!

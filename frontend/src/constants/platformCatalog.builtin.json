@@ -1,18 +1,18 @@
 {
   "platforms": [
     {
-      "id": "anthropic",
-      "display_name": "Anthropic",
-      "gateway": "anthropic",
-      "cn_provider": false,
-      "litellm_provider": "anthropic"
-    },
-    {
       "id": "openai",
       "display_name": "OpenAI",
       "gateway": "openai",
       "cn_provider": false,
       "litellm_provider": "openai"
+    },
+    {
+      "id": "anthropic",
+      "display_name": "Anthropic",
+      "gateway": "anthropic",
+      "cn_provider": false,
+      "litellm_provider": "anthropic"
     },
     {
       "id": "gemini",

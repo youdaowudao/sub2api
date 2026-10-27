@@ -11,9 +11,10 @@ import (
 
 // 以下为重构前各处手写的平台列表 / switch，作为平台清单派生结果的等价基准；
 // 重构后新登记的平台（Command Code、Cline）按同类平台（OpenCode）的位置补入。
+// 全平台展示改为 OpenAI 优先；调度快照和组合匹配继续保持历史顺序。
 var (
 	legacyAllPlatforms = []string{
-		PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformAntigravity, PlatformGrok,
+		PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformAntigravity, PlatformGrok,
 		PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax, PlatformOpenCodeGo, PlatformTypeSafe,
 		PlatformCommandCode,
 		PlatformCline,

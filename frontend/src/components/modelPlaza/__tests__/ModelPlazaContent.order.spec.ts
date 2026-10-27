@@ -20,9 +20,9 @@ describe('model plaza display order', () => {
       },
     } })
     const ids = () => wrapper.findAll('[data-group]').map(n => Number(n.text()))
-    expect(ids()).toEqual([1, 2, 3])
+    expect(ids()).toEqual([3, 1, 2])
     await wrapper.setProps({ response: { ...response, groups: response.groups.map(g => ({ ...g, name: `new ${g.id}`, user_rate_multiplier: 100 - g.id, peak_rate_multiplier: g.id })) } })
-    expect(ids()).toEqual([1, 2, 3])
+    expect(ids()).toEqual([3, 1, 2])
     expect(rows.map(g => g.id)).toEqual([2, 1, 3])
   })
 })
