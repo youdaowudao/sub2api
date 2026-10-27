@@ -123,21 +123,15 @@
               <button
                 data-tour="key-copy"
                 @click="copyToClipboard(value, row.id)"
-                class="rounded-lg p-1 transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
+                class="whitespace-nowrap rounded-lg p-1 text-xs transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
                 :class="
                   copiedKeyId === row.id
                     ? 'text-green-500'
                     : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
                 "
-                :title="copiedKeyId === row.id ? t('keys.copied') : t('keys.copyToClipboard')"
+                :title="copiedKeyId === row.id ? t('keys.copied') : t('keys.clickToCopy')"
               >
-                <Icon
-                  v-if="copiedKeyId === row.id"
-                  name="check"
-                  size="sm"
-                  :stroke-width="2"
-                />
-                <Icon v-else name="clipboard" size="sm" />
+                {{ copiedKeyId === row.id ? t('keys.copied') : t('keys.clickToCopy') }}
               </button>
             </div>
           </template>
@@ -408,6 +402,7 @@
                 v-if="!publicSettings?.hide_ccs_import_button"
                 data-tour="key-ccs"
                 @click="importToCcswitch(row)"
+                :title="t('keys.importToCcSwitchHint')"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
               >
                 <Icon name="upload" size="sm" />
