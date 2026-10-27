@@ -1991,8 +1991,8 @@ describe("admin SettingsView wechat connect controls", () => {
 
   it("sorts subscription choices without changing either automatic gift target", async () => {
     const rows = [
-      { id: 30, name: 'OpenAI first from API', platform: 'openai', sort_order: -30, subscription_type: 'subscription', status: 'active' },
-      { id: 10, name: 'Anthropic first in display', platform: 'anthropic', sort_order: 0, subscription_type: 'subscription', status: 'active' },
+      { id: 30, name: 'Anthropic first from API', platform: 'anthropic', sort_order: -30, subscription_type: 'subscription', status: 'active' },
+      { id: 10, name: 'OpenAI first in display', platform: 'openai', sort_order: 0, subscription_type: 'subscription', status: 'active' },
     ];
     getGroups.mockResolvedValueOnce(rows);
     const wrapper = mountView();
