@@ -12,9 +12,9 @@ const rows = [
 describe('group display order', () => {
   it('uses catalog order and administrator order, preserving zero and negative values', () => {
     const frozen = Object.freeze(rows.map(g => Object.freeze({ ...g, rate_multiplier: g.id, name: `name ${g.id}` })))
-    expect(sortGroupsForDisplay(frozen).map(g => g.id)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(sortGroupsForDisplay(frozen).map(g => g.id)).toEqual([3, 1, 2, 4, 5, 6])
     expect(frozen.map(g => g.id)).toEqual([6, 5, 4, 3, 2, 1])
-    expect(groupByPlatformForDisplay(frozen, '未识别平台').map(s => s.label)).toEqual(['Anthropic', 'OpenAI', 'Composite', 'zzz', '未识别平台'])
+    expect(groupByPlatformForDisplay(frozen, '未识别平台').map(s => s.label)).toEqual(['OpenAI', 'Anthropic', 'Composite', 'zzz', '未识别平台'])
   })
   it('breaks ties by ID, places missing/invalid values last and keeps their original order', () => {
     const input = [
@@ -26,7 +26,7 @@ describe('group display order', () => {
   })
   it('sorts known selected IDs for rendering and retains unknown IDs at the end without mutating business order', () => {
     const ids = Object.freeze([99, 3, 2, 98, 1])
-    expect(sortGroupIdsForDisplay(ids, rows)).toEqual([1, 2, 3, 99, 98])
+    expect(sortGroupIdsForDisplay(ids, rows)).toEqual([3, 1, 2, 99, 98])
     expect(ids).toEqual([99, 3, 2, 98, 1])
   })
   it('creates unique non-selectable headings without losing IDs', () => {
@@ -34,6 +34,6 @@ describe('group display order', () => {
     const headers = options.filter(o => 'kind' in o)
     expect(new Set(headers.map(o => o.value)).size).toBe(5)
     expect(headers.every(o => 'disabled' in o && o.disabled)).toBe(true)
-    expect(options.filter(o => !('kind' in o)).map(o => o.value)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(options.filter(o => !('kind' in o)).map(o => o.value)).toEqual([3, 1, 2, 4, 5, 6])
   })
 })

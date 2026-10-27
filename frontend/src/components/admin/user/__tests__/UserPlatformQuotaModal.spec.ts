@@ -105,7 +105,7 @@ describe('UserPlatformQuotaModal', () => {
     const w = await mountAndOpen()
     const rows = w.findAll('tbody tr')
     expect(rows.map(row => row.find('td').text())).toEqual([
-      'anthropic', 'openai', 'gemini', 'antigravity', 'grok',
+      'openai', 'anthropic', 'gemini', 'antigravity', 'grok',
       'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'typesafe', 'command_code', 'cline',
     ])
     for (const row of rows) {
@@ -154,8 +154,8 @@ describe('UserPlatformQuotaModal', () => {
     const inputs = w.findAll('input[type=number]')
     // 13 platforms × 3 windows = 39 inputs
     expect(inputs.length).toBe(39)
-    // 第一个 input 是 anthropic.daily = 10
-    expect((inputs[0].element as HTMLInputElement).value).toBe('10')
+    const anthropic = w.findAll('tbody tr').find(row => row.find('td').text() === 'anthropic')!
+    expect(anthropic.findAll('input[type=number]')[0].element.value).toBe('10')
   })
 
   it('保存提交完整 13 platform payload', async () => {
@@ -216,8 +216,8 @@ describe('UserPlatformQuotaModal', () => {
     await flushPromises()
     expect(confirmSpy).toHaveBeenCalledTimes(1)
     // anthropic daily 应保持 10（未被清空）
-    const inputs = w.findAll('input[type=number]')
-    const dailyVal = (inputs[0].element as HTMLInputElement).value
+    const anthropic = w.findAll('tbody tr').find(row => row.find('td').text() === 'anthropic')!
+    const dailyVal = anthropic.findAll('input[type=number]')[0].element.value
     expect(dailyVal).toBe('10')
     confirmSpy.mockRestore()
   })
@@ -260,7 +260,8 @@ describe('UserPlatformQuotaModal', () => {
     apiMocks.getPlatformQuotas.mockResolvedValue(anthropicConfigured)
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const w = await mountAndOpen()
-    const resetBtns = w.findAll('button').filter((b) => b.text() === '↻')
+    const anthropic = w.findAll('tbody tr').find(row => row.find('td').text() === 'anthropic')!
+    const resetBtns = anthropic.findAll('button').filter((b) => b.text() === '↻')
     expect(resetBtns.length).toBeGreaterThan(0)
     await resetBtns[0].trigger('click')
     await flushPromises()
@@ -272,8 +273,9 @@ describe('UserPlatformQuotaModal', () => {
     apiMocks.getPlatformQuotas.mockResolvedValue(anthropicConfigured)
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const w = await mountAndOpen()
-    const resetBtns = w.findAll('button').filter((b) => b.text() === '↻')
-    await resetBtns[0].trigger('click') // 第一个是 anthropic.daily
+    const anthropic = w.findAll('tbody tr').find(row => row.find('td').text() === 'anthropic')!
+    const resetBtns = anthropic.findAll('button').filter((b) => b.text() === '↻')
+    await resetBtns[0].trigger('click')
     await flushPromises()
     expect(apiMocks.resetPlatformQuotaWindow).toHaveBeenCalledWith(99, 'anthropic', 'daily')
     confirmSpy.mockRestore()

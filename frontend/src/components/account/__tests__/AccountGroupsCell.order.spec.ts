@@ -10,9 +10,9 @@ describe('account group display copies', () => {
       { id: 1, name: 'First', platform: 'anthropic', sort_order: 0 },
     ] as any
     const w = mount(AccountGroupsCell, { props: { groups, maxDisplay: 2 }, global: { stubs: { Teleport: true, GroupBadge: { props: ['name'], template: '<span data-badge>{{ name }}</span>' } } } })
-    expect(w.findAll('[data-badge]').map(n => n.text())).toEqual(['First'])
+    expect(w.findAll('[data-badge]').map(n => n.text())).toEqual(['OpenAI'])
     await w.get('button').trigger('click')
-    expect(w.findAll('[data-badge]').slice(1).map(n => n.text())).toEqual(['First', 'Later', 'OpenAI'])
+    expect(w.findAll('[data-badge]').slice(1).map(n => n.text())).toEqual(['OpenAI', 'First', 'Later'])
     expect(groups.map((g: any) => g.id)).toEqual([3, 2, 1])
     w.unmount()
   })

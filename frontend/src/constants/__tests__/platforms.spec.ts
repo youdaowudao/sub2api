@@ -13,10 +13,10 @@ import { platformLabel } from '@/utils/platformColors'
 import { normalizePlatformQuotasMap, sanitizePlatformQuotasMap } from '@/api/admin/settings'
 import { platformQuotaPlatforms } from '@/api/admin/users'
 
-// 改为读取平台清单之前的平台字面量，加上之后内置登记的 Command Code。
+// 当前展示顺序；组合路由优先级另行断言，保持历史顺序。
 const concretePlatforms = [
-  'anthropic',
   'openai',
+  'anthropic',
   'gemini',
   'antigravity',
   'grok',
@@ -56,14 +56,14 @@ describe('platform catalog with a newly registered platform', () => {
     resetPlatformCatalog()
   })
 
-  it('keeps the built-in catalog equal to the legacy literals', () => {
+  it('uses OpenAI first for display while preserving composite routing precedence', () => {
     expect(listPlatformIds()).toEqual(concretePlatforms)
     expect(compositePrecedencePlatformIds()).toEqual([
       'anthropic', 'gemini', 'openai', 'antigravity', 'grok',
       'kimi', 'zhipu', 'deepseek', 'minimax', 'opencode_go', 'typesafe', 'command_code', 'cline'
     ])
     expect(CONCRETE_PLATFORM_OPTIONS.map((option) => option.label)).toEqual([
-      'Anthropic', 'OpenAI', 'Gemini', 'Antigravity', 'Grok',
+      'OpenAI', 'Anthropic', 'Gemini', 'Antigravity', 'Grok',
       'Kimi', 'Zhipu GLM', 'DeepSeek', 'MiniMax', 'OpenCode', 'TypeSafe / Jev', 'Command Code', 'Cline'
     ])
     expect(platformLabel('zhipu')).toBe('Zhipu GLM')

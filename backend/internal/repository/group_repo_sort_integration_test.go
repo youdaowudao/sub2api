@@ -129,7 +129,7 @@ func (s *GroupRepoSuite) TestList_DisplayOrderAcrossPages() {
 		inputs[i].RateMultiplier = 1
 		s.Require().NoError(s.repo.Create(s.ctx, &inputs[i]))
 	}
-	want := []int64{inputs[4].ID, inputs[2].ID, inputs[7].ID, inputs[0].ID, inputs[3].ID, inputs[5].ID, inputs[8].ID, inputs[1].ID, inputs[6].ID}
+	want := []int64{inputs[0].ID, inputs[4].ID, inputs[2].ID, inputs[7].ID, inputs[3].ID, inputs[5].ID, inputs[8].ID, inputs[1].ID, inputs[6].ID}
 	var got []int64
 	for page := 1; page <= 5; page++ {
 		rows, _, err := s.repo.ListWithFilters(s.ctx, pagination.PaginationParams{Page: page, PageSize: 2, SortBy: "display_order", SortOrder: "asc"}, "", "", "display-", nil)

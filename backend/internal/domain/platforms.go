@@ -35,8 +35,8 @@ type PlatformSpec struct {
 
 // platformList 的顺序即平台的展示顺序。
 var platformList = []PlatformSpec{
-	{ID: PlatformAnthropic, DisplayName: "Anthropic", Gateway: PlatformGatewayAnthropic, LiteLLMProvider: "anthropic"},
 	{ID: PlatformOpenAI, DisplayName: "OpenAI", Gateway: PlatformGatewayOpenAI, LiteLLMProvider: "openai"},
+	{ID: PlatformAnthropic, DisplayName: "Anthropic", Gateway: PlatformGatewayAnthropic, LiteLLMProvider: "anthropic"},
 	{ID: PlatformGemini, DisplayName: "Gemini", Gateway: PlatformGatewayGemini, LiteLLMProvider: "gemini"},
 	{ID: PlatformAntigravity, DisplayName: "Antigravity", Gateway: PlatformGatewayAntigravity, LiteLLMProvider: "anthropic"},
 	{ID: PlatformGrok, DisplayName: "Grok", Gateway: PlatformGatewayOpenAI, LiteLLMProvider: "xai"},
