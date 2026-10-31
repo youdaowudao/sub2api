@@ -3,6 +3,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { reactive, nextTick, h } from 'vue'
 import GuideSettingsCard from '../components/GuideSettingsCard.vue'
 import { normalizeConfig, previewConfigKey } from '../config'
+import bundled from '../config/onboarding.json'
 
 const { fetchPublicSettings, store } = vi.hoisted(() => ({ fetchPublicSettings: vi.fn(), store: { value: null as any } }))
 vi.mock('@/stores', () => ({ useAppStore: () => store.value }))
@@ -65,7 +66,11 @@ describe('admin guide configuration card', () => {
   })
   it('validates a draft, previews it locally, clears only the preview and exports without changing the build', async () => {
     store.value.cachedPublicSettings = { custom_menu_items: [menu()] }
-    create(); await flushPromises()
+    // The shipped build turns every chapter off. This case keeps the shipped bindings with every chapter on.
+    vi.resetModules()
+    vi.doMock('../config/onboarding.json', () => ({ default: { ...bundled, modules: bundled.modules.map(module => ({ ...module, enabled: true })) } }))
+    const EnabledCard = (await import('../components/GuideSettingsCard.vue')).default
+    wrapper = mount(EnabledCard); await flushPromises()
     await wrapper!.get('[data-guide-module="recharge"]').setValue(false)
     await wrapper!.get('[data-guide-module="more"]').setValue(false)
     await button('仅当前浏览器试用').trigger('click')
