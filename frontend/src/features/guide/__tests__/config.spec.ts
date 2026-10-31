@@ -7,13 +7,17 @@ describe('guide configuration', () => {
   afterEach(() => { history.replaceState({}, '', '/dashboard'); localStorage.clear(); vi.doUnmock('../config/onboarding.json') })
   it('plays every enabled chapter in configured order after registration', () => {
     expect(normalizeConfig(bundled)).toEqual(bundled)
-    expect(registrationModules(bundled)).toEqual(['keys', 'key-use', 'quick-start', 'recharge', 'more'])
-    expect(enabledModules(bundled)).toEqual(['keys', 'key-use', 'quick-start', 'recharge', 'more'])
+    // The shipped build turns every chapter off; order is checked on the same bindings with every chapter on.
+    expect(registrationModules(bundled)).toEqual([])
+    expect(enabledModules(bundled)).toEqual([])
+    const enabled = { ...bundled, modules: bundled.modules.map(module => ({ ...module, enabled: true })) }
+    expect(registrationModules(enabled)).toEqual(['keys', 'key-use', 'quick-start', 'recharge', 'more'])
+    expect(enabledModules(enabled)).toEqual(['keys', 'key-use', 'quick-start', 'recharge', 'more'])
     expect(registrationModules({ schemaVersion: 1, modules: [{ id: 'recharge', enabled: true }, { id: 'keys', enabled: false }, { id: 'key-use', enabled: true }] })).toEqual(['recharge', 'key-use'])
     expect(registrationModules({ schemaVersion: 1, modules: [] })).toEqual([])
   })
   it('accepts the legacy configuration and includes an enabled overview in registration playback', () => {
-    const legacy = { schemaVersion: 1, modules: bundled.modules.filter(module => module.id !== 'more') }
+    const legacy = { schemaVersion: 1, modules: bundled.modules.filter(module => module.id !== 'more').map(module => ({ ...module, enabled: true })) }
     expect(enabledModules(legacy)).toEqual(['keys', 'key-use', 'quick-start', 'recharge'])
     expect(registrationModules(legacy)).toEqual(['keys', 'key-use', 'quick-start', 'recharge'])
     const onlyMore = { schemaVersion: 1, modules: [{ id: 'more', enabled: true }] }

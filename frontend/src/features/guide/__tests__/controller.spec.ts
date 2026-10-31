@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import { createGuideController, type GuideState } from '../controller'
-import config from '../config/onboarding.json'
+import bundled from '../config/onboarding.json'
 import { normalizeConfig } from '../config'
 import { historyKey, progressKey, recordGuideRegistration, registrationKey, suppressedKey } from '../registration'
 import { FLOW_VERSION } from '../steps'
 import { beginGuideAction, completeGuideAction } from '../businessEvents'
 import { fakeDriver, installGuideDOM, keyPage, nextGuideStep, settle } from './fixture'
+
+// The shipped build turns every chapter off. Engine tests keep the shipped bindings with every chapter on.
+const config = normalizeConfig({ ...bundled, modules: bundled.modules.map(module => ({ ...module, enabled: true })) })
 
 describe('guide controller authentication and lifetime', () => {
   let controller: ReturnType<typeof createGuideController> | undefined
@@ -19,9 +22,16 @@ describe('guide controller authentication and lifetime', () => {
   })
   afterEach(() => { controller?.destroy(); controller = undefined; vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = '' })
   function create(overrides: any = {}) {
-    controller = createGuideController({ getState: () => state, getPublicSettings: () => ({ payment_enabled: false }), driverFactory: fakeDriver as any, ...overrides })
+    controller = createGuideController({ getState: () => state, getPublicSettings: () => ({ payment_enabled: false }), driverFactory: fakeDriver as any, config, ...overrides })
     return controller
   }
+  it('ships with every chapter off: a new registration plays nothing and no replay entry is offered', async () => {
+    create({ config: undefined }); recordGuideRegistration(state.user!); await settle()
+    expect(controller!.status().modules).toEqual([])
+    expect(controller!.status().available).toBe(false)
+    expect(controller!.status().active).toBe(false)
+    expect(document.querySelector('[data-s2o-step="welcome"]')).toBeNull()
+  })
   it('preserves B when its successful registration arrives before A account cleanup', async () => {
     create(); recordGuideRegistration(state.user!); await settle()
     const first = JSON.parse(sessionStorage.getItem(progressKey)!)
