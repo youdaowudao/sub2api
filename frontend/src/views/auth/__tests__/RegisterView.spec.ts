@@ -88,6 +88,7 @@ function mountRegister() {
         LinuxDoOAuthSection: true,
         WechatOAuthSection: true,
         OidcOAuthSection: true,
+        QqGroupInline: { template: '<div data-testid="qq-inline" />' },
         RouterLink: true,
         transition: false
       }
@@ -374,4 +375,18 @@ describe('RegisterView', () => {
     } finally { storage.mockRestore(); wrapper.unmount() }
   })
 
+})
+
+describe('RegisterView QQ group row', () => {
+  beforeEach(() => {
+    getPublicSettingsMock.mockReset()
+    getPublicSettingsMock.mockResolvedValue(publicSettings)
+  })
+
+  it('shows the QQ group row in the title area', async () => {
+    const wrapper = mountRegister()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="qq-inline"]').exists()).toBe(true)
+  })
 })

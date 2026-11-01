@@ -1,4 +1,19 @@
 export default {
+  // 品牌页面：QQ 交流群与新人福利
+  community: {
+    qqGroup: 'QQ 交流群',
+    copyNumber: '复制群号',
+    copied: '已复制群号',
+    scanToJoin: '扫码加群',
+    dialogTitle: '扫码加入 QQ 交流群',
+    groupNumber: '群号 {number}',
+    saveHint: '手机可长按二维码保存',
+    openLink: '点击链接加入群聊',
+    joinGroup: '加入 QQ 群',
+    newcomerReward: '新人进群领 2 元',
+    signupBonus: '注册即领新人福利金',
+    qrAlt: 'QQ 群二维码'
+  },
   batchImageGuide: {
     title: '图片批量生成',
     description: '一次提交多条提示词，任务完成后可统一下载图片结果'
