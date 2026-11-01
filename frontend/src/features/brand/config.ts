@@ -28,3 +28,23 @@ export const streamModels = {
   left: ['Claude', 'GPT', 'Gemini', 'GLM'],
   right: ['DeepSeek', 'Grok', 'Kimi', 'MiniMax']
 } as const
+
+/** 仪表盘「快速开始」：接入助手下载地址、导入失败时的教程、自动收起的使用记录条数 */
+export const quickConnect = {
+  downloads: {
+    windows: 'https://docs.usegoodai.com/download/usegoodai-quick-connect-windows-x64.exe',
+    mac: 'https://docs.usegoodai.com/download/usegoodai-quick-connect-mac-arm64.zip'
+  },
+  /** 一键导入没反应时，跳到文档「快速开始」的「运行接入命令」一节 */
+  fallbackDoc: 'https://docs.usegoodai.com/quick-start#_2-运行接入命令',
+  docsHome: 'https://docs.usegoodai.com/',
+  /** 使用记录超过这个条数后面板默认收起 */
+  collapseAfterRequests: 10
+} as const
+
+/** 接入助手的导入链接，格式与助手 connect/link.go 一致 */
+export function buildQuickConnectLink(key: string, name?: string): string {
+  const params = new URLSearchParams({ v: '1', app: 'codex', key })
+  if (name) params.set('name', name)
+  return `usegoodai://import?${params.toString()}`
+}

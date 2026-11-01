@@ -19,7 +19,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 const log = (id: number) => ({ id, model: `model-${id}`, created_at: '2026-10-25', actual_cost: 0, total_cost: 0, input_tokens: 1, output_tokens: 1 })
 async function view() {
-  const w = mount(DashboardView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, UserDashboardStats: true, UserDashboardQuickActions: true, Doughnut: true, TokenUsageTrend: true, Icon: true, RouterLink: { template: '<a><slot /></a>' } } } })
+  const w = mount(DashboardView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, UserDashboardStats: true, UserDashboardQuickActions: true, UserDashboardQuickStart: true, Doughnut: true, TokenUsageTrend: true, Icon: true, RouterLink: { template: '<a><slot /></a>' } } } })
   await flushPromises(); return w
 }
 async function range(w: ReturnType<typeof mount>, start: string, end: string) {
