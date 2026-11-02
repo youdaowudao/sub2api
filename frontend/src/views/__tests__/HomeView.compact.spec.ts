@@ -50,6 +50,7 @@ function mountHome(settings: Record<string, unknown> = {}) {
         RouterLink: RouterLinkStub,
         LocaleSwitcher: { template: '<div data-testid="locale-switcher" />' },
         Icon: { template: '<span data-testid="icon" />' },
+        StreamsBackground: true,
       },
     },
   })
@@ -180,5 +181,63 @@ describe('HomeView compact mode', () => {
     })
 
     expect(modelPlazaDestination(wrapper)).toBeUndefined()
+  })
+})
+
+function linkTargets(wrapper: ReturnType<typeof mountHome>) {
+  return wrapper
+    .get('[data-testid="brand-hero"]')
+    .findAllComponents(RouterLinkStub)
+    .map((link) => link.props('to'))
+}
+
+describe('HomeView compact brand hero', () => {
+  beforeEach(() => {
+    authStore.isAuthenticated = false
+    authStore.isAdmin = false
+    localStorage.clear()
+    vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: false } as MediaQueryList)
+  })
+
+  it('offers register and login with the signup bonus when registration is open', () => {
+    const wrapper = mountHome({ compact_home_enabled: true, registration_enabled: true })
+
+    expect(linkTargets(wrapper)).toEqual(['/register', '/login'])
+    expect(wrapper.find('[data-testid="hero-signup-bonus"]').text()).toContain('community.signupBonus')
+  })
+
+  it.each([
+    ['registration is closed', { registration_enabled: false }],
+    ['backend mode is on', { registration_enabled: true, backend_mode_enabled: true }],
+  ])('offers only login when %s', (_label, settings) => {
+    const wrapper = mountHome({ compact_home_enabled: true, ...settings })
+
+    expect(linkTargets(wrapper)).toEqual(['/login'])
+    expect(wrapper.find('[data-testid="hero-signup-bonus"]').exists()).toBe(false)
+  })
+
+  it('shows only the dashboard entry to signed-in users', () => {
+    authStore.isAuthenticated = true
+    const wrapper = mountHome({ compact_home_enabled: true, registration_enabled: true })
+
+    expect(linkTargets(wrapper)).toEqual(['/dashboard'])
+    expect(wrapper.find('[data-testid="hero-signup-bonus"]').exists()).toBe(false)
+  })
+
+  it('keeps the QQ group card in every state and drops the footer copyright', () => {
+    const wrapper = mountHome({ compact_home_enabled: true, registration_enabled: true })
+    const compact = wrapper.get('[data-testid="compact-home"]')
+
+    expect(compact.find('[data-testid="qq-card"]').text()).toContain('1020015031')
+    expect(compact.find('footer').exists()).toBe(false)
+    expect(compact.text()).not.toContain('©')
+  })
+
+  it('highlights Good in the site name in the header and the hero title', () => {
+    const wrapper = mountHome({ compact_home_enabled: true, site_name: 'UseGoodAI' })
+    const highlights = wrapper.findAll('[data-testid="brand-highlight"]')
+
+    expect(highlights).toHaveLength(2)
+    expect(highlights.every((h) => h.text() === 'Good')).toBe(true)
   })
 })

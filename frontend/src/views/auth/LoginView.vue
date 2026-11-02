@@ -9,6 +9,7 @@
         <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">
           {{ t('auth.signInToAccount') }}
         </p>
+        <QqGroupInline />
       </div>
       <!-- Login Form -->
       <form @submit.prevent="handleLogin" class="space-y-5">
@@ -226,6 +227,7 @@ import { computed, ref, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
+import QqGroupInline from '@/features/brand/components/QqGroupInline.vue'
 import LinuxDoOAuthSection from '@/components/auth/LinuxDoOAuthSection.vue'
 import DingTalkOAuthSection from '@/components/auth/DingTalkOAuthSection.vue'
 import OidcOAuthSection from '@/components/auth/OidcOAuthSection.vue'

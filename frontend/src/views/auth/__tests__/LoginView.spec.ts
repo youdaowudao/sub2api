@@ -80,6 +80,7 @@ function mountLogin() {
         LinuxDoOAuthSection: true,
         LoginAgreementPrompt: true,
         OidcOAuthSection: true,
+        QqGroupInline: { template: '<div data-testid="qq-inline" />' },
         RouterLink: { template: '<a><slot /></a>' },
         TotpLoginModal: true,
         TurnstileWidget: true,
@@ -114,5 +115,19 @@ describe('LoginView registration entry', () => {
     await flushPromises()
 
     expect(wrapper.text()).not.toContain('auth.signUp')
+  })
+})
+
+describe('LoginView QQ group row', () => {
+  beforeEach(() => {
+    getPublicSettingsMock.mockReset()
+    getPublicSettingsMock.mockResolvedValue(publicSettings)
+  })
+
+  it('shows the QQ group row in the title area', async () => {
+    const wrapper = mountLogin()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="qq-inline"]').exists()).toBe(true)
   })
 })

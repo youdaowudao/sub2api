@@ -9,6 +9,7 @@
         <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">
           {{ t('auth.signUpToStart', { siteName }) }}
         </p>
+        <QqGroupInline />
       </div>
 
       <!-- Registration Disabled Message -->
@@ -370,6 +371,7 @@ import { computed, ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
+import QqGroupInline from '@/features/brand/components/QqGroupInline.vue'
 import LinuxDoOAuthSection from '@/components/auth/LinuxDoOAuthSection.vue'
 import OidcOAuthSection from '@/components/auth/OidcOAuthSection.vue'
 import WechatOAuthSection from '@/components/auth/WechatOAuthSection.vue'

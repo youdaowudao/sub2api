@@ -1,4 +1,19 @@
 export default {
+  // Brand pages: QQ group and newcomer rewards
+  community: {
+    qqGroup: 'QQ Group',
+    copyNumber: 'Copy number',
+    copied: 'Group number copied',
+    scanToJoin: 'Scan to join',
+    dialogTitle: 'Join our QQ group',
+    groupNumber: 'Group {number}',
+    saveHint: 'On mobile, long-press the QR code to save it',
+    openLink: 'Join via link',
+    joinGroup: 'Join QQ group',
+    newcomerReward: 'New members get ¥2 after joining',
+    signupBonus: 'Sign up to get a welcome bonus',
+    qrAlt: 'QQ group QR code'
+  },
   batchImageGuide: {
     title: 'Batch Image Generation',
     description: 'Submit multiple prompts in one job and download the generated images when complete'
