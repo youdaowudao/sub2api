@@ -99,13 +99,6 @@
             <a :href="quickConnect.fallbackDoc" target="_blank" rel="noopener noreferrer" class="step-link text-gray-500 dark:text-dark-400" data-testid="quick-start-fallback">
               {{ t(os === 'mac' ? 'dashboard.quickStart.step3NoResponseMac' : 'dashboard.quickStart.step3NoResponse') }} →
             </a>
-            <!-- 电脑上弹出扫码加群；手机上直接跳转加群 -->
-            <button type="button" class="support-link hidden sm:inline-flex" data-testid="quick-start-support" @click="showQr = true">
-              <img :src="qqGroup.penguinImage" alt="" class="h-4 w-auto" />{{ t('dashboard.quickStart.step3Support') }}
-            </button>
-            <a :href="qqGroup.link" target="_blank" rel="noopener noreferrer" class="support-link inline-flex sm:hidden" data-testid="quick-start-support-mobile">
-              <img :src="qqGroup.penguinImage" alt="" class="h-4 w-auto" />{{ t('dashboard.quickStart.step3Support') }}
-            </a>
           </div>
         </div>
       </li>
@@ -135,7 +128,9 @@
         </span>
         <span class="btn btn-primary ml-auto whitespace-nowrap">{{ t('dashboard.quickStart.qqTap') }}</span>
       </a>
-      <p class="mt-2 text-sm font-medium text-amber-600 dark:text-amber-400 sm:hidden" data-testid="quick-start-qq-help-mobile">{{ t('dashboard.quickStart.qqHelp') }}</p>
+      <a :href="qqGroup.link" target="_blank" rel="noopener noreferrer" class="support-link mt-2.5 inline-flex !items-start sm:hidden" data-testid="quick-start-qq-help-mobile">
+        <img :src="qqGroup.penguinImage" alt="" class="mt-0.5 h-4 w-auto flex-none" /><span class="whitespace-normal">{{ t('dashboard.quickStart.qqHelp') }}</span>
+      </a>
       <div class="hidden flex-wrap items-center gap-x-4 gap-y-3 sm:flex">
         <img :src="qqGroup.penguinImage" alt="" class="h-9 w-auto" />
         <span class="text-sm text-gray-500 dark:text-dark-400">{{ t('community.qqGroup') }}</span>
@@ -146,8 +141,11 @@
         <!-- 扫码按钮紧跟群号，放在左边 -->
         <button type="button" class="btn btn-primary" data-testid="quick-start-qq-scan" @click="showQr = true">{{ t('community.scanToJoin') }}</button>
         <span class="flex flex-col gap-0.5 text-sm">
-          <span class="text-amber-600 dark:text-amber-400">{{ t('community.newcomerReward') }}</span>
-          <span class="font-medium text-gray-700 dark:text-dark-200" data-testid="quick-start-qq-help">{{ t('dashboard.quickStart.qqHelp') }}</span>
+          <span class="text-gray-500 dark:text-dark-400">{{ t('community.newcomerReward') }}</span>
+          <!-- 求助文案带小企鹅，点了弹出扫码加群 -->
+          <button type="button" class="support-link inline-flex" data-testid="quick-start-qq-help" @click="showQr = true">
+            <img :src="qqGroup.penguinImage" alt="" class="h-4 w-auto" />{{ t('dashboard.quickStart.qqHelp') }}
+          </button>
         </span>
         <a :href="quickConnect.docsHome" target="_blank" rel="noopener noreferrer" class="btn btn-secondary ml-auto" data-testid="quick-start-tutorial">
           <Icon name="book" size="sm" />{{ t('dashboard.quickStart.tutorial') }}

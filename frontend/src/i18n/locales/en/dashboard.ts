@@ -29,7 +29,6 @@ export default {
       step3NoResponse: 'Nothing happened? Try the PowerShell command',
       step3NoResponseMac: 'Nothing happened? Try the Terminal command',
       step3KeyLabel: 'Key to import',
-      step3Support: 'Ask support in the group, free help',
       step4: 'Send a first message',
       step4Hint: 'Open Codex, start a new task and send "test"',
       step4HintClaude: 'Open Claude, start a new chat and send "test"',

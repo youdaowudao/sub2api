@@ -29,7 +29,6 @@ export default {
       step3NoResponse: '没反应？用 PowerShell 命令行试试',
       step3NoResponseMac: '没反应？用终端命令行试试',
       step3KeyLabel: '导入的密钥',
-      step3Support: '进群找客服，免费帮解决',
       step4: '发送第一条消息',
       step4Hint: '打开 Codex，新建任务，发送“测试”',
       step4HintClaude: '打开 Claude，新建对话，发送“测试”',
