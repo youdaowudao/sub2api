@@ -103,7 +103,8 @@ describe('quick start panel', () => {
     expect(w.get('[data-testid="quick-start-step-1"]').text()).not.toContain('测试')
     const select = w.get('[data-testid="quick-start-key-select"]')
     expect(select.findAll('option').map((o) => o.text())).toEqual(['claude', '测试', '旧'])
-    expect(w.text()).not.toContain('sk-')
+    // 页面上只有示意用的 sk-••••，不出现真实密钥
+    expect(w.text()).not.toMatch(/sk-[0-9a-z]/i)
 
     const step3 = () => w.get('[data-testid="quick-start-step-3"]').text()
     const location = { href: '' }

@@ -25,9 +25,9 @@
   </div>
 
   <section v-else class="card overflow-hidden" data-testid="quick-start">
-    <div class="flex items-center justify-between border-b border-gray-100 px-5 py-3 dark:border-dark-700">
-      <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-        <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('dashboard.quickStart.title') }}</h2>
+    <div class="flex items-center justify-between px-5 pb-1 pt-4 sm:px-6">
+      <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white">{{ t('dashboard.quickStart.title') }}</h2>
         <span class="tagline" data-testid="quick-start-tagline">
           <Icon name="bolt" size="sm" class="tagline-icon" />
           <span class="tagline-text">{{ t('dashboard.quickStart.tagline') }}</span>
@@ -42,17 +42,25 @@
       </button>
     </div>
 
-    <ol class="grid grid-cols-1 gap-px bg-gray-100 dark:bg-dark-700 md:grid-cols-2 xl:grid-cols-[0.95fr_0.95fr_1.5fr_1fr]">
+    <!-- 四个步骤做成独立小卡片：已完成 / 当前 / 未开始三种状态一眼区分 -->
+    <ol class="grid grid-cols-1 gap-3 p-4 sm:gap-4 sm:p-5 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.45fr_1fr]">
       <!-- ① 创建密钥 -->
-      <li class="step" :class="{ 'step-guide': guideStep === 1 }" data-testid="quick-start-step-1">
+      <li class="step" :class="stepClass(1, hasKey)" data-testid="quick-start-step-1">
         <div class="step-inner">
           <StepHead :index="1" :done="hasKey" :active="guideStep === 1" :title="t('dashboard.quickStart.step1')" />
           <p class="step-text">{{ hasKey ? t('dashboard.quickStart.step1Tip') : t('dashboard.quickStart.step1Todo') }}</p>
-          <div class="step-foot flex-wrap gap-x-3 gap-y-2">
+          <!-- 示意密钥长什么样：和第四步的对话框呼应 -->
+          <div class="chat-mock" aria-hidden="true">
+            <Icon name="key" size="sm" class="flex-none text-gray-400" />
+            <span class="min-w-0 flex-1 truncate font-mono text-[13px] text-gray-500 dark:text-dark-400">sk-••••••••••••••••</span>
+            <span class="flex-none rounded-md px-1.5 py-0.5 text-xs font-medium" :class="hasKey ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-gray-200/70 text-gray-500 dark:bg-dark-700 dark:text-dark-400'">{{ hasKey ? t('dashboard.quickStart.step1MockReady') : t('dashboard.quickStart.step1MockTodo') }}</span>
+          </div>
+          <!-- 有指引气泡时上方多留空间，气泡不压住上面的内容 -->
+          <div class="step-foot flex-wrap gap-x-3 gap-y-2" :class="{ '!pt-14': guideStep === 1 }">
             <router-link v-if="hasKey" to="/keys" class="step-link">{{ t('dashboard.quickStart.step1Manage') }} →</router-link>
             <!-- 带上 create=quick：密钥页直接打开创建窗口，并默认选好 GPT 第一个分组 -->
             <span v-else class="relative inline-flex">
-              <router-link :to="quickCreateRoute" class="btn btn-primary" data-testid="quick-start-create">{{ t('dashboard.quickStart.step1Action') }}</router-link>
+              <router-link :to="quickCreateRoute" class="btn" :class="guideStep === 1 ? 'btn-primary' : 'btn-secondary'" data-testid="quick-start-create">{{ t('dashboard.quickStart.step1Action') }}</router-link>
               <GuideBubble v-if="guideStep === 1" :text="t('dashboard.quickStart.guide.step1')" />
             </span>
             <button type="button" class="btn btn-secondary whitespace-nowrap" data-testid="quick-start-key-guide" @click="showKeyGuide = true">
@@ -63,17 +71,17 @@
       </li>
 
       <!-- ② 充值 -->
-      <li class="step" :class="{ 'step-guide': guideStep === 2 }" data-testid="quick-start-step-2">
+      <li class="step" :class="stepClass(2, hasBalance)" data-testid="quick-start-step-2">
         <div class="step-inner">
           <StepHead :index="2" :done="hasBalance" :active="guideStep === 2" :title="t('dashboard.quickStart.step2')" />
           <div class="step-body">
             <p class="step-label">{{ t('dashboard.quickStart.step2Label') }}</p>
             <p class="step-value tabular-nums" :class="hasBalance ? 'text-emerald-600 dark:text-emerald-400' : ''" data-testid="quick-start-balance">${{ balance.toFixed(2) }}</p>
           </div>
-          <div class="step-foot flex-wrap gap-x-3 gap-y-2">
-            <router-link :to="rechargePath" class="btn" :class="hasBalance ? 'btn-secondary' : 'btn-primary'" data-testid="quick-start-recharge">{{ t('dashboard.quickStart.step2Action') }}</router-link>
+          <div class="step-foot flex-wrap gap-x-3 gap-y-2" :class="{ '!pt-14': guideStep === 2 }">
+            <router-link :to="rechargePath" class="btn" :class="guideStep === 2 ? 'btn-primary' : 'btn-secondary'" data-testid="quick-start-recharge">{{ t('dashboard.quickStart.step2Action') }}</router-link>
             <span class="relative inline-flex">
-              <button type="button" class="inline-flex items-center gap-1 whitespace-nowrap text-sm font-medium text-primary-600 hover:underline dark:text-primary-400" data-testid="quick-start-reward" @click="showQr = true">
+              <button type="button" class="inline-flex items-center gap-1.5 whitespace-nowrap text-[15px] font-medium text-primary-600 hover:underline dark:text-primary-400" data-testid="quick-start-reward" @click="showQr = true">
                 <img :src="qqGroup.penguinImage" alt="" class="h-4 w-auto" />{{ t('dashboard.quickStart.step2Reward') }}
               </button>
               <GuideBubble v-if="guideStep === 2" :text="t('dashboard.quickStart.guide.step2')" align="end" />
@@ -83,10 +91,10 @@
       </li>
 
       <!-- ③ 连接 Codex：出现使用记录就算连接成功 -->
-      <li class="step" :class="{ 'step-guide': guideStep === 3 }" data-testid="quick-start-step-3">
+      <li class="step" :class="stepClass(3, hasUsage)" data-testid="quick-start-step-3">
         <div class="step-inner">
           <StepHead :index="3" :done="hasUsage" :active="guideStep === 3" :title="t('dashboard.quickStart.step3', { app: appLabel })" :badge="t('dashboard.quickStart.step3Badge')" />
-          <div class="mt-3 flex flex-col gap-2.5">
+          <div class="mt-4 flex flex-col gap-3">
             <div class="flex items-center gap-3 whitespace-nowrap">
               <span class="relative inline-flex">
                 <a :href="quickConnect.downloads[os]" class="download-btn" data-testid="quick-start-download" @click="markDownloaded">
@@ -95,28 +103,29 @@
                 <GuideBubble v-if="step3Guide === 'download'" :text="t('dashboard.quickStart.guide.download')" placement="right" />
               </span>
               <!-- 气泡指着下载按钮时，先把另一个系统的下载链接让出位置 -->
-              <a v-if="step3Guide !== 'download'" :href="quickConnect.downloads[otherOs]" class="text-xs text-gray-500 hover:text-primary-600 hover:underline dark:text-dark-400" data-testid="quick-start-download-other">
+              <a v-if="step3Guide !== 'download'" :href="quickConnect.downloads[otherOs]" class="text-[13px] text-gray-500 hover:text-primary-600 hover:underline dark:text-dark-400" data-testid="quick-start-download-other">
                 {{ t('dashboard.quickStart.step3OtherOs', { os: osLabel[otherOs] }) }}
               </a>
             </div>
 
-            <div class="flex items-center gap-2 whitespace-nowrap">
-              <div class="relative flex-none">
-              <select v-model="selectedKeyId" class="h-9 w-[8.5rem] cursor-pointer appearance-none truncate rounded-lg border border-gray-200 bg-white py-0 pl-2.5 pr-6 text-sm text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-100" :aria-label="t('dashboard.quickStart.step3KeyLabel')" data-testid="quick-start-key-select">
+            <!-- 手机上下拉框和一键导入上下排、各占满一行；电脑上同一行 -->
+            <div class="flex flex-col gap-2.5 whitespace-nowrap sm:flex-row sm:items-center">
+              <div class="relative w-full sm:w-40 sm:flex-none">
+              <select v-model="selectedKeyId" class="h-11 w-full cursor-pointer appearance-none truncate rounded-xl border border-gray-200 bg-white py-0 pl-3 pr-7 text-[15px] text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-100" :aria-label="t('dashboard.quickStart.step3KeyLabel')" data-testid="quick-start-key-select">
                 <option v-if="!importKeys.length" :value="null">{{ t('dashboard.quickStart.step3NoKey') }}</option>
                 <option v-for="k in importKeys" :key="k.id" :value="k.id" :title="k.name">{{ k.name }}</option>
               </select>
               <Icon name="chevronDown" size="xs" class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400" />
             </div>
               <!-- 还没有可导入的密钥时：自动建一把「测试」密钥（GPT 第一个分组）再继续导入；按选中密钥的分组切换 Codex / Claude -->
-              <span class="relative inline-flex">
-                <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" :app="importApp" :disabled="creatingKey" data-testid="quick-start-import" @missing-key="createKeyAndImport" />
+              <span class="relative flex sm:inline-flex">
+                <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" :app="importApp" :disabled="creatingKey" class="import-big w-full sm:w-auto" data-testid="quick-start-import" @missing-key="createKeyAndImport" />
                 <GuideBubble v-if="step3Guide === 'import'" :text="t('dashboard.quickStart.guide.import')" placement="bottom" xl="right" />
               </span>
             </div>
           </div>
           <!-- w-0 min-w-full：说明文字不撑宽这一列，跟随上面按钮的宽度换行 -->
-          <p class="mt-2.5 w-0 min-w-full text-xs leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint', { app: appLabel }) }}</p>
+          <p class="mt-3 max-w-md text-[13px] leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint', { app: appLabel }) }}</p>
           <div class="step-foot-stack">
             <a :href="quickConnect.fallbackDoc" target="_blank" rel="noopener noreferrer" class="step-link text-gray-500 dark:text-dark-400" data-testid="quick-start-fallback">
               {{ t(os === 'mac' ? 'dashboard.quickStart.step3NoResponseMac' : 'dashboard.quickStart.step3NoResponse') }} →
@@ -126,12 +135,17 @@
       </li>
 
       <!-- ④ 发送第一条消息 -->
-      <li class="step" data-testid="quick-start-step-4">
+      <li class="step" :class="stepClass(4, hasUsage)" data-testid="quick-start-step-4">
         <div class="step-inner">
           <StepHead :index="4" :done="hasUsage" :title="t('dashboard.quickStart.step4')" />
           <p class="step-text">{{ t(importApp === 'claude' ? 'dashboard.quickStart.step4HintClaude' : 'dashboard.quickStart.step4Hint') }}</p>
+          <!-- 示意要发什么：一个迷你对话输入框 -->
+          <div class="chat-mock" aria-hidden="true">
+            <span class="min-w-0 flex-1 truncate">{{ t('dashboard.quickStart.step4Sample') }}</span>
+            <span class="chat-send"><Icon name="arrowUp" size="sm" /></span>
+          </div>
           <div class="step-foot">
-            <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-sm" :class="hasUsage ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-dark-400'">
+            <span class="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium" :class="hasUsage ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-dark-400'">
               <span class="h-2 w-2 rounded-full" :class="hasUsage ? 'bg-emerald-500' : 'animate-pulse bg-gray-400 dark:bg-dark-500'"></span>
               {{ hasUsage ? t('dashboard.quickStart.step4Done') : t('dashboard.quickStart.step4Waiting') }}
             </span>
@@ -251,6 +265,11 @@ const appLabel = computed(() => (importApp.value === 'claude' ? 'Claude' : 'Code
 /** 第一步「去创建」：到密钥页并直接打开创建窗口 */
 const quickCreateRoute = { path: '/keys', query: { create: 'quick' } }
 
+/** 步骤卡片的三种状态：已完成、当前（新人指引）、未开始 */
+function stepClass(index: number, done: boolean) {
+  return { 'step-done': done, 'step-guide': guideStep.value === index, 'step-todo': !done && guideStep.value !== index }
+}
+
 /** 新人指引：当前该做哪一步（全部完成后不再指引） */
 const guideStep = computed<1 | 2 | 3 | null>(() => (!hasKey.value ? 1 : !hasBalance.value ? 2 : !hasUsage.value ? 3 : null))
 
@@ -318,23 +337,23 @@ const StepHead = defineComponent({
   props: { index: { type: Number, required: true }, done: Boolean, active: Boolean, title: { type: String, required: true }, badge: { type: String, default: '' } },
   setup(p) {
     return () =>
-      h('div', { class: 'flex items-center gap-2.5' }, [
+      h('div', { class: 'flex flex-wrap items-center gap-x-3 gap-y-1.5' }, [
         h(
           'span',
           {
             class: [
-              'flex h-7 w-7 flex-none items-center justify-center rounded-full text-sm font-semibold',
+              'flex h-9 w-9 flex-none items-center justify-center rounded-full text-base font-bold',
               p.done
                 ? 'bg-emerald-500 text-white'
                 : p.active
                   ? 'guide-dot bg-primary-500 text-white'
-                  : 'bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-dark-300'
             ],
             'data-done': p.done ? 'true' : 'false'
           },
           p.done ? '✓' : String(p.index)
         ),
-        h('h3', { class: ['text-sm font-semibold', p.active ? 'guide-title' : 'text-gray-900 dark:text-white'] }, p.title),
+        h('h3', { class: ['text-[17px] font-semibold', p.active ? 'guide-title' : 'text-gray-900 dark:text-white'] }, p.title),
         // 这里由子组件渲染，父组件的 scoped 样式够不到，只能用工具类；
         // 用浅橙色描边小胶囊，和青蓝渐变的“一键导入”按钮区分开
         p.badge
@@ -342,7 +361,7 @@ const StepHead = defineComponent({
               'span',
               {
                 class:
-                  'whitespace-nowrap rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold leading-4 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-500/30',
+                  'whitespace-nowrap rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold leading-5 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-500/30',
                 'data-testid': 'quick-start-step-badge'
               },
               p.badge
@@ -354,17 +373,56 @@ const StepHead = defineComponent({
 </script>
 
 <style scoped>
+/* 步骤小卡片：内容靠左铺满，不再在宽列里居中漂着 */
 .step {
-  @apply flex min-w-0 justify-center bg-white px-5 py-4 dark:bg-dark-800;
+  @apply relative flex min-w-0 rounded-2xl border border-gray-200 bg-white p-5 transition-colors dark:border-dark-700 dark:bg-dark-800 xl:p-6;
 }
 
-/* 内容块在列里居中，块内文字靠左 */
+.step-done {
+  @apply border-emerald-200/70 dark:border-emerald-900/50;
+}
+
+/* 大屏时卡片之间画个小箭头，表示先后顺序 */
+@media (min-width: 1280px) {
+  .step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: -11px;
+    width: 7px;
+    height: 7px;
+    border-top: 2px solid rgb(203 213 225);
+    border-right: 2px solid rgb(203 213 225);
+    transform: translateY(-50%) rotate(45deg);
+  }
+  .dark .step:not(:last-child)::after {
+    border-color: rgb(71 85 105);
+  }
+}
+
 .step-inner {
-  @apply flex h-full w-fit min-w-0 max-w-full flex-col;
+  @apply flex h-full min-w-0 flex-1 flex-col;
 }
 
 .step-text {
-  @apply mt-3 text-sm leading-relaxed text-gray-500 dark:text-dark-400;
+  @apply mt-3 text-[15px] leading-relaxed text-gray-600 dark:text-dark-300;
+}
+
+/* 第四步的迷你对话框 */
+.chat-mock {
+  @apply mt-4 flex max-w-xs items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 py-2 pl-3.5 pr-2 text-[15px] text-gray-700 dark:border-dark-600 dark:bg-dark-900/60 dark:text-dark-200;
+}
+
+.chat-send {
+  @apply flex h-7 w-7 flex-none items-center justify-center rounded-lg bg-gray-900 text-white dark:bg-white dark:text-gray-900;
+}
+
+/* 第三步的一键导入是整个流程的重点，做大 */
+.import-big {
+  height: 44px !important;
+  padding: 0 20px !important;
+  font-size: 15px !important;
+  border-radius: 12px !important;
 }
 
 .step-body {
@@ -372,19 +430,19 @@ const StepHead = defineComponent({
 }
 
 .step-label {
-  @apply text-xs text-gray-400 dark:text-dark-500;
+  @apply text-[13px] text-gray-500 dark:text-dark-400;
 }
 
 .step-value {
-  @apply mt-0.5 text-2xl font-bold text-gray-900 dark:text-white;
+  @apply mt-1 text-3xl font-bold text-gray-900 dark:text-white;
 }
 
 .step-foot {
-  @apply mt-auto flex items-center pt-4;
+  @apply mt-auto flex items-center pt-5;
 }
 
 .step-link {
-  @apply text-sm font-medium text-primary-600 hover:underline dark:text-primary-400;
+  @apply text-[15px] font-medium text-primary-600 hover:underline dark:text-primary-400;
 }
 
 .step-foot-stack {
@@ -393,7 +451,7 @@ const StepHead = defineComponent({
 
 /* 下载助手：浅靛蓝底色，和青蓝渐变的“一键导入”按钮区分开 */
 .download-btn {
-  @apply inline-flex h-9 items-center whitespace-nowrap rounded-[10px] bg-indigo-50 px-3.5 text-sm font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 transition-colors hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30 dark:hover:bg-indigo-500/20;
+  @apply inline-flex h-11 items-center whitespace-nowrap rounded-xl bg-indigo-50 px-4 text-[15px] font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 transition-colors hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30 dark:hover:bg-indigo-500/20;
 }
 
 .support-link {
@@ -402,20 +460,22 @@ const StepHead = defineComponent({
 
 /* 新人指引：当前步骤卡片淡青底 + 缓慢呼吸的描边，序号外圈轻扩散，标题颜色缓慢明暗变化 */
 .step-guide {
-  @apply relative;
-  background-image: linear-gradient(180deg, rgba(240, 253, 250, 0.95) 0%, rgba(255, 255, 255, 0) 75%);
+  @apply border-primary-300 dark:border-primary-700;
+  background-image: linear-gradient(180deg, rgba(240, 253, 250, 1) 0%, rgba(255, 255, 255, 1) 70%);
+  box-shadow: 0 14px 34px -18px rgba(13, 148, 136, 0.55);
 }
 
 .dark .step-guide {
-  background-image: linear-gradient(180deg, rgba(20, 184, 166, 0.1) 0%, rgba(20, 184, 166, 0) 75%);
+  background-image: linear-gradient(180deg, rgba(20, 184, 166, 0.14) 0%, rgba(20, 184, 166, 0.02) 70%);
 }
 
 .step-guide::before {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: -1px;
+  border-radius: inherit;
   pointer-events: none;
-  box-shadow: inset 0 0 0 1.5px rgba(20, 184, 166, 0.6);
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.28);
   animation: guide-breathe 2.8s ease-in-out infinite;
 }
 
@@ -459,12 +519,12 @@ const StepHead = defineComponent({
 }
 
 .header-help {
-  @apply min-w-0 items-center gap-1.5 text-sm font-medium text-amber-600 hover:underline dark:text-amber-400;
+  @apply min-w-0 items-center gap-1.5 text-[15px] font-medium text-amber-600 hover:underline dark:text-amber-400;
 }
 
 /* 标题旁的卖点：渐变色与“一键导入”按钮一致，缓慢流光 */
 .tagline {
-  @apply inline-flex min-w-0 items-center gap-1 text-xs font-semibold sm:text-sm;
+  @apply inline-flex min-w-0 items-center gap-1.5 rounded-full bg-primary-50/80 px-3 py-1 text-xs font-semibold ring-1 ring-inset ring-primary-100 dark:bg-primary-900/20 dark:ring-primary-800/50 sm:text-sm;
 }
 
 .tagline-icon {

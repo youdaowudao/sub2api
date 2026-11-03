@@ -37,11 +37,11 @@ withDefaults(
   z-index: 30;
   pointer-events: none;
   white-space: nowrap;
-  padding: 5px 10px;
-  border-radius: 9px;
-  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 13px;
   font-weight: 600;
-  line-height: 16px;
+  line-height: 18px;
   color: #fff;
   background: linear-gradient(135deg, #0d9488 0%, #0891b2 100%);
   box-shadow: 0 8px 20px -8px rgba(8, 145, 178, 0.75);
