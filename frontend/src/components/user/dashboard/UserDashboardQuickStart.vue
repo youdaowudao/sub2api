@@ -69,7 +69,7 @@
           <StepHead :index="3" :done="hasUsage" :title="t('dashboard.quickStart.step3', { app: appLabel })" :badge="t('dashboard.quickStart.step3Badge')" />
           <div class="mt-3 flex flex-col gap-2.5">
             <div class="flex items-center gap-3 whitespace-nowrap">
-              <a :href="quickConnect.downloads[os]" class="btn btn-secondary btn-sm whitespace-nowrap" data-testid="quick-start-download">
+              <a :href="quickConnect.downloads[os]" class="download-btn" data-testid="quick-start-download">
                 <Icon name="download" size="sm" class="mr-1" />{{ t('dashboard.quickStart.step3Download', { os: osLabel[os] }) }}
               </a>
               <a :href="quickConnect.downloads[otherOs]" class="text-xs text-gray-500 hover:text-primary-600 hover:underline dark:text-dark-400" data-testid="quick-start-download-other">
@@ -235,13 +235,14 @@ const StepHead = defineComponent({
           p.done ? '✓' : String(p.index)
         ),
         h('h3', { class: 'text-sm font-semibold text-gray-900 dark:text-white' }, p.title),
-        // 这里由子组件渲染，父组件的 scoped 样式够不到，只能用工具类和行内渐变
+        // 这里由子组件渲染，父组件的 scoped 样式够不到，只能用工具类；
+        // 用浅橙色描边小胶囊，和青蓝渐变的“一键导入”按钮区分开
         p.badge
           ? h(
               'span',
               {
-                class: 'whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold leading-4 text-white shadow-sm',
-                style: { background: 'linear-gradient(135deg, #0d9488 0%, #0891b2 55%, #2563eb 100%)' },
+                class:
+                  'whitespace-nowrap rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold leading-4 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-500/30',
                 'data-testid': 'quick-start-step-badge'
               },
               p.badge
@@ -288,6 +289,11 @@ const StepHead = defineComponent({
 
 .step-foot-stack {
   @apply mt-auto flex flex-col items-start gap-1.5 pt-4;
+}
+
+/* 下载助手：浅靛蓝底色，和青蓝渐变的“一键导入”按钮区分开 */
+.download-btn {
+  @apply inline-flex h-[30px] items-center whitespace-nowrap rounded-lg bg-indigo-50 px-3 text-[13px] font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 transition-colors hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30 dark:hover:bg-indigo-500/20;
 }
 
 .support-link {
