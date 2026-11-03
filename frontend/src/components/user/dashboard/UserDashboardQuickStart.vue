@@ -36,9 +36,12 @@
         <div class="step-inner">
           <StepHead :index="1" :done="hasKey" :title="t('dashboard.quickStart.step1')" />
           <p class="step-text">{{ hasKey ? t('dashboard.quickStart.step1Tip') : t('dashboard.quickStart.step1Todo') }}</p>
-          <div class="step-foot">
+          <div class="step-foot flex-wrap gap-x-3 gap-y-2">
             <router-link v-if="hasKey" to="/keys" class="step-link">{{ t('dashboard.quickStart.step1Manage') }} →</router-link>
             <router-link v-else to="/keys" class="btn btn-primary btn-sm">{{ t('dashboard.quickStart.step1Action') }}</router-link>
+            <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" data-testid="quick-start-key-guide" @click="showKeyGuide = true">
+              <Icon name="eye" size="sm" class="mr-1" />{{ t('dashboard.quickStart.step1Guide') }}
+            </button>
           </div>
         </div>
       </li>
@@ -145,6 +148,7 @@
       </div>
     </div>
     <QqGroupDialog :show="showQr" @close="showQr = false" />
+    <CreateKeyGuideDialog :show="showKeyGuide" @close="showKeyGuide = false" />
   </section>
 </template>
 
@@ -156,6 +160,7 @@ import Icon from '@/components/icons/Icon.vue'
 import QqGroupDialog from '@/features/brand/components/QqGroupDialog.vue'
 import { qqGroup, quickConnect } from '@/features/brand/config'
 import CodexImportButton from '@/features/brand/components/CodexImportButton.vue'
+import CreateKeyGuideDialog from './CreateKeyGuideDialog.vue'
 import { keysAPI } from '@/api/keys'
 import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
@@ -174,6 +179,7 @@ const appStore = useAppStore()
 /** 使用记录不超过设定条数时一直展开；手动收起只对本次访问有效 */
 const expanded = ref(props.totalRequests <= quickConnect.collapseAfterRequests)
 const showQr = ref(false)
+const showKeyGuide = ref(false)
 
 const hasKey = computed(() => props.totalApiKeys > 0)
 const hasBalance = computed(() => props.balance > 0)

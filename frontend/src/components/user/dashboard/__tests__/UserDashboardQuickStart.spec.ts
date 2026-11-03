@@ -27,7 +27,7 @@ const key = (id: number, name: string, platform: string, created_at: string, sta
 async function panel(props: { totalApiKeys?: number; totalRequests?: number; balance?: number } = {}) {
   const w = mount(UserDashboardQuickStart, {
     props: { totalApiKeys: 0, totalRequests: 0, balance: 0, ...props },
-    global: { stubs: { Icon: true, QqGroupDialog: true, RouterLink: { props: ['to'], template: '<a :data-to="to"><slot /></a>' } } }
+    global: { stubs: { Icon: true, QqGroupDialog: true, CreateKeyGuideDialog: true, RouterLink: { props: ['to'], template: '<a :data-to="to"><slot /></a>' } } }
   })
   await flushPromises()
   return w
@@ -143,6 +143,18 @@ describe('quick start panel', () => {
     expect(dialog.props('show')).toBe(false)
     await step3.get('[data-testid="quick-start-support"]').trigger('click')
     expect(dialog.props('show')).toBe(true)
+  })
+})
+
+describe('create key picture guide', () => {
+  it('opens the picture guide from step 1 whether or not a key exists', async () => {
+    for (const totalApiKeys of [0, 1]) {
+      const w = await panel({ totalApiKeys })
+      const dialog = w.getComponent({ name: 'CreateKeyGuideDialog' })
+      expect(dialog.props('show')).toBe(false)
+      await w.get('[data-testid="quick-start-step-1"] [data-testid="quick-start-key-guide"]').trigger('click')
+      expect(dialog.props('show')).toBe(true)
+    }
   })
 })
 
