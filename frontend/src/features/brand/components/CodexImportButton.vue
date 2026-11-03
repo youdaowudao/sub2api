@@ -3,18 +3,19 @@
     type="button"
     class="codex-import-btn"
     :class="stacked ? 'codex-import-btn-stacked' : compact ? 'codex-import-btn-compact' : ''"
-    :title="t('keys.importToCodex')"
+    :title="app === 'claude' ? t('keys.importToClaudeHint') : t('keys.importToCodex')"
+    :data-app="app"
     data-testid="codex-import"
     @click="launch"
   >
     <!-- stacked：表格操作列里用，两行字，和旁边的图标按钮一样高 -->
     <template v-if="stacked">
       <span>{{ t('keys.importToCodexLine1') }}</span>
-      <span>Codex</span>
+      <span>{{ app === 'claude' ? 'Claude' : 'Codex' }}</span>
     </template>
     <template v-else>
       <Icon name="bolt" size="sm" />
-      <span>{{ t('keys.importToCodex') }}</span>
+      <span>{{ app === 'claude' ? t('keys.importToClaude') : t('keys.importToCodex') }}</span>
     </template>
   </button>
 </template>
@@ -22,9 +23,10 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import { buildQuickConnectLink } from '../config'
+import { buildQuickConnectLink, type ImportApp } from '../config'
 
-const props = defineProps<{ apiKey?: string; name?: string; compact?: boolean; stacked?: boolean }>()
+/** app：导入到哪个软件，由 importAppForGroup 按分组得出，默认 Codex */
+const props = withDefaults(defineProps<{ apiKey?: string; name?: string; app?: ImportApp; compact?: boolean; stacked?: boolean }>(), { app: 'codex' })
 const emit = defineEmits<{ 'missing-key': [] }>()
 const { t } = useI18n()
 
@@ -35,7 +37,7 @@ function launch() {
     emit('missing-key')
     return
   }
-  window.location.href = buildQuickConnectLink(props.apiKey, props.name)
+  window.location.href = buildQuickConnectLink(props.apiKey, props.name, props.app)
 }
 </script>
 

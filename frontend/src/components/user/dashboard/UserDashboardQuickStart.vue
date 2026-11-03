@@ -66,7 +66,7 @@
       <!-- ③ 连接 Codex：出现使用记录就算连接成功 -->
       <li class="step" data-testid="quick-start-step-3">
         <div class="step-inner">
-          <StepHead :index="3" :done="hasUsage" :title="t('dashboard.quickStart.step3')" :badge="t('dashboard.quickStart.step3Badge')" />
+          <StepHead :index="3" :done="hasUsage" :title="t('dashboard.quickStart.step3', { app: appLabel })" :badge="t('dashboard.quickStart.step3Badge')" />
           <div class="mt-3 flex flex-col gap-2.5">
             <div class="flex items-center gap-3 whitespace-nowrap">
               <a :href="quickConnect.downloads[os]" class="btn btn-secondary btn-sm whitespace-nowrap" data-testid="quick-start-download">
@@ -80,17 +80,17 @@
             <div class="flex items-center gap-2 whitespace-nowrap">
               <div class="relative flex-none">
               <select v-model="selectedKeyId" class="h-[30px] w-[8.5rem] cursor-pointer appearance-none truncate rounded-lg border border-gray-200 bg-white py-0 pl-2.5 pr-6 text-sm text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-100" :aria-label="t('dashboard.quickStart.step3KeyLabel')" data-testid="quick-start-key-select">
-                <option v-if="!openaiKeys.length" :value="null">{{ t('dashboard.quickStart.step3NoKey') }}</option>
-                <option v-for="k in openaiKeys" :key="k.id" :value="k.id" :title="k.name">{{ k.name }}</option>
+                <option v-if="!importKeys.length" :value="null">{{ t('dashboard.quickStart.step3NoKey') }}</option>
+                <option v-for="k in importKeys" :key="k.id" :value="k.id" :title="k.name">{{ k.name }}</option>
               </select>
               <Icon name="chevronDown" size="xs" class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400" />
             </div>
-              <!-- 还没有 OpenAI 密钥时按钮照常显示，点了去创建密钥 -->
-              <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" compact data-testid="quick-start-import" @missing-key="router.push('/keys')" />
+              <!-- 还没有可导入的密钥时按钮照常显示，点了去创建密钥；按选中密钥的分组切换 Codex / Claude -->
+              <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" :app="importApp" compact data-testid="quick-start-import" @missing-key="router.push('/keys')" />
             </div>
           </div>
           <!-- w-0 min-w-full：说明文字不撑宽这一列，跟随上面按钮的宽度换行 -->
-          <p class="mt-2.5 w-0 min-w-full text-xs leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint') }}</p>
+          <p class="mt-2.5 w-0 min-w-full text-xs leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint', { app: appLabel }) }}</p>
           <div class="step-foot-stack">
             <a :href="quickConnect.fallbackDoc" target="_blank" rel="noopener noreferrer" class="step-link text-gray-500 dark:text-dark-400" data-testid="quick-start-fallback">
               {{ t(os === 'mac' ? 'dashboard.quickStart.step3NoResponseMac' : 'dashboard.quickStart.step3NoResponse') }} →
@@ -110,7 +110,7 @@
       <li class="step" data-testid="quick-start-step-4">
         <div class="step-inner">
           <StepHead :index="4" :done="hasUsage" :title="t('dashboard.quickStart.step4')" />
-          <p class="step-text">{{ t('dashboard.quickStart.step4Hint') }}</p>
+          <p class="step-text">{{ t(importApp === 'claude' ? 'dashboard.quickStart.step4HintClaude' : 'dashboard.quickStart.step4Hint') }}</p>
           <div class="step-foot">
             <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-sm" :class="hasUsage ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-dark-400'">
               <span class="h-2 w-2 rounded-full" :class="hasUsage ? 'bg-emerald-500' : 'animate-pulse bg-gray-400 dark:bg-dark-500'"></span>
@@ -158,7 +158,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import Icon from '@/components/icons/Icon.vue'
 import QqGroupDialog from '@/features/brand/components/QqGroupDialog.vue'
-import { qqGroup, quickConnect } from '@/features/brand/config'
+import { canQuickImport, importAppForGroup, qqGroup, quickConnect } from '@/features/brand/config'
 import CodexImportButton from '@/features/brand/components/CodexImportButton.vue'
 import CreateKeyGuideDialog from './CreateKeyGuideDialog.vue'
 import { keysAPI } from '@/api/keys'
@@ -195,20 +195,24 @@ const osLabel: Record<Os, string> = { windows: 'Windows', mac: 'Mac' }
 const keys = ref<ApiKey[]>([])
 const selectedKeyId = ref<number | null>(null)
 const byNewest = (a: ApiKey, b: ApiKey) => (b.created_at || '').localeCompare(a.created_at || '') || b.id - a.id
-const openaiKeys = computed(() => keys.value.filter((k) => k.status === 'active' && k.group?.platform === 'openai').sort(byNewest))
+/** 能一键导入的密钥：启用中的 OpenAI（导入 Codex）和 Anthropic（导入 Claude）分组密钥，最新的在前 */
+const importKeys = computed(() => keys.value.filter((k) => k.status === 'active' && canQuickImport(k.group)).sort(byNewest))
 
 onMounted(async () => {
   if (!hasKey.value) return
   try {
     const res = await keysAPI.list(1, 100)
     keys.value = res.items || []
-    selectedKeyId.value = openaiKeys.value[0]?.id ?? null
+    selectedKeyId.value = importKeys.value[0]?.id ?? null
   } catch {
     keys.value = []
   }
 })
 
-const selectedKey = computed(() => openaiKeys.value.find((k) => k.id === selectedKeyId.value) ?? openaiKeys.value[0] ?? null)
+const selectedKey = computed(() => importKeys.value.find((k) => k.id === selectedKeyId.value) ?? importKeys.value[0] ?? null)
+/** 第 3、4 步的软件名和导入目标跟着选中的密钥变 */
+const importApp = computed(() => importAppForGroup(selectedKey.value?.group))
+const appLabel = computed(() => (importApp.value === 'claude' ? 'Claude' : 'Codex'))
 
 function copyQq() {
   void useClipboard().copyToClipboard(qqGroup.number, t('community.copied'))
