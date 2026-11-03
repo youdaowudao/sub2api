@@ -19,7 +19,7 @@ export default {
       step2: 'Top up',
       step2Label: 'Balance',
       step2Action: 'Top up',
-      step2Reward: 'Join the group for ¥2',
+      step2Reward: 'Ask support in the group for ¥2',
       step3: 'Connect {app}',
       step3Badge: 'One click · No config',
       step3Download: 'Download {os} helper',
@@ -29,14 +29,39 @@ export default {
       step3NoResponse: 'Nothing happened? Try the PowerShell command',
       step3NoResponseMac: 'Nothing happened? Try the Terminal command',
       step3KeyLabel: 'Key to import',
-      step3Support: 'Ask support in the group, free help',
       step4: 'Send a first message',
       step4Hint: 'Open Codex, start a new task and send "test"',
+      step1MockReady: 'Ready',
+      step1MockTodo: 'Not yet',
+      step4Sample: 'test',
       step4HintClaude: 'Open Claude, start a new chat and send "test"',
       step4Waiting: 'Waiting',
       step4Done: 'Received',
       qqTap: 'Tap to join',
-      qqCopyHint: 'Click to copy'
+      qqCopyHint: 'Click to copy',
+      qqHelp: 'Still stuck on setup? No worries, join the group and support will set it up for free!',
+      headerHelp: 'Worried setup is too hard? Don\'t leave, just join the group for quick help!',
+      guide: {
+        step1: 'New here? Start by creating a key',
+        step2: 'Ask support in the group for ¥2',
+        download: 'Download the helper first',
+        import: 'Helper installed? Click to import'
+      },
+      autoKeyCreated: 'Created key "{name}" for you, importing now',
+      tipsLabel: 'Tip',
+      tips: {
+        invite: 'Invite users with your link and earn a 10% rebate on their top-ups, forever.',
+        newChat: "Don't keep one chat going too long: long context costs more. Start a new chat for each new task.",
+        oneAccount: 'Create three keys at once: one for Claude, one for Codex and one in the image group, then use whichever you need.',
+        keySafe: 'Never share your key or post it publicly. If it leaks, disable it and create a new one right away.',
+        error: "Hit an error? Don't struggle alone: take a screenshot and ask support in the group."
+      },
+      tipActions: {
+        invite: 'Invite',
+        keySafe: 'Manage keys',
+        oneAccount: 'Create key',
+        error: 'Join group'
+      }
     },
     chartsLoadFailed: 'Could not load charts for the selected dates. Please refresh to retry.',
     recentLoadFailed: 'Could not load recent usage for the selected dates. Please refresh to retry.',
@@ -161,7 +186,8 @@ export default {
     enable: 'Enable',
     disable: 'Disable',
     nameLabel: 'Name',
-    namePlaceholder: 'My API Key',
+    namePlaceholder: 'test',
+    quickCreateHint: 'Name and group are filled in for you, just click Create',
     groupLabel: 'Group',
     providerLabel: 'Provider',
     providers: {

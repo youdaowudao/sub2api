@@ -39,6 +39,7 @@ export default {
     all: '全部',
     none: '无',
     selectAll: '全选',
+    resizeColumnHint: '拖动调整列宽，双击恢复默认',
     noData: '暂无数据',
     expand: '展开',
     collapse: '收起',

@@ -10,7 +10,7 @@ export default {
     saveHint: '手机可长按二维码保存',
     openLink: '点击链接加入群聊',
     joinGroup: '加入 QQ 群',
-    newcomerReward: '新人进群领 2 元',
+    newcomerReward: '新人进群找客服领 2 元',
     signupBonus: '注册即领新人福利金',
     qrAlt: 'QQ 群二维码'
   },

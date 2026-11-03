@@ -182,6 +182,7 @@
           :loading="loading"
           :columns="visibleColumns"
           :server-side-sort="true"
+          column-width-storage-key="user-usage-column-widths"
           :show-account-billing="false"
           :show-upstream-endpoint="false"
           default-sort-key="created_at"

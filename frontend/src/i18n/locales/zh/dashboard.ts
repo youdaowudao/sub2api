@@ -19,7 +19,7 @@ export default {
       step2: '充值',
       step2Label: '当前余额',
       step2Action: '去充值',
-      step2Reward: '进群领 2 元',
+      step2Reward: '进群找客服领 2 元',
       step3: '连接 {app}',
       step3Badge: '一键接入 · 免配置',
       step3Download: '下载 {os} 接入助手',
@@ -29,14 +29,39 @@ export default {
       step3NoResponse: '没反应？用 PowerShell 命令行试试',
       step3NoResponseMac: '没反应？用终端命令行试试',
       step3KeyLabel: '导入的密钥',
-      step3Support: '进群找客服，免费帮解决',
       step4: '发送第一条消息',
       step4Hint: '打开 Codex，新建任务，发送“测试”',
+      step1MockReady: '已创建',
+      step1MockTodo: '待创建',
+      step4Sample: '测试',
       step4HintClaude: '打开 Claude，新建对话，发送“测试”',
       step4Waiting: '等待中',
       step4Done: '已收到',
       qqTap: '点击加入',
-      qqCopyHint: '点击复制群号'
+      qqCopyHint: '点击复制群号',
+      qqHelp: '还是不会安装？别担心，进群联系客服免费帮忙部署！',
+      headerHelp: '担心自己不会部署？害怕有难度？不要离开，直接进群快速寻求帮助即可！',
+      guide: {
+        step1: '新人从这里开始，点我创建密钥',
+        step2: '进群找客服领 2 元，马上能用',
+        download: '先下载接入助手',
+        import: '装好助手了？点这里一键导入'
+      },
+      autoKeyCreated: '已自动创建密钥「{name}」，正在一键导入',
+      tipsLabel: '小提示',
+      tips: {
+        invite: '使用邀请链接邀请用户，可以永久获得 10% 的充值返利。',
+        newChat: '一个对话窗口不要用太久，上下文太长很费钱！换个任务就新开一个对话。',
+        oneAccount: '一次建好三把密钥：一把用 Claude，一把用 Codex，一把放画图分组，想用哪个直接用。',
+        keySafe: '密钥不要发给别人或贴到公开的地方；一旦泄露，马上停用并重新创建。',
+        error: '遇到报错别自己硬扛，截个图进群找客服，比自己摸索快得多。'
+      },
+      tipActions: {
+        invite: '去邀请',
+        keySafe: '管理密钥',
+        oneAccount: '去建密钥',
+        error: '扫码进群'
+      }
     },
     chartsLoadFailed: '所选日期的图表加载失败，请刷新重试。',
     recentLoadFailed: '所选日期的最近使用加载失败，请刷新重试。',
@@ -161,7 +186,8 @@ export default {
     enable: '启用',
     disable: '禁用',
     nameLabel: '名称',
-    namePlaceholder: '我的 API 密钥',
+    namePlaceholder: '测试',
+    quickCreateHint: '名称和分组都帮你填好了，直接点「创建」就行',
     groupLabel: '分组',
     providerLabel: '厂商',
     providers: {

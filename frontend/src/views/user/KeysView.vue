@@ -474,7 +474,7 @@
           <input
             v-model="formData.name"
             type="text"
-            required
+            :required="showEditModal"
             class="input"
             :placeholder="t('keys.namePlaceholder')"
             data-tour="key-form-name"
@@ -984,6 +984,13 @@
           <button @click="closeModals" type="button" class="btn btn-secondary">
             {{ t('common.cancel') }}
           </button>
+          <!-- 从首页「去创建」进来时，在创建按钮上方提示直接点创建 -->
+          <span class="relative inline-flex">
+          <GuideBubble
+            v-if="quickCreate && showCreateModal && !showEditModal"
+            :text="t('keys.quickCreateHint')"
+            align="end"
+          />
           <button
             form="key-form"
             type="submit"
@@ -1019,6 +1026,7 @@
                   : t('common.create')
             }}
           </button>
+          </span>
         </div>
       </template>
     </BaseDialog>
@@ -1213,6 +1221,9 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
 import { keysAPI, authAPI, usageAPI, userGroupsAPI } from '@/api'
+import { useRoute, useRouter } from 'vue-router'
+import GuideBubble from '@/features/brand/components/GuideBubble.vue'
+import { nextTestKeyName, pickFirstGptGroup } from '@/features/brand/quickKey'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import BulkEditKeysModal from '@/components/keys/BulkEditKeysModal.vue'
@@ -1565,6 +1576,29 @@ watch([showCreateModal, createProviderOptions], ([isOpen, providers], [wasOpen])
   }
 })
 
+// 首页「去创建」带 ?create=quick 进来：直接打开创建窗口，选好 GPT 第一个分组，并提示直接点创建
+const route = useRoute()
+const router = useRouter()
+const quickCreate = ref(false)
+let quickCreatePending = false
+function openQuickCreate() {
+  quickCreate.value = true
+  quickCreatePending = true
+  showCreateModal.value = true
+  // 去掉 create 参数，刷新页面时不再自动打开
+  const { create: _create, ...rest } = route?.query ?? {}
+  void router?.replace({ query: rest })
+}
+// 分组可能在窗口打开后才加载完，等到有分组再选
+watch([showCreateModal, groups], () => {
+  if (!quickCreatePending || !showCreateModal.value || !groups.value.length) return
+  quickCreatePending = false
+  const group = pickFirstGptGroup(groups.value)
+  if (!group) return
+  selectCreateProvider('openai')
+  formData.value.group_id = group.id
+})
+
 // Group dropdown search
 const groupSearchQuery = ref('')
 const filteredGroupOptions = computed(() => {
@@ -1800,6 +1834,10 @@ const confirmDelete = (key: ApiKey) => {
 
 const handleSubmit = async () => {
   const guideTicket = beginGuideAction('key-create')
+  // 新建时名称可以不填：用占位的「测试」，重名就依次用「测试1」「测试2」……
+  if (!showEditModal.value && !formData.value.name.trim()) {
+    formData.value.name = nextTestKeyName(apiKeys.value.map((k) => k.name), t('keys.namePlaceholder'))
+  }
   // Validate group_id is required
   if (formData.value.group_id === null) {
     appStore.showError(t('keys.groupRequired'))
@@ -1923,6 +1961,8 @@ const handleDelete = async () => {
 }
 
 const closeModals = () => {
+  quickCreate.value = false
+  quickCreatePending = false
   showCreateModal.value = false
   showEditModal.value = false
   selectedKey.value = null
@@ -2082,6 +2122,7 @@ function formatResetTime(resetAt: string | null): string {
 }
 
 onMounted(() => {
+  if (route?.query?.create === 'quick') openQuickCreate()
   loadSavedColumns()
   loadApiKeys()
   loadGroups()

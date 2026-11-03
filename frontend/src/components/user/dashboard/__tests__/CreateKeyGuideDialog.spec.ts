@@ -10,7 +10,7 @@ const mountDialog = () =>
     global: {
       stubs: {
         BaseDialog: { props: ['show', 'title'], template: '<div v-if="show"><slot /><slot name="footer" /></div>' },
-        RouterLink: { props: ['to'], template: '<a :data-to="to" @click="$attrs.onClick"><slot /></a>' }
+        RouterLink: { props: ['to'], template: '<a :data-to="typeof to === \'string\' ? to : JSON.stringify(to)" @click="$attrs.onClick"><slot /></a>' }
       }
     }
   })
@@ -27,10 +27,10 @@ describe('CreateKeyGuideDialog', () => {
     expect(w.text()).toContain('dashboard.quickStart.step1GuideShot2')
   })
 
-  it('goes to the keys page and closes', async () => {
+  it('goes to the keys page with the create dialog open, and closes', async () => {
     const w = mountDialog()
     const go = w.get('[data-testid="create-key-guide-go"]')
-    expect(go.attributes('data-to')).toBe('/keys')
+    expect(JSON.parse(go.attributes('data-to')!)).toEqual({ path: '/keys', query: { create: 'quick' } })
     await go.trigger('click')
     expect(w.emitted('close')).toHaveLength(1)
   })
