@@ -39,6 +39,7 @@ export default {
     all: 'All',
     none: 'None',
     selectAll: 'Select all',
+    resizeColumnHint: 'Drag to resize, double-click to reset',
     noData: 'No data',
     expand: 'Expand',
     collapse: 'Collapse',

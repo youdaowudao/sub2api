@@ -24,6 +24,7 @@
         :server-side-sort="serverSideSort"
         :default-sort-key="defaultSortKey"
         :default-sort-order="defaultSortOrder"
+        :column-width-storage-key="columnWidthStorageKey"
         @sort="(key, order) => $emit('sort', key, order)"
       >
         <template #cell-user="{ row }">
@@ -601,6 +602,8 @@ interface Props {
   showUpstreamEndpoint?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
+  /** 设置后表头可拖动调整列宽，并按这个 key 记在本浏览器 */
+  columnWidthStorageKey?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {

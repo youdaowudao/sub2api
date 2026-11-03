@@ -369,3 +369,69 @@ describe('DataTable', () => {
   })
 
 })
+
+describe('DataTable column resizing', () => {
+  const columns = [
+    { key: 'name', label: 'Name', sortable: true },
+    { key: 'model', label: 'Model' }
+  ]
+  const data = [{ id: 1, name: 'a', model: 'gpt' }]
+
+  beforeEach(() => {
+    stubDesktopMatchMedia()
+    localStorage.clear()
+  })
+
+  // jsdom 没有布局，按 data-col-key 给表头一个假宽度
+  const fakeWidths = (wrapper: ReturnType<typeof mount>, px: Record<string, number>) => {
+    for (const th of wrapper.findAll('th')) {
+      const key = th.attributes('data-col-key')
+      if (key) (th.element as HTMLElement).getBoundingClientRect = () => ({ width: px[key] } as DOMRect)
+    }
+  }
+  const drag = (wrapper: ReturnType<typeof mount>, index: number, from: number, to: number) => {
+    const handle = wrapper.findAll('[data-test="col-resizer"]')[index].element
+    handle.dispatchEvent(new MouseEvent('pointerdown', { button: 0, clientX: from, bubbles: true }))
+    window.dispatchEvent(new MouseEvent('pointermove', { clientX: to }))
+    window.dispatchEvent(new MouseEvent('pointerup', { clientX: to }))
+  }
+
+  it('stays unchanged without a storage key', () => {
+    const wrapper = mount(DataTable, { props: { columns, data } })
+    expect(wrapper.find('[data-test="col-resizer"]').exists()).toBe(false)
+    expect(wrapper.find('table').classes()).toContain('w-full')
+  })
+
+  it('drags a header edge, remembers widths in this browser and restores them', async () => {
+    const wrapper = mount(DataTable, { props: { columns, data, columnWidthStorageKey: 'test-widths' } })
+    fakeWidths(wrapper, { name: 120, model: 200 })
+    drag(wrapper, 0, 100, 160)
+    await wrapper.vm.$nextTick()
+
+    // 第一次拖动时先量下所有列，再改被拖的那一列
+    expect(JSON.parse(localStorage.getItem('test-widths')!)).toEqual({ name: 180, model: 200 })
+    const table = wrapper.find('table').element as HTMLElement
+    expect(table.style.tableLayout).toBe('fixed')
+    expect(table.style.width).toBe('380px')
+    expect((wrapper.findAll('th')[0].element as HTMLElement).style.width).toBe('180px')
+
+    // 刷新后照样用记住的宽度；拖得太窄有下限
+    const again = mount(DataTable, { props: { columns, data, columnWidthStorageKey: 'test-widths' } })
+    expect((again.findAll('th')[1].element as HTMLElement).style.width).toBe('200px')
+    drag(again, 1, 300, 0)
+    await again.vm.$nextTick()
+    expect(JSON.parse(localStorage.getItem('test-widths')!).model).toBe(48)
+  })
+
+  it('does not sort when using the handle and resets on double-click', async () => {
+    localStorage.setItem('test-widths', JSON.stringify({ name: 150, model: 'bad' }))
+    const wrapper = mount(DataTable, { props: { columns, data, columnWidthStorageKey: 'test-widths', serverSideSort: true } })
+    expect((wrapper.findAll('th')[0].element as HTMLElement).style.width).toBe('150px')
+    await wrapper.findAll('[data-test="col-resizer"]')[0].trigger('click')
+    expect(wrapper.emitted('sort')).toBeUndefined()
+
+    await wrapper.findAll('[data-test="col-resizer"]')[0].trigger('dblclick')
+    expect(localStorage.getItem('test-widths')).toBeNull()
+    expect(wrapper.find('table').classes()).toContain('w-full')
+  })
+})

@@ -100,7 +100,10 @@
       'is-scrollable': isScrollable
     }"
   >
-    <table class="w-full min-w-max divide-y divide-gray-200 dark:divide-dark-700">
+    <table
+      :class="['divide-y divide-gray-200 dark:divide-dark-700', isFixedLayout ? '' : 'w-full min-w-max']"
+      :style="isFixedLayout ? { tableLayout: 'fixed', width: `${columnTableWidth(selectable ? SELECT_COLUMN_WIDTH : 0)}px` } : undefined"
+    >
       <thead class="table-header bg-gray-50 dark:bg-dark-800">
         <tr>
           <th
@@ -121,15 +124,19 @@
           <th
             v-for="(column, index) in columns"
             :key="column.key"
+            :ref="(el) => setHeaderCellRef(column.key, el)"
             scope="col"
             :aria-sort="column.sortable ? getColumnAriaSort(column.key) : undefined"
             :class="[
               'sticky-header-cell py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400',
               getAdaptivePaddingClass(),
               { 'cursor-pointer hover:bg-gray-100 dark:hover:bg-dark-700': column.sortable },
+              { 'overflow-hidden whitespace-nowrap': isFixedLayout },
               getStickyColumnClass(column, index),
               column.class
             ]"
+            :style="isFixedLayout ? { width: `${columnWidthOf(column.key)}px` } : undefined"
+            :data-col-key="column.key"
             @click="column.sortable && handleSort(column.key)"
           >
             <div :class="['flex items-center space-x-1', getHeaderContentAlignmentClass(column)]">
@@ -164,6 +171,19 @@
                 </svg>
               </span>
             </div>
+            <!-- 拖动调整列宽；双击恢复自动列宽 -->
+            <span
+              v-if="columnResizeEnabled"
+              class="col-resizer"
+              :class="{ 'is-resizing': resizingColumnKey === column.key }"
+              role="separator"
+              aria-orientation="vertical"
+              :title="t('common.resizeColumnHint')"
+              data-test="col-resizer"
+              @pointerdown="startColumnResize($event, column.key, () => headerCellRefs)"
+              @click.stop
+              @dblclick.stop="resetColumnWidths"
+            ></span>
           </th>
         </tr>
       </thead>
@@ -238,6 +258,7 @@
               :class="[
                 'whitespace-nowrap py-4 text-sm text-gray-900 dark:text-gray-100',
                 getAdaptivePaddingClass(),
+                { 'overflow-hidden text-ellipsis': isFixedLayout },
                 getStickyColumnClass(column, colIndex),
                 column.class
               ]"
@@ -264,7 +285,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch, nextTick, toRef } from 'vue'
+import { useResizableColumns } from '@/composables/useResizableColumns'
 import { useVirtualizer, observeElementRect as observeElementRectDefault } from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
@@ -472,6 +494,10 @@ interface Props {
   selectedKeys?: Array<string | number>
   /** Accessible label for a row selection checkbox. */
   selectionLabel?: string | ((row: any) => string)
+  /**
+   * 设置后表头可以拖动调整列宽，并用这个 key 记在本浏览器（localStorage）；不设置则保持原样。
+   */
+  columnWidthStorageKey?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -484,6 +510,25 @@ const props = withDefaults(defineProps<Props>(), {
   selectable: false,
   selectedKeys: () => []
 })
+
+// 拖动调整列宽（仅在传入 columnWidthStorageKey 时启用）
+const SELECT_COLUMN_WIDTH = 44
+const headerCellRefs: Record<string, HTMLElement | undefined> = {}
+const setHeaderCellRef = (key: string, el: unknown) => {
+  headerCellRefs[key] = el instanceof HTMLElement ? el : undefined
+}
+const {
+  enabled: columnResizeEnabled,
+  isFixed: isFixedLayout,
+  widthOf: columnWidthOf,
+  tableWidth: columnTableWidth,
+  resizingKey: resizingColumnKey,
+  startResize: startColumnResize,
+  resetWidths: resetColumnWidths
+} = useResizableColumns(
+  toRef(props, 'columnWidthStorageKey'),
+  computed(() => props.columns.map((column) => column.key))
+)
 
 const sortKey = ref<string>('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
@@ -982,6 +1027,46 @@ defineExpose({
 }
 
 /* 所有表头单元格固定在顶部 */
+/* 表头右边缘的拖动条：平时是一条细线，悬停或拖动时变成主题色 */
+.col-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 1;
+}
+
+.col-resizer::after {
+  content: '';
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  right: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background-color: rgb(229 231 235);
+  transition: background-color 0.15s;
+}
+
+.col-resizer:hover::after,
+.col-resizer.is-resizing::after {
+  top: 0;
+  bottom: 0;
+  background-color: rgb(20 184 166);
+}
+
+.dark .col-resizer::after {
+  background-color: rgb(55 65 81);
+}
+
+.dark .col-resizer:hover::after,
+.dark .col-resizer.is-resizing::after {
+  background-color: rgb(45 212 191);
+}
+
 .sticky-header-cell {
   position: sticky;
   top: 0;
