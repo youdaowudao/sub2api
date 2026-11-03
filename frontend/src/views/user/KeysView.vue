@@ -389,12 +389,13 @@
           <template #cell-actions="{ row }">
             <!-- 一行操作：一键导入（双行字，强调色）+ 手动配置 + 导入到 CC Switch + 编辑 + 删除 -->
             <div data-tour="key-actions" class="flex items-stretch">
-              <!-- 一键导入区：OpenAI 分组导入 Codex；以后其他分组（如 Claude App）的一键导入也放在这个位置。
+              <!-- 一键导入区：OpenAI 分组导入 Codex，Anthropic 分组导入 Claude（规则见 importAppForGroup）。
                    没有可导入目标的行保留同宽空位，各行按钮对齐 -->
               <div class="mr-0.5 flex w-[3.6rem] flex-none items-center">
                 <CodexImportButton
-                  v-if="row.group?.platform === 'openai' && row.status === 'active'"
+                  v-if="canQuickImport(row.group) && row.status === 'active'"
                   :api-key="row.key"
+                  :app="importAppForGroup(row.group)"
                   :name="row.name"
                   stacked
                   data-tour="key-codex"
@@ -1241,6 +1242,7 @@ import {
   type CcSwitchClientType
 } from '@/utils/ccswitchImport'
 import CodexImportButton from '@/features/brand/components/CodexImportButton.vue'
+import { canQuickImport, importAppForGroup } from '@/features/brand/config'
 
 // Helper to format date for datetime-local input
 const formatDateTimeLocal = (isoDate: string): string => {

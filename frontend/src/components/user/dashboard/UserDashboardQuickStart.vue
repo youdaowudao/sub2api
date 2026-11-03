@@ -18,8 +18,14 @@
 
   <section v-else class="card overflow-hidden" data-testid="quick-start">
     <div class="flex items-center justify-between border-b border-gray-100 px-5 py-3 dark:border-dark-700">
-      <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('dashboard.quickStart.title') }}</h2>
-      <button type="button" class="text-sm text-gray-500 hover:text-gray-700 dark:text-dark-400 dark:hover:text-dark-200" data-testid="quick-start-collapse" @click="expanded = false">
+      <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('dashboard.quickStart.title') }}</h2>
+        <span class="tagline" data-testid="quick-start-tagline">
+          <Icon name="bolt" size="sm" class="tagline-icon" />
+          <span class="tagline-text">{{ t('dashboard.quickStart.tagline') }}</span>
+        </span>
+      </div>
+      <button type="button" class="ml-3 flex-none text-sm text-gray-500 hover:text-gray-700 dark:text-dark-400 dark:hover:text-dark-200" data-testid="quick-start-collapse" @click="expanded = false">
         {{ t('dashboard.quickStart.collapse') }}
       </button>
     </div>
@@ -30,9 +36,12 @@
         <div class="step-inner">
           <StepHead :index="1" :done="hasKey" :title="t('dashboard.quickStart.step1')" />
           <p class="step-text">{{ hasKey ? t('dashboard.quickStart.step1Tip') : t('dashboard.quickStart.step1Todo') }}</p>
-          <div class="step-foot">
+          <div class="step-foot flex-wrap gap-x-3 gap-y-2">
             <router-link v-if="hasKey" to="/keys" class="step-link">{{ t('dashboard.quickStart.step1Manage') }} →</router-link>
             <router-link v-else to="/keys" class="btn btn-primary btn-sm">{{ t('dashboard.quickStart.step1Action') }}</router-link>
+            <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" data-testid="quick-start-key-guide" @click="showKeyGuide = true">
+              <Icon name="eye" size="sm" class="mr-1" />{{ t('dashboard.quickStart.step1Guide') }}
+            </button>
           </div>
         </div>
       </li>
@@ -57,10 +66,10 @@
       <!-- ③ 连接 Codex：出现使用记录就算连接成功 -->
       <li class="step" data-testid="quick-start-step-3">
         <div class="step-inner">
-          <StepHead :index="3" :done="hasUsage" :title="t('dashboard.quickStart.step3')" />
+          <StepHead :index="3" :done="hasUsage" :title="t('dashboard.quickStart.step3', { app: appLabel })" :badge="t('dashboard.quickStart.step3Badge')" />
           <div class="mt-3 flex flex-col gap-2.5">
             <div class="flex items-center gap-3 whitespace-nowrap">
-              <a :href="quickConnect.downloads[os]" class="btn btn-secondary btn-sm whitespace-nowrap" data-testid="quick-start-download">
+              <a :href="quickConnect.downloads[os]" class="download-btn" data-testid="quick-start-download">
                 <Icon name="download" size="sm" class="mr-1" />{{ t('dashboard.quickStart.step3Download', { os: osLabel[os] }) }}
               </a>
               <a :href="quickConnect.downloads[otherOs]" class="text-xs text-gray-500 hover:text-primary-600 hover:underline dark:text-dark-400" data-testid="quick-start-download-other">
@@ -71,19 +80,27 @@
             <div class="flex items-center gap-2 whitespace-nowrap">
               <div class="relative flex-none">
               <select v-model="selectedKeyId" class="h-[30px] w-[8.5rem] cursor-pointer appearance-none truncate rounded-lg border border-gray-200 bg-white py-0 pl-2.5 pr-6 text-sm text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-100" :aria-label="t('dashboard.quickStart.step3KeyLabel')" data-testid="quick-start-key-select">
-                <option v-if="!openaiKeys.length" :value="null">{{ t('dashboard.quickStart.step3NoKey') }}</option>
-                <option v-for="k in openaiKeys" :key="k.id" :value="k.id" :title="k.name">{{ k.name }}</option>
+                <option v-if="!importKeys.length" :value="null">{{ t('dashboard.quickStart.step3NoKey') }}</option>
+                <option v-for="k in importKeys" :key="k.id" :value="k.id" :title="k.name">{{ k.name }}</option>
               </select>
               <Icon name="chevronDown" size="xs" class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400" />
             </div>
-              <!-- 还没有 OpenAI 密钥时按钮照常显示，点了去创建密钥 -->
-              <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" compact data-testid="quick-start-import" @missing-key="router.push('/keys')" />
+              <!-- 还没有可导入的密钥时按钮照常显示，点了去创建密钥；按选中密钥的分组切换 Codex / Claude -->
+              <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" :app="importApp" compact data-testid="quick-start-import" @missing-key="router.push('/keys')" />
             </div>
           </div>
-          <p class="mt-2.5 text-xs text-gray-400 dark:text-dark-500">{{ t('dashboard.quickStart.step3Hint') }}</p>
-          <div class="step-foot">
+          <!-- w-0 min-w-full：说明文字不撑宽这一列，跟随上面按钮的宽度换行 -->
+          <p class="mt-2.5 w-0 min-w-full text-xs leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint', { app: appLabel }) }}</p>
+          <div class="step-foot-stack">
             <a :href="quickConnect.fallbackDoc" target="_blank" rel="noopener noreferrer" class="step-link text-gray-500 dark:text-dark-400" data-testid="quick-start-fallback">
               {{ t(os === 'mac' ? 'dashboard.quickStart.step3NoResponseMac' : 'dashboard.quickStart.step3NoResponse') }} →
+            </a>
+            <!-- 电脑上弹出扫码加群；手机上直接跳转加群 -->
+            <button type="button" class="support-link hidden sm:inline-flex" data-testid="quick-start-support" @click="showQr = true">
+              <img :src="qqGroup.penguinImage" alt="" class="h-4 w-auto" />{{ t('dashboard.quickStart.step3Support') }}
+            </button>
+            <a :href="qqGroup.link" target="_blank" rel="noopener noreferrer" class="support-link inline-flex sm:hidden" data-testid="quick-start-support-mobile">
+              <img :src="qqGroup.penguinImage" alt="" class="h-4 w-auto" />{{ t('dashboard.quickStart.step3Support') }}
             </a>
           </div>
         </div>
@@ -93,7 +110,7 @@
       <li class="step" data-testid="quick-start-step-4">
         <div class="step-inner">
           <StepHead :index="4" :done="hasUsage" :title="t('dashboard.quickStart.step4')" />
-          <p class="step-text">{{ t('dashboard.quickStart.step4Hint') }}</p>
+          <p class="step-text">{{ t(importApp === 'claude' ? 'dashboard.quickStart.step4HintClaude' : 'dashboard.quickStart.step4Hint') }}</p>
           <div class="step-foot">
             <span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-sm" :class="hasUsage ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-dark-400'">
               <span class="h-2 w-2 rounded-full" :class="hasUsage ? 'bg-emerald-500' : 'animate-pulse bg-gray-400 dark:bg-dark-500'"></span>
@@ -131,6 +148,7 @@
       </div>
     </div>
     <QqGroupDialog :show="showQr" @close="showQr = false" />
+    <CreateKeyGuideDialog :show="showKeyGuide" @close="showKeyGuide = false" />
   </section>
 </template>
 
@@ -140,8 +158,9 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import Icon from '@/components/icons/Icon.vue'
 import QqGroupDialog from '@/features/brand/components/QqGroupDialog.vue'
-import { qqGroup, quickConnect } from '@/features/brand/config'
+import { canQuickImport, importAppForGroup, qqGroup, quickConnect } from '@/features/brand/config'
 import CodexImportButton from '@/features/brand/components/CodexImportButton.vue'
+import CreateKeyGuideDialog from './CreateKeyGuideDialog.vue'
 import { keysAPI } from '@/api/keys'
 import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
@@ -160,6 +179,7 @@ const appStore = useAppStore()
 /** 使用记录不超过设定条数时一直展开；手动收起只对本次访问有效 */
 const expanded = ref(props.totalRequests <= quickConnect.collapseAfterRequests)
 const showQr = ref(false)
+const showKeyGuide = ref(false)
 
 const hasKey = computed(() => props.totalApiKeys > 0)
 const hasBalance = computed(() => props.balance > 0)
@@ -175,27 +195,31 @@ const osLabel: Record<Os, string> = { windows: 'Windows', mac: 'Mac' }
 const keys = ref<ApiKey[]>([])
 const selectedKeyId = ref<number | null>(null)
 const byNewest = (a: ApiKey, b: ApiKey) => (b.created_at || '').localeCompare(a.created_at || '') || b.id - a.id
-const openaiKeys = computed(() => keys.value.filter((k) => k.status === 'active' && k.group?.platform === 'openai').sort(byNewest))
+/** 能一键导入的密钥：启用中的 OpenAI（导入 Codex）和 Anthropic（导入 Claude）分组密钥，最新的在前 */
+const importKeys = computed(() => keys.value.filter((k) => k.status === 'active' && canQuickImport(k.group)).sort(byNewest))
 
 onMounted(async () => {
   if (!hasKey.value) return
   try {
     const res = await keysAPI.list(1, 100)
     keys.value = res.items || []
-    selectedKeyId.value = openaiKeys.value[0]?.id ?? null
+    selectedKeyId.value = importKeys.value[0]?.id ?? null
   } catch {
     keys.value = []
   }
 })
 
-const selectedKey = computed(() => openaiKeys.value.find((k) => k.id === selectedKeyId.value) ?? openaiKeys.value[0] ?? null)
+const selectedKey = computed(() => importKeys.value.find((k) => k.id === selectedKeyId.value) ?? importKeys.value[0] ?? null)
+/** 第 3、4 步的软件名和导入目标跟着选中的密钥变 */
+const importApp = computed(() => importAppForGroup(selectedKey.value?.group))
+const appLabel = computed(() => (importApp.value === 'claude' ? 'Claude' : 'Codex'))
 
 function copyQq() {
   void useClipboard().copyToClipboard(qqGroup.number, t('community.copied'))
 }
 
 const StepHead = defineComponent({
-  props: { index: { type: Number, required: true }, done: Boolean, title: { type: String, required: true } },
+  props: { index: { type: Number, required: true }, done: Boolean, title: { type: String, required: true }, badge: { type: String, default: '' } },
   setup(p) {
     return () =>
       h('div', { class: 'flex items-center gap-2.5' }, [
@@ -210,7 +234,20 @@ const StepHead = defineComponent({
           },
           p.done ? '✓' : String(p.index)
         ),
-        h('h3', { class: 'text-sm font-semibold text-gray-900 dark:text-white' }, p.title)
+        h('h3', { class: 'text-sm font-semibold text-gray-900 dark:text-white' }, p.title),
+        // 这里由子组件渲染，父组件的 scoped 样式够不到，只能用工具类；
+        // 用浅橙色描边小胶囊，和青蓝渐变的“一键导入”按钮区分开
+        p.badge
+          ? h(
+              'span',
+              {
+                class:
+                  'whitespace-nowrap rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold leading-4 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-500/30',
+                'data-testid': 'quick-start-step-badge'
+              },
+              p.badge
+            )
+          : null
       ])
   }
 })
@@ -248,5 +285,70 @@ const StepHead = defineComponent({
 
 .step-link {
   @apply text-sm font-medium text-primary-600 hover:underline dark:text-primary-400;
+}
+
+.step-foot-stack {
+  @apply mt-auto flex flex-col items-start gap-1.5 pt-4;
+}
+
+/* 下载助手：浅靛蓝底色，和青蓝渐变的“一键导入”按钮区分开 */
+.download-btn {
+  @apply inline-flex h-[30px] items-center whitespace-nowrap rounded-lg bg-indigo-50 px-3 text-[13px] font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 transition-colors hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30 dark:hover:bg-indigo-500/20;
+}
+
+.support-link {
+  @apply items-center gap-1 whitespace-nowrap text-sm font-medium text-amber-600 hover:underline dark:text-amber-400;
+}
+
+/* 标题旁的卖点：渐变色与“一键导入”按钮一致，缓慢流光 */
+.tagline {
+  @apply inline-flex min-w-0 items-center gap-1 text-xs font-semibold sm:text-sm;
+}
+
+.tagline-icon {
+  color: #0891b2;
+  animation: tagline-pulse 2.4s ease-in-out infinite;
+}
+
+.tagline-text {
+  background: linear-gradient(90deg, #0d9488 0%, #0891b2 30%, #2563eb 50%, #0891b2 70%, #0d9488 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: tagline-shine 4s linear infinite;
+}
+
+.dark .tagline-icon {
+  color: #22d3ee;
+}
+
+.dark .tagline-text {
+  background-image: linear-gradient(90deg, #2dd4bf 0%, #22d3ee 30%, #60a5fa 50%, #22d3ee 70%, #2dd4bf 100%);
+}
+
+@keyframes tagline-shine {
+  to {
+    background-position: -200% center;
+  }
+}
+
+@keyframes tagline-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tagline-icon,
+  .tagline-text {
+    animation: none;
+  }
 }
 </style>

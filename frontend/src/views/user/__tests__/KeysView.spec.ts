@@ -500,6 +500,65 @@ describe('user KeysView column settings', () => {
     expect(columnMenuText).not.toContain('Actions')
   })
 
+  it('shows one import button per row, Claude for anthropic groups and Codex for openai groups', async () => {
+    const row = (id: number, platform: string | null, status = 'active') => ({
+      ...createApiKey(),
+      id,
+      name: `k${id}`,
+      key: `sk-${id}`,
+      status,
+      group: platform ? { id, name: `g${id}`, platform } : undefined,
+    })
+    listKeys.mockResolvedValueOnce({
+      items: [row(1, 'anthropic'), row(2, 'openai'), row(3, 'gemini'), row(4, null), row(5, 'anthropic', 'inactive')],
+      total: 5,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    const wrapper = await mountView()
+
+    const buttons = wrapper.findAll('[data-testid="codex-import"]')
+    expect(buttons.map((b) => b.attributes('data-app'))).toEqual(['claude', 'codex'])
+    expect(buttons[0].text()).toContain('Claude')
+    expect(buttons[1].text()).toContain('Codex')
+
+    const location = { href: '' }
+    vi.stubGlobal('location', location)
+    await buttons[0].trigger('click')
+    expect(location.href).toBe('usegoodai://import?v=1&app=claude&key=sk-1&name=k1')
+    await buttons[1].trigger('click')
+    expect(location.href).toBe('usegoodai://import?v=1&app=codex&key=sk-2&name=k2')
+    vi.unstubAllGlobals()
+  })
+
+  it('switches the row import button between Codex and Claude after changing the key group', async () => {
+    const openai = { id: 21, name: 'GPT 组', platform: 'openai', rate_multiplier: 1, status: 'active', subscription_type: 'standard', is_exclusive: false }
+    const anthropic = { id: 22, name: 'Claude 组', platform: 'anthropic', rate_multiplier: 1, status: 'active', subscription_type: 'standard', is_exclusive: false }
+    getAvailableGroups.mockResolvedValue([openai, anthropic])
+    const before = { ...createApiKey(), id: 7, key: 'sk-7', name: 'k7', group_id: 21, group: openai }
+    const page = (item: unknown) => ({ items: [item], total: 1, page: 1, page_size: 20, pages: 1 })
+    listKeys.mockResolvedValueOnce(page(before))
+    const wrapper = await mountView()
+    expect(wrapper.get('[data-testid="codex-import"]').attributes('data-app')).toBe('codex')
+
+    // 和真实页面一样：改分组后重新拉列表，新数据里带新分组
+    updateKey.mockResolvedValueOnce({ ...before, group_id: 22, group: anthropic })
+    listKeys.mockResolvedValueOnce(page({ ...before, group_id: 22, group: anthropic }))
+    await wrapper.get('[data-tour="key-group"]').trigger('click')
+    await nextTick()
+    const option = wrapper
+      .findAll('[data-tour="key-group-option"]')
+      .find((o) => o.findComponent({ name: 'GroupOptionItem' }).exists() && o.findComponent({ name: 'GroupOptionItem' }).props('name') === 'Claude 组')
+    expect(option).toBeTruthy()
+    await option!.trigger('click')
+    await flushPromises()
+
+    expect(updateKey).toHaveBeenCalledWith(7, { group_id: 22 })
+    expect(wrapper.get('[data-testid="codex-import"]').attributes('data-app')).toBe('claude')
+    expect(wrapper.get('[data-testid="codex-import"]').text()).toContain('Claude')
+  })
+
   it('renders the current concurrency value', async () => {
     const wrapper = await mountView()
 
