@@ -36,7 +36,9 @@ export default {
       step4Waiting: 'Waiting',
       step4Done: 'Received',
       qqTap: 'Tap to join',
-      qqCopyHint: 'Click to copy'
+      qqCopyHint: 'Click to copy',
+      qqHelp: 'Still stuck on setup? No worries, join the group and support will set it up for free!',
+      headerHelp: 'Worried setup is too hard? Don\'t leave, just join the group for quick help!'
     },
     chartsLoadFailed: 'Could not load charts for the selected dates. Please refresh to retry.',
     recentLoadFailed: 'Could not load recent usage for the selected dates. Please refresh to retry.',

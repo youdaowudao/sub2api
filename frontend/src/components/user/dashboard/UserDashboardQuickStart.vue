@@ -4,9 +4,9 @@
     <img :src="qqGroup.penguinImage" alt="" class="h-6 w-auto" />
     <span class="text-sm text-gray-500 dark:text-dark-400">{{ t('community.qqGroup') }}</span>
     <span class="text-base font-bold tabular-nums text-gray-900 dark:text-white">{{ qqGroup.number }}</span>
-    <button type="button" class="btn btn-secondary btn-sm hidden sm:inline-flex" data-testid="quick-start-copy-qq" @click="copyQq">{{ t('community.copyNumber') }}</button>
-    <button type="button" class="btn btn-secondary btn-sm hidden sm:inline-flex" @click="showQr = true">{{ t('community.scanToJoin') }}</button>
-    <a :href="qqGroup.link" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm sm:hidden">{{ t('community.joinGroup') }}</a>
+    <button type="button" class="btn btn-secondary hidden sm:inline-flex" data-testid="quick-start-copy-qq" @click="copyQq">{{ t('community.copyNumber') }}</button>
+    <button type="button" class="btn btn-primary hidden sm:inline-flex" @click="showQr = true">{{ t('community.scanToJoin') }}</button>
+    <a :href="qqGroup.link" target="_blank" rel="noopener noreferrer" class="btn btn-primary sm:hidden">{{ t('community.joinGroup') }}</a>
     <a :href="quickConnect.docsHome" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-primary-600 dark:text-dark-300">
       <Icon name="book" size="sm" />{{ t('dashboard.quickStart.tutorial') }}
     </a>
@@ -25,7 +25,11 @@
           <span class="tagline-text">{{ t('dashboard.quickStart.tagline') }}</span>
         </span>
       </div>
-      <button type="button" class="ml-3 flex-none text-sm text-gray-500 hover:text-gray-700 dark:text-dark-400 dark:hover:text-dark-200" data-testid="quick-start-collapse" @click="expanded = false">
+      <!-- 标题行右侧：劝留文案，点了弹出扫码加群；窄屏放不下就不显示 -->
+      <button type="button" class="header-help ml-auto hidden lg:inline-flex" data-testid="quick-start-header-help" @click="showQr = true">
+        <img :src="qqGroup.penguinImage" alt="" class="h-4 w-auto" />{{ t('dashboard.quickStart.headerHelp') }}
+      </button>
+      <button type="button" class="ml-4 flex-none text-sm text-gray-500 hover:text-gray-700 dark:text-dark-400 dark:hover:text-dark-200" data-testid="quick-start-collapse" @click="expanded = false">
         {{ t('dashboard.quickStart.collapse') }}
       </button>
     </div>
@@ -38,9 +42,9 @@
           <p class="step-text">{{ hasKey ? t('dashboard.quickStart.step1Tip') : t('dashboard.quickStart.step1Todo') }}</p>
           <div class="step-foot flex-wrap gap-x-3 gap-y-2">
             <router-link v-if="hasKey" to="/keys" class="step-link">{{ t('dashboard.quickStart.step1Manage') }} →</router-link>
-            <router-link v-else to="/keys" class="btn btn-primary btn-sm">{{ t('dashboard.quickStart.step1Action') }}</router-link>
-            <button type="button" class="btn btn-secondary btn-sm whitespace-nowrap" data-testid="quick-start-key-guide" @click="showKeyGuide = true">
-              <Icon name="eye" size="sm" class="mr-1" />{{ t('dashboard.quickStart.step1Guide') }}
+            <router-link v-else to="/keys" class="btn btn-primary">{{ t('dashboard.quickStart.step1Action') }}</router-link>
+            <button type="button" class="btn btn-secondary whitespace-nowrap" data-testid="quick-start-key-guide" @click="showKeyGuide = true">
+              <Icon name="eye" size="sm" />{{ t('dashboard.quickStart.step1Guide') }}
             </button>
           </div>
         </div>
@@ -55,7 +59,7 @@
             <p class="step-value tabular-nums" :class="hasBalance ? 'text-emerald-600 dark:text-emerald-400' : ''" data-testid="quick-start-balance">${{ balance.toFixed(2) }}</p>
           </div>
           <div class="step-foot flex-wrap gap-x-3 gap-y-2">
-            <router-link :to="rechargePath" class="btn btn-sm" :class="hasBalance ? 'btn-secondary' : 'btn-primary'" data-testid="quick-start-recharge">{{ t('dashboard.quickStart.step2Action') }}</router-link>
+            <router-link :to="rechargePath" class="btn" :class="hasBalance ? 'btn-secondary' : 'btn-primary'" data-testid="quick-start-recharge">{{ t('dashboard.quickStart.step2Action') }}</router-link>
             <button type="button" class="inline-flex items-center gap-1 whitespace-nowrap text-sm font-medium text-primary-600 hover:underline dark:text-primary-400" data-testid="quick-start-reward" @click="showQr = true">
               <img :src="qqGroup.penguinImage" alt="" class="h-4 w-auto" />{{ t('dashboard.quickStart.step2Reward') }}
             </button>
@@ -79,14 +83,14 @@
 
             <div class="flex items-center gap-2 whitespace-nowrap">
               <div class="relative flex-none">
-              <select v-model="selectedKeyId" class="h-[30px] w-[8.5rem] cursor-pointer appearance-none truncate rounded-lg border border-gray-200 bg-white py-0 pl-2.5 pr-6 text-sm text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-100" :aria-label="t('dashboard.quickStart.step3KeyLabel')" data-testid="quick-start-key-select">
+              <select v-model="selectedKeyId" class="h-9 w-[8.5rem] cursor-pointer appearance-none truncate rounded-lg border border-gray-200 bg-white py-0 pl-2.5 pr-6 text-sm text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-100" :aria-label="t('dashboard.quickStart.step3KeyLabel')" data-testid="quick-start-key-select">
                 <option v-if="!importKeys.length" :value="null">{{ t('dashboard.quickStart.step3NoKey') }}</option>
                 <option v-for="k in importKeys" :key="k.id" :value="k.id" :title="k.name">{{ k.name }}</option>
               </select>
               <Icon name="chevronDown" size="xs" class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400" />
             </div>
               <!-- 还没有可导入的密钥时按钮照常显示，点了去创建密钥；按选中密钥的分组切换 Codex / Claude -->
-              <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" :app="importApp" compact data-testid="quick-start-import" @missing-key="router.push('/keys')" />
+              <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" :app="importApp" data-testid="quick-start-import" @missing-key="router.push('/keys')" />
             </div>
           </div>
           <!-- w-0 min-w-full：说明文字不撑宽这一列，跟随上面按钮的宽度换行 -->
@@ -129,22 +133,25 @@
           <span class="whitespace-nowrap text-xs text-gray-500 dark:text-dark-400">{{ t('community.qqGroup') }}</span>
           <span class="whitespace-nowrap text-xl font-extrabold tabular-nums text-gray-900 dark:text-white">{{ qqGroup.number }}</span>
         </span>
-        <span class="btn btn-primary btn-sm ml-auto whitespace-nowrap">{{ t('dashboard.quickStart.qqTap') }}</span>
+        <span class="btn btn-primary ml-auto whitespace-nowrap">{{ t('dashboard.quickStart.qqTap') }}</span>
       </a>
-      <div class="hidden items-center gap-4 sm:flex">
+      <p class="mt-2 text-sm font-medium text-amber-600 dark:text-amber-400 sm:hidden" data-testid="quick-start-qq-help-mobile">{{ t('dashboard.quickStart.qqHelp') }}</p>
+      <div class="hidden flex-wrap items-center gap-x-4 gap-y-3 sm:flex">
         <img :src="qqGroup.penguinImage" alt="" class="h-9 w-auto" />
         <span class="text-sm text-gray-500 dark:text-dark-400">{{ t('community.qqGroup') }}</span>
         <button type="button" class="group inline-flex items-baseline gap-2" :title="t('dashboard.quickStart.qqCopyHint')" data-testid="quick-start-qq-copy" @click="copyQq">
           <span class="text-2xl font-extrabold tabular-nums tracking-wide text-gray-900 group-hover:text-primary-600 dark:text-white">{{ qqGroup.number }}</span>
           <Icon name="copy" size="sm" class="text-gray-400 group-hover:text-primary-600" />
         </button>
-        <span class="text-sm text-amber-600 dark:text-amber-400">{{ t('community.newcomerReward') }}</span>
-        <div class="ml-auto flex items-center gap-2">
-          <a :href="quickConnect.docsHome" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-sm" data-testid="quick-start-tutorial">
-            <Icon name="book" size="sm" class="mr-1" />{{ t('dashboard.quickStart.tutorial') }}
-          </a>
-          <button type="button" class="btn btn-primary btn-sm" data-testid="quick-start-qq-scan" @click="showQr = true">{{ t('community.scanToJoin') }}</button>
-        </div>
+        <!-- 扫码按钮紧跟群号，放在左边 -->
+        <button type="button" class="btn btn-primary" data-testid="quick-start-qq-scan" @click="showQr = true">{{ t('community.scanToJoin') }}</button>
+        <span class="flex flex-col gap-0.5 text-sm">
+          <span class="text-amber-600 dark:text-amber-400">{{ t('community.newcomerReward') }}</span>
+          <span class="font-medium text-gray-700 dark:text-dark-200" data-testid="quick-start-qq-help">{{ t('dashboard.quickStart.qqHelp') }}</span>
+        </span>
+        <a :href="quickConnect.docsHome" target="_blank" rel="noopener noreferrer" class="btn btn-secondary ml-auto" data-testid="quick-start-tutorial">
+          <Icon name="book" size="sm" />{{ t('dashboard.quickStart.tutorial') }}
+        </a>
       </div>
     </div>
     <QqGroupDialog :show="showQr" @close="showQr = false" />
@@ -293,11 +300,15 @@ const StepHead = defineComponent({
 
 /* 下载助手：浅靛蓝底色，和青蓝渐变的“一键导入”按钮区分开 */
 .download-btn {
-  @apply inline-flex h-[30px] items-center whitespace-nowrap rounded-lg bg-indigo-50 px-3 text-[13px] font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 transition-colors hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30 dark:hover:bg-indigo-500/20;
+  @apply inline-flex h-9 items-center whitespace-nowrap rounded-[10px] bg-indigo-50 px-3.5 text-sm font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 transition-colors hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30 dark:hover:bg-indigo-500/20;
 }
 
 .support-link {
   @apply items-center gap-1 whitespace-nowrap text-sm font-medium text-amber-600 hover:underline dark:text-amber-400;
+}
+
+.header-help {
+  @apply min-w-0 items-center gap-1.5 text-sm font-medium text-amber-600 hover:underline dark:text-amber-400;
 }
 
 /* 标题旁的卖点：渐变色与“一键导入”按钮一致，缓慢流光 */

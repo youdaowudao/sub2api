@@ -161,6 +161,21 @@ describe('quick start panel', () => {
   })
 })
 
+describe('help to keep newcomers', () => {
+  it('asks for help from the header and the QQ bar, with the scan button left of the tutorial', async () => {
+    const w = await panel()
+    const dialog = w.findAllComponents({ name: 'QqGroupDialog' }).at(-1)!
+    await w.get('[data-testid="quick-start-header-help"]').trigger('click')
+    expect(dialog.props('show')).toBe(true)
+    expect(w.get('[data-testid="quick-start-header-help"]').text()).toBe('dashboard.quickStart.headerHelp')
+    expect(w.get('[data-testid="quick-start-qq-help"]').text()).toBe('dashboard.quickStart.qqHelp')
+    expect(w.get('[data-testid="quick-start-qq-help-mobile"]').text()).toBe('dashboard.quickStart.qqHelp')
+    const html = w.html()
+    expect(html.indexOf('quick-start-qq-scan')).toBeLessThan(html.indexOf('quick-start-tutorial'))
+    expect(w.get('[data-testid="quick-start-qq-scan"]').classes()).not.toContain('btn-sm')
+  })
+})
+
 describe('create key picture guide', () => {
   it('opens the picture guide from step 1 whether or not a key exists', async () => {
     for (const totalApiKeys of [0, 1]) {

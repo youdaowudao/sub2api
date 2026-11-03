@@ -36,7 +36,9 @@ export default {
       step4Waiting: '等待中',
       step4Done: '已收到',
       qqTap: '点击加入',
-      qqCopyHint: '点击复制群号'
+      qqCopyHint: '点击复制群号',
+      qqHelp: '还是不会安装？别担心，进群联系客服免费帮忙部署！',
+      headerHelp: '担心自己不会部署？害怕有难度？不要离开，直接进群快速寻求帮助即可！'
     },
     chartsLoadFailed: '所选日期的图表加载失败，请刷新重试。',
     recentLoadFailed: '所选日期的最近使用加载失败，请刷新重试。',
