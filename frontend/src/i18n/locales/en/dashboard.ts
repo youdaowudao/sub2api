@@ -19,7 +19,7 @@ export default {
       step2: 'Top up',
       step2Label: 'Balance',
       step2Action: 'Top up',
-      step2Reward: 'Join the group for ¥2',
+      step2Reward: 'Ask support in the group for ¥2',
       step3: 'Connect {app}',
       step3Badge: 'One click · No config',
       step3Download: 'Download {os} helper',

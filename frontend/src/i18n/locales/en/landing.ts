@@ -10,7 +10,7 @@ export default {
     saveHint: 'On mobile, long-press the QR code to save it',
     openLink: 'Join via link',
     joinGroup: 'Join QQ group',
-    newcomerReward: 'New members get ¥2 after joining',
+    newcomerReward: 'New members: join the group and ask support for ¥2',
     signupBonus: 'Sign up to get a welcome bonus',
     qrAlt: 'QQ group QR code'
   },

@@ -19,7 +19,7 @@ export default {
       step2: '充值',
       step2Label: '当前余额',
       step2Action: '去充值',
-      step2Reward: '进群领 2 元',
+      step2Reward: '进群找客服领 2 元',
       step3: '连接 {app}',
       step3Badge: '一键接入 · 免配置',
       step3Download: '下载 {os} 接入助手',
