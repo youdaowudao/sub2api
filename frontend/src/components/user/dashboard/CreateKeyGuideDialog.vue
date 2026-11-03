@@ -16,7 +16,7 @@
     <template #footer>
       <div class="flex justify-end gap-3">
         <button type="button" class="btn btn-secondary" @click="emit('close')">{{ t('common.close') }}</button>
-        <router-link to="/keys" class="btn btn-primary" data-testid="create-key-guide-go" @click="emit('close')">{{ t('dashboard.quickStart.step1Action') }}</router-link>
+        <router-link :to="{ path: '/keys', query: { create: 'quick' } }" class="btn btn-primary" data-testid="create-key-guide-go" @click="emit('close')">{{ t('dashboard.quickStart.step1Action') }}</router-link>
       </div>
     </template>
   </BaseDialog>

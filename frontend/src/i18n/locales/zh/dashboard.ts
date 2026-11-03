@@ -38,6 +38,13 @@ export default {
       qqCopyHint: '点击复制群号',
       qqHelp: '还是不会安装？别担心，进群联系客服免费帮忙部署！',
       headerHelp: '担心自己不会部署？害怕有难度？不要离开，直接进群快速寻求帮助即可！',
+      guide: {
+        step1: '新人从这里开始，点我创建密钥',
+        step2: '进群找客服领 2 元，马上能用',
+        download: '先下载接入助手',
+        import: '装好助手了？点这里一键导入'
+      },
+      autoKeyCreated: '已自动创建密钥「{name}」，正在一键导入',
       tipsLabel: '小提示',
       tips: {
         invite: '使用邀请链接邀请用户，可以永久获得 10% 的充值返利。',
@@ -176,7 +183,8 @@ export default {
     enable: '启用',
     disable: '禁用',
     nameLabel: '名称',
-    namePlaceholder: '我的 API 密钥',
+    namePlaceholder: '测试',
+    quickCreateHint: '名称和分组都帮你填好了，直接点「创建」就行',
     groupLabel: '分组',
     providerLabel: '厂商',
     providers: {

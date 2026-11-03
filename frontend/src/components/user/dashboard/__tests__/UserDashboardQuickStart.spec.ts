@@ -2,17 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import UserDashboardQuickStart from '../UserDashboardQuickStart.vue'
 import { buildQuickConnectLink, canQuickImport, currentTipIndex, importAppForGroup, quickStartTips } from '@/features/brand/config'
+import { nextTestKeyName, pickFirstGptGroup } from '@/features/brand/quickKey'
 
-const { list, copyToClipboard, settings, push } = vi.hoisted(() => ({
+const { list, create, getAvailable, showSuccess, showError, copyToClipboard, settings, push } = vi.hoisted(() => ({
   push: vi.fn(),
   list: vi.fn(),
+  create: vi.fn(),
+  getAvailable: vi.fn(),
+  showSuccess: vi.fn(),
+  showError: vi.fn(),
   copyToClipboard: vi.fn().mockResolvedValue(true),
   settings: { value: { payment_enabled: true } as { payment_enabled: boolean } | null }
 }))
 
-vi.mock('@/api/keys', () => ({ keysAPI: { list } }))
+vi.mock('@/api/keys', () => ({ keysAPI: { list, create } }))
+vi.mock('@/api/groups', () => ({ userGroupsAPI: { getAvailable } }))
 vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copyToClipboard }) }))
-vi.mock('@/stores/app', () => ({ useAppStore: () => ({ get cachedPublicSettings() { return settings.value } }) }))
+vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess, showError, get cachedPublicSettings() { return settings.value } }) }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) })
@@ -33,7 +39,7 @@ async function collapsedPanel() {
 async function panel(props: { totalApiKeys?: number; totalRequests?: number; balance?: number } = {}) {
   const w = mount(UserDashboardQuickStart, {
     props: { totalApiKeys: 0, totalRequests: 0, balance: 0, ...props },
-    global: { stubs: { Icon: true, QqGroupDialog: true, CreateKeyGuideDialog: true, RouterLink: { props: ['to'], template: '<a :data-to="to"><slot /></a>' } } }
+    global: { stubs: { Icon: true, QqGroupDialog: true, CreateKeyGuideDialog: true, RouterLink: { props: ['to'], template: '<a :data-to="typeof to === \'string\' ? to : JSON.stringify(to)"><slot /></a>' } } }
   })
   await flushPromises()
   return w
@@ -44,8 +50,10 @@ const done = (w: Awaited<ReturnType<typeof panel>>, step: number) =>
 
 beforeEach(() => {
   vi.clearAllMocks()
+  localStorage.clear()
   settings.value = { payment_enabled: true }
   list.mockResolvedValue({ items: [] })
+  getAvailable.mockResolvedValue([])
 })
 
 describe('quick start panel', () => {
@@ -216,6 +224,120 @@ describe('rotating tips on the collapsed bar', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('newcomer guidance', () => {
+  const guided = (w: Awaited<ReturnType<typeof panel>>) =>
+    [1, 2, 3, 4].filter((n) => w.get(`[data-testid="quick-start-step-${n}"]`).classes().includes('step-guide'))
+  const bubbleIn = (w: Awaited<ReturnType<typeof panel>>, selector: string) =>
+    w.get(selector).element.parentElement!.querySelector('[data-testid="guide-bubble"]')
+
+  it('lights up the next unfinished step and points a bubble at what to click', async () => {
+    const fresh = await panel()
+    expect(guided(fresh)).toEqual([1])
+    expect(fresh.findAll('[data-testid="guide-bubble"]')).toHaveLength(1)
+    expect(bubbleIn(fresh, '[data-testid="quick-start-create"]')?.textContent).toContain('dashboard.quickStart.guide.step1')
+
+    const noBalance = await panel({ totalApiKeys: 1 })
+    expect(guided(noBalance)).toEqual([2])
+    expect(bubbleIn(noBalance, '[data-testid="quick-start-reward"]')?.textContent).toContain('dashboard.quickStart.guide.step2')
+
+    const done = await panel({ totalApiKeys: 1, balance: 3, totalRequests: 2 })
+    expect(guided(done)).toEqual([])
+    expect(done.find('[data-testid="guide-bubble"]').exists()).toBe(false)
+  })
+
+  it('points at the download first, then at one-click import 10 seconds after downloading', async () => {
+    vi.useFakeTimers()
+    try {
+      const w = await panel({ totalApiKeys: 1, balance: 3 })
+      expect(guided(w)).toEqual([3])
+      expect(bubbleIn(w, '[data-testid="quick-start-download"]')?.textContent).toContain('guide.download')
+      // 气泡指着下载时先让出另一个系统的下载链接
+      expect(w.find('[data-testid="quick-start-download-other"]').exists()).toBe(false)
+
+      const link = w.get('[data-testid="quick-start-download"]')
+      link.element.addEventListener('click', (e) => e.preventDefault())
+      await link.trigger('click')
+      vi.advanceTimersByTime(9_000)
+      await flushPromises()
+      expect(bubbleIn(w, '[data-testid="quick-start-download"]')).not.toBeNull()
+      vi.advanceTimersByTime(1_000)
+      await flushPromises()
+      expect(bubbleIn(w, '[data-testid="quick-start-download"]')).toBeNull()
+      expect(bubbleIn(w, '[data-testid="quick-start-import"]')?.textContent).toContain('guide.import')
+
+      // 刷新后直接指一键导入
+      const again = await panel({ totalApiKeys: 1, balance: 3 })
+      expect(bubbleIn(again, '[data-testid="quick-start-import"]')).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('step 1 opens the keys page with the create dialog', async () => {
+    const w = await panel()
+    expect(JSON.parse(w.get('[data-testid="quick-start-create"]').attributes('data-to')!)).toEqual({ path: '/keys', query: { create: 'quick' } })
+  })
+})
+
+describe('one-click import without a key', () => {
+  const groups = [
+    { id: 1, name: 'Claude', platform: 'anthropic', sort_order: 1 },
+    { id: 7, name: 'GPT 备用', platform: 'openai', sort_order: 5 },
+    { id: 3, name: 'GPT 满血', platform: 'openai', sort_order: 2 }
+  ]
+
+  it('creates a test key in the first GPT group, shows it in the picker and continues importing', async () => {
+    getAvailable.mockResolvedValue(groups)
+    create.mockResolvedValue({ id: 99, name: 'keys.namePlaceholder', key: 'sk-new', status: 'active', created_at: '2026-11-03', group: { id: 3, platform: 'openai' } })
+    const location = { href: '' }
+    vi.stubGlobal('location', location)
+    try {
+      const w = await panel()
+      await w.get('[data-testid="quick-start-import"]').trigger('click')
+      await flushPromises()
+      expect(create).toHaveBeenCalledWith('keys.namePlaceholder', 3)
+      expect(push).not.toHaveBeenCalled()
+      expect(location.href).toBe(buildQuickConnectLink('sk-new', 'keys.namePlaceholder', 'codex'))
+      expect(w.get('[data-testid="quick-start-key-select"]').findAll('option').map((o) => o.text())).toEqual(['keys.namePlaceholder'])
+      // 建好密钥后第一步也算完成
+      expect(done(w, 1)).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('names the new key after existing test keys and falls back to the keys page without a GPT group', async () => {
+    list.mockResolvedValue({ items: [key(5, 'gemini', 'gemini', '2026-10-31'), key(6, 'keys.namePlaceholder', 'gemini', '2026-10-30')] })
+    getAvailable.mockResolvedValue(groups)
+    create.mockResolvedValue({ id: 100, name: 'x', key: 'sk-x', status: 'active', created_at: '2026-11-03', group: { platform: 'openai' } })
+    const location = { href: '' }
+    vi.stubGlobal('location', location)
+    try {
+      const w = await panel({ totalApiKeys: 2 })
+      await w.get('[data-testid="quick-start-import"]').trigger('click')
+      await flushPromises()
+      expect(create).toHaveBeenCalledWith('keys.namePlaceholder1', 3)
+
+      getAvailable.mockResolvedValue([groups[0]])
+      create.mockClear()
+      const none = await panel()
+      await none.get('[data-testid="quick-start-import"]').trigger('click')
+      await flushPromises()
+      expect(create).not.toHaveBeenCalled()
+      expect(push).toHaveBeenCalledWith('/keys')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('picks names and the default group the same way everywhere', () => {
+    expect(nextTestKeyName([], '测试')).toBe('测试')
+    expect(nextTestKeyName(['测试', '测试1', ' 测试3 '], '测试')).toBe('测试2')
+    expect(pickFirstGptGroup(groups as never)?.id).toBe(3)
+    expect(pickFirstGptGroup([groups[0]] as never)).toBeNull()
   })
 })
 

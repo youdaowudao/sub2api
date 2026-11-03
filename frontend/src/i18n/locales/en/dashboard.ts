@@ -38,6 +38,13 @@ export default {
       qqCopyHint: 'Click to copy',
       qqHelp: 'Still stuck on setup? No worries, join the group and support will set it up for free!',
       headerHelp: 'Worried setup is too hard? Don\'t leave, just join the group for quick help!',
+      guide: {
+        step1: 'New here? Start by creating a key',
+        step2: 'Ask support in the group for ¥2',
+        download: 'Download the helper first',
+        import: 'Helper installed? Click to import'
+      },
+      autoKeyCreated: 'Created key "{name}" for you, importing now',
       tipsLabel: 'Tip',
       tips: {
         invite: 'Invite users with your link and earn a 10% rebate on their top-ups, forever.',
@@ -176,7 +183,8 @@ export default {
     enable: 'Enable',
     disable: 'Disable',
     nameLabel: 'Name',
-    namePlaceholder: 'My API Key',
+    namePlaceholder: 'test',
+    quickCreateHint: 'Name and group are filled in for you, just click Create',
     groupLabel: 'Group',
     providerLabel: 'Provider',
     providers: {

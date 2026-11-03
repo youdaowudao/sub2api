@@ -19,7 +19,11 @@ const {
   copyToClipboard,
   isCurrentStep,
   nextStep,
+  routeState,
+  routerReplace,
 } = vi.hoisted(() => ({
+  routeState: { query: {} as Record<string, string> },
+  routerReplace: vi.fn(),
   listKeys: vi.fn(),
   updateKey: vi.fn(),
   getPublicSettings: vi.fn(),
@@ -57,6 +61,8 @@ const messages: Record<string, string> = {
   'keys.status.inactive': 'Inactive',
   'keys.status.quota_exhausted': 'Quota exhausted',
   'keys.usage': 'Usage',
+  'keys.namePlaceholder': '测试',
+  'keys.quickCreateHint': '直接点创建',
 }
 
 vi.mock('@/api', () => ({
@@ -78,6 +84,11 @@ vi.mock('@/api', () => ({
     getUserGroupRates,
   },
 }))
+
+vi.mock('vue-router', async () => {
+  const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
+  return { ...actual, useRoute: () => routeState, useRouter: () => ({ replace: routerReplace, push: vi.fn() }) }
+})
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
@@ -298,6 +309,8 @@ describe('user KeysView column settings', () => {
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
     isCurrentStep.mockReturnValue(false)
+    routeState.query = {}
+    routerReplace.mockReset()
   })
 
   it.each([
@@ -841,6 +854,47 @@ describe('user KeysView column settings', () => {
       release = bindGuideBusinessSession({ sessionId: {}, userId: 7, accepts: () => true, complete })
       done(true); await flushPromises()
       expect(complete).not.toHaveBeenCalled()
+    })
+  })
+
+
+  describe('quick create from the dashboard', () => {
+    const group = (id: number, platform: string, sort_order: number) => ({ id, name: `g${id}`, platform, sort_order, rate_multiplier: 1, status: 'active', subscription_type: 'standard', is_exclusive: false })
+
+    it('opens the create dialog with the first GPT group, hints at the create button and clears the query', async () => {
+      routeState.query = { create: 'quick', tab: 'x' }
+      getAvailableGroups.mockResolvedValue([group(1, 'anthropic', 1), group(8, 'openai', 9), group(4, 'openai', 2)])
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), id: 2 })
+      const wrapper = await mountView()
+
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+      expect(routerReplace).toHaveBeenCalledWith({ query: { tab: 'x' } })
+      expect(wrapper.get('[data-testid="guide-bubble"]').text()).toBe('直接点创建')
+      expect(wrapper.get('[data-tour="key-form-name"]').attributes('placeholder')).toBe('测试')
+      expect(wrapper.get('[data-tour="key-form-name"]').attributes('required')).toBeUndefined()
+
+      // 名称留空直接创建：用「测试」，分组是 GPT 第一个
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(vi.mocked(keysAPI.create).mock.calls[0].slice(0, 2)).toEqual(['测试', 4])
+      expect(wrapper.find('[data-testid="guide-bubble"]').exists()).toBe(false)
+    })
+
+    it('numbers the default name when test keys already exist, and stays normal without the query', async () => {
+      listKeys.mockResolvedValue({ items: [{ ...createApiKey(), name: '测试' }, { ...createApiKey(), id: 2, name: '测试1' }], total: 2, page: 1, page_size: 20, pages: 1 })
+      getAvailableGroups.mockResolvedValue([group(4, 'openai', 2)])
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), id: 3 })
+      const wrapper = await mountView()
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+      expect(routerReplace).not.toHaveBeenCalled()
+
+      await getButtonByText(wrapper, 'Create API Key').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[data-testid="guide-bubble"]').exists()).toBe(false)
+      ;(wrapper.vm as unknown as { formData: { group_id: number } }).formData.group_id = 4
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(vi.mocked(keysAPI.create).mock.calls[0][0]).toBe('测试2')
     })
   })
 
