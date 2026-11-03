@@ -10,6 +10,14 @@
     <a :href="quickConnect.docsHome" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-primary-600 dark:text-dark-300">
       <Icon name="book" size="sm" />{{ t('dashboard.quickStart.tutorial') }}
     </a>
+    <!-- 右侧空白放轮换小提示：大屏同一行靠右，小屏单独占最后一行 -->
+    <p class="order-last flex w-full min-w-0 items-center gap-1.5 text-sm text-gray-600 dark:text-dark-300 md:order-none md:w-auto md:flex-1 md:justify-end" :data-tip="tip.id" data-testid="quick-start-tip">
+      <Icon name="lightbulb" size="sm" class="flex-none text-amber-500" />
+      <span class="flex-none font-medium text-amber-600 dark:text-amber-400">{{ t('dashboard.quickStart.tipsLabel') }}</span>
+      <span class="min-w-0 md:truncate" :title="t(`dashboard.quickStart.tips.${tip.id}`)">{{ t(`dashboard.quickStart.tips.${tip.id}`) }}</span>
+      <router-link v-if="'to' in tip" :to="tip.to" class="flex-none whitespace-nowrap font-medium text-primary-600 hover:underline dark:text-primary-400" data-testid="quick-start-tip-action">{{ t(`dashboard.quickStart.tipActions.${tip.id}`) }} →</router-link>
+      <button v-else-if="'qr' in tip" type="button" class="flex-none whitespace-nowrap font-medium text-primary-600 hover:underline dark:text-primary-400" data-testid="quick-start-tip-action" @click="showQr = true">{{ t(`dashboard.quickStart.tipActions.${tip.id}`) }} →</button>
+    </p>
     <button type="button" class="ml-auto inline-flex items-center gap-1 text-sm text-primary-600 dark:text-primary-400" data-testid="quick-start-expand" @click="expanded = true">
       {{ t('dashboard.quickStart.expand') }}<Icon name="chevronDown" size="sm" />
     </button>
@@ -163,7 +171,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import Icon from '@/components/icons/Icon.vue'
 import QqGroupDialog from '@/features/brand/components/QqGroupDialog.vue'
-import { canQuickImport, importAppForGroup, qqGroup, quickConnect } from '@/features/brand/config'
+import { canQuickImport, currentTipIndex, importAppForGroup, qqGroup, quickConnect, quickStartTips } from '@/features/brand/config'
 import CodexImportButton from '@/features/brand/components/CodexImportButton.vue'
 import CreateKeyGuideDialog from './CreateKeyGuideDialog.vue'
 import { keysAPI } from '@/api/keys'
@@ -185,6 +193,8 @@ const appStore = useAppStore()
 const expanded = ref(props.totalRequests <= quickConnect.collapseAfterRequests)
 const showQr = ref(false)
 const showKeyGuide = ref(false)
+/** 收起横条的小提示：按时间每 5 小时轮换，打开页面时取一次 */
+const tip = quickStartTips[currentTipIndex()]
 
 const hasKey = computed(() => props.totalApiKeys > 0)
 const hasBalance = computed(() => props.balance > 0)

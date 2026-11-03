@@ -42,6 +42,23 @@ export const quickConnect = {
   collapseAfterRequests: 10
 } as const
 
+/** 收起横条右侧的小提示：顺序就是轮换顺序，action 为可选的跳转或弹窗 */
+export const quickStartTips = [
+  { id: 'invite', to: '/affiliate' },
+  { id: 'newChat' },
+  { id: 'oneAccount', to: '/keys' },
+  { id: 'keySafe', to: '/keys' },
+  { id: 'error', qr: true }
+] as const
+
+/** 每条提示展示的小时数 */
+export const tipRotateHours = 5
+
+/** 按绝对时间（UTC 纪元）每 5 小时换一条，所有人同一时刻看到的是同一条 */
+export function currentTipIndex(now = Date.now(), count: number = quickStartTips.length): number {
+  return Math.floor(now / (tipRotateHours * 3600_000)) % count
+}
+
 /** 一键导入的目标软件，对应导入链接里的 app 参数 */
 export type ImportApp = 'codex' | 'claude'
 

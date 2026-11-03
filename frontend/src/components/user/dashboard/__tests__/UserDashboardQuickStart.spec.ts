@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import UserDashboardQuickStart from '../UserDashboardQuickStart.vue'
-import { buildQuickConnectLink, canQuickImport, importAppForGroup } from '@/features/brand/config'
+import { buildQuickConnectLink, canQuickImport, currentTipIndex, importAppForGroup, quickStartTips } from '@/features/brand/config'
 
 const { list, copyToClipboard, settings, push } = vi.hoisted(() => ({
   push: vi.fn(),
@@ -175,6 +175,41 @@ describe('help to keep newcomers', () => {
     const html = w.html()
     expect(html.indexOf('quick-start-qq-scan')).toBeLessThan(html.indexOf('quick-start-tutorial'))
     expect(w.get('[data-testid="quick-start-qq-scan"]').classes()).not.toContain('btn-sm')
+  })
+})
+
+describe('rotating tips on the collapsed bar', () => {
+  const H = 3600_000
+  it('switches every 5 hours by absolute time, so everyone sees the same tip', () => {
+    expect(quickStartTips.map((x) => x.id)).toEqual(['invite', 'newChat', 'oneAccount', 'keySafe', 'error'])
+    expect(currentTipIndex(0)).toBe(0)
+    expect(currentTipIndex(5 * H - 1)).toBe(0)
+    expect(currentTipIndex(5 * H)).toBe(1)
+    expect(currentTipIndex(4 * 5 * H)).toBe(4)
+    expect(currentTipIndex(5 * 5 * H)).toBe(0)
+  })
+
+  it('shows the current tip with its action on the collapsed bar only', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(0)
+      const invite = await panel({ totalRequests: 11 })
+      expect(invite.get('[data-testid="quick-start-tip"]').attributes('data-tip')).toBe('invite')
+      expect(invite.get('[data-testid="quick-start-tip"]').text()).toContain('dashboard.quickStart.tips.invite')
+      expect(invite.get('[data-testid="quick-start-tip-action"]').attributes('data-to')).toBe('/affiliate')
+      expect((await panel()).find('[data-testid="quick-start-tip"]').exists()).toBe(false)
+
+      vi.setSystemTime(5 * H)
+      expect((await panel({ totalRequests: 11 })).find('[data-testid="quick-start-tip-action"]').exists()).toBe(false)
+
+      vi.setSystemTime(4 * 5 * H)
+      const error = await panel({ totalRequests: 11 })
+      const dialog = error.findAllComponents({ name: 'QqGroupDialog' }).at(0)!
+      await error.get('[data-testid="quick-start-tip-action"]').trigger('click')
+      expect(dialog.props('show')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

@@ -37,7 +37,21 @@ export default {
       qqTap: 'Tap to join',
       qqCopyHint: 'Click to copy',
       qqHelp: 'Still stuck on setup? No worries, join the group and support will set it up for free!',
-      headerHelp: 'Worried setup is too hard? Don\'t leave, just join the group for quick help!'
+      headerHelp: 'Worried setup is too hard? Don\'t leave, just join the group for quick help!',
+      tipsLabel: 'Tip',
+      tips: {
+        invite: 'Invite users with your link and earn a 10% rebate on their top-ups, forever.',
+        newChat: "Don't keep one chat going too long: long context costs more. Start a new chat for each new task.",
+        oneAccount: 'Create three keys at once: one for Claude, one for Codex and one in the image group, then use whichever you need.',
+        keySafe: 'Never share your key or post it publicly. If it leaks, disable it and create a new one right away.',
+        error: "Hit an error? Don't struggle alone: take a screenshot and ask support in the group."
+      },
+      tipActions: {
+        invite: 'Invite',
+        keySafe: 'Manage keys',
+        oneAccount: 'Create key',
+        error: 'Join group'
+      }
     },
     chartsLoadFailed: 'Could not load charts for the selected dates. Please refresh to retry.',
     recentLoadFailed: 'Could not load recent usage for the selected dates. Please refresh to retry.',

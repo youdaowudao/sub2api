@@ -37,7 +37,21 @@ export default {
       qqTap: '点击加入',
       qqCopyHint: '点击复制群号',
       qqHelp: '还是不会安装？别担心，进群联系客服免费帮忙部署！',
-      headerHelp: '担心自己不会部署？害怕有难度？不要离开，直接进群快速寻求帮助即可！'
+      headerHelp: '担心自己不会部署？害怕有难度？不要离开，直接进群快速寻求帮助即可！',
+      tipsLabel: '小提示',
+      tips: {
+        invite: '使用邀请链接邀请用户，可以永久获得 10% 的充值返利。',
+        newChat: '一个对话窗口不要用太久，上下文太长很费钱！换个任务就新开一个对话。',
+        oneAccount: '一次建好三把密钥：一把用 Claude，一把用 Codex，一把放画图分组，想用哪个直接用。',
+        keySafe: '密钥不要发给别人或贴到公开的地方；一旦泄露，马上停用并重新创建。',
+        error: '遇到报错别自己硬扛，截个图进群找客服，比自己摸索快得多。'
+      },
+      tipActions: {
+        invite: '去邀请',
+        keySafe: '管理密钥',
+        oneAccount: '去建密钥',
+        error: '扫码进群'
+      }
     },
     chartsLoadFailed: '所选日期的图表加载失败，请刷新重试。',
     recentLoadFailed: '所选日期的最近使用加载失败，请刷新重试。',
