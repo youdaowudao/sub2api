@@ -129,6 +129,21 @@ describe('quick start panel', () => {
     expect(copyToClipboard).toHaveBeenCalledWith('1020015031', 'community.copied')
     expect(w.get('[data-testid="quick-start-qq-mobile"]').attributes('href')).toBe('https://qm.qq.com/q/o80PFAbey4')
   })
+
+  it('promises one-click import in the header and step 3, with free help from the group', async () => {
+    const w = await panel()
+    expect(w.get('[data-testid="quick-start-tagline"]').text()).toContain('dashboard.quickStart.tagline')
+    const step3 = w.get('[data-testid="quick-start-step-3"]')
+    expect(step3.get('[data-testid="quick-start-step-badge"]').text()).toBe('dashboard.quickStart.step3Badge')
+    expect(w.findAll('[data-testid="quick-start-step-badge"]')).toHaveLength(1)
+    expect(step3.get('[data-testid="quick-start-step3-hint"]').text()).toBe('dashboard.quickStart.step3Hint')
+
+    expect(step3.get('[data-testid="quick-start-support-mobile"]').attributes('href')).toBe('https://qm.qq.com/q/o80PFAbey4')
+    const dialog = w.findAllComponents({ name: 'QqGroupDialog' }).at(-1)!
+    expect(dialog.props('show')).toBe(false)
+    await step3.get('[data-testid="quick-start-support"]').trigger('click')
+    expect(dialog.props('show')).toBe(true)
+  })
 })
 
 describe('buildQuickConnectLink', () => {

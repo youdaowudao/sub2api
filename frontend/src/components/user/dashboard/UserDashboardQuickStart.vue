@@ -18,8 +18,14 @@
 
   <section v-else class="card overflow-hidden" data-testid="quick-start">
     <div class="flex items-center justify-between border-b border-gray-100 px-5 py-3 dark:border-dark-700">
-      <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('dashboard.quickStart.title') }}</h2>
-      <button type="button" class="text-sm text-gray-500 hover:text-gray-700 dark:text-dark-400 dark:hover:text-dark-200" data-testid="quick-start-collapse" @click="expanded = false">
+      <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('dashboard.quickStart.title') }}</h2>
+        <span class="tagline" data-testid="quick-start-tagline">
+          <Icon name="bolt" size="sm" class="tagline-icon" />
+          <span class="tagline-text">{{ t('dashboard.quickStart.tagline') }}</span>
+        </span>
+      </div>
+      <button type="button" class="ml-3 flex-none text-sm text-gray-500 hover:text-gray-700 dark:text-dark-400 dark:hover:text-dark-200" data-testid="quick-start-collapse" @click="expanded = false">
         {{ t('dashboard.quickStart.collapse') }}
       </button>
     </div>
@@ -57,7 +63,7 @@
       <!-- ③ 连接 Codex：出现使用记录就算连接成功 -->
       <li class="step" data-testid="quick-start-step-3">
         <div class="step-inner">
-          <StepHead :index="3" :done="hasUsage" :title="t('dashboard.quickStart.step3')" />
+          <StepHead :index="3" :done="hasUsage" :title="t('dashboard.quickStart.step3')" :badge="t('dashboard.quickStart.step3Badge')" />
           <div class="mt-3 flex flex-col gap-2.5">
             <div class="flex items-center gap-3 whitespace-nowrap">
               <a :href="quickConnect.downloads[os]" class="btn btn-secondary btn-sm whitespace-nowrap" data-testid="quick-start-download">
@@ -80,10 +86,18 @@
               <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" compact data-testid="quick-start-import" @missing-key="router.push('/keys')" />
             </div>
           </div>
-          <p class="mt-2.5 text-xs text-gray-400 dark:text-dark-500">{{ t('dashboard.quickStart.step3Hint') }}</p>
-          <div class="step-foot">
+          <!-- w-0 min-w-full：说明文字不撑宽这一列，跟随上面按钮的宽度换行 -->
+          <p class="mt-2.5 w-0 min-w-full text-xs leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint') }}</p>
+          <div class="step-foot-stack">
             <a :href="quickConnect.fallbackDoc" target="_blank" rel="noopener noreferrer" class="step-link text-gray-500 dark:text-dark-400" data-testid="quick-start-fallback">
               {{ t(os === 'mac' ? 'dashboard.quickStart.step3NoResponseMac' : 'dashboard.quickStart.step3NoResponse') }} →
+            </a>
+            <!-- 电脑上弹出扫码加群；手机上直接跳转加群 -->
+            <button type="button" class="support-link hidden sm:inline-flex" data-testid="quick-start-support" @click="showQr = true">
+              <img :src="qqGroup.penguinImage" alt="" class="h-4 w-auto" />{{ t('dashboard.quickStart.step3Support') }}
+            </button>
+            <a :href="qqGroup.link" target="_blank" rel="noopener noreferrer" class="support-link inline-flex sm:hidden" data-testid="quick-start-support-mobile">
+              <img :src="qqGroup.penguinImage" alt="" class="h-4 w-auto" />{{ t('dashboard.quickStart.step3Support') }}
             </a>
           </div>
         </div>
@@ -195,7 +209,7 @@ function copyQq() {
 }
 
 const StepHead = defineComponent({
-  props: { index: { type: Number, required: true }, done: Boolean, title: { type: String, required: true } },
+  props: { index: { type: Number, required: true }, done: Boolean, title: { type: String, required: true }, badge: { type: String, default: '' } },
   setup(p) {
     return () =>
       h('div', { class: 'flex items-center gap-2.5' }, [
@@ -210,7 +224,19 @@ const StepHead = defineComponent({
           },
           p.done ? '✓' : String(p.index)
         ),
-        h('h3', { class: 'text-sm font-semibold text-gray-900 dark:text-white' }, p.title)
+        h('h3', { class: 'text-sm font-semibold text-gray-900 dark:text-white' }, p.title),
+        // 这里由子组件渲染，父组件的 scoped 样式够不到，只能用工具类和行内渐变
+        p.badge
+          ? h(
+              'span',
+              {
+                class: 'whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold leading-4 text-white shadow-sm',
+                style: { background: 'linear-gradient(135deg, #0d9488 0%, #0891b2 55%, #2563eb 100%)' },
+                'data-testid': 'quick-start-step-badge'
+              },
+              p.badge
+            )
+          : null
       ])
   }
 })
@@ -248,5 +274,65 @@ const StepHead = defineComponent({
 
 .step-link {
   @apply text-sm font-medium text-primary-600 hover:underline dark:text-primary-400;
+}
+
+.step-foot-stack {
+  @apply mt-auto flex flex-col items-start gap-1.5 pt-4;
+}
+
+.support-link {
+  @apply items-center gap-1 whitespace-nowrap text-sm font-medium text-amber-600 hover:underline dark:text-amber-400;
+}
+
+/* 标题旁的卖点：渐变色与“一键导入”按钮一致，缓慢流光 */
+.tagline {
+  @apply inline-flex min-w-0 items-center gap-1 text-xs font-semibold sm:text-sm;
+}
+
+.tagline-icon {
+  color: #0891b2;
+  animation: tagline-pulse 2.4s ease-in-out infinite;
+}
+
+.tagline-text {
+  background: linear-gradient(90deg, #0d9488 0%, #0891b2 30%, #2563eb 50%, #0891b2 70%, #0d9488 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: tagline-shine 4s linear infinite;
+}
+
+.dark .tagline-icon {
+  color: #22d3ee;
+}
+
+.dark .tagline-text {
+  background-image: linear-gradient(90deg, #2dd4bf 0%, #22d3ee 30%, #60a5fa 50%, #22d3ee 70%, #2dd4bf 100%);
+}
+
+@keyframes tagline-shine {
+  to {
+    background-position: -200% center;
+  }
+}
+
+@keyframes tagline-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tagline-icon,
+  .tagline-text {
+    animation: none;
+  }
 }
 </style>
