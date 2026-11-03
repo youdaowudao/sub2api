@@ -189,8 +189,8 @@ const { t } = useI18n()
 const router = useRouter()
 const appStore = useAppStore()
 
-/** 使用记录不超过设定条数时一直展开；手动收起只对本次访问有效 */
-const expanded = ref(props.totalRequests <= quickConnect.collapseAfterRequests)
+/** 默认始终展开，不因使用记录自动收起；只有用户手动收起，且只对本次访问有效 */
+const expanded = ref(true)
 const showQr = ref(false)
 const showKeyGuide = ref(false)
 /** 收起横条的小提示：按时间每 5 小时轮换，打开页面时取一次 */

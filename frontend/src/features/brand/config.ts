@@ -29,7 +29,7 @@ export const streamModels = {
   right: ['DeepSeek', 'Grok', 'Kimi', 'MiniMax']
 } as const
 
-/** 仪表盘「快速开始」：接入助手下载地址、导入失败时的教程、自动收起的使用记录条数 */
+/** 仪表盘「快速开始」：接入助手下载地址、导入失败时的教程、文档首页 */
 export const quickConnect = {
   downloads: {
     windows: 'https://docs.usegoodai.com/download/usegoodai-quick-connect-windows-x64.exe',
@@ -37,9 +37,7 @@ export const quickConnect = {
   },
   /** 一键导入没反应时，跳到文档「快速开始」的「运行接入命令」一节 */
   fallbackDoc: 'https://docs.usegoodai.com/quick-start#_2-运行接入命令',
-  docsHome: 'https://docs.usegoodai.com/',
-  /** 使用记录超过这个条数后面板默认收起 */
-  collapseAfterRequests: 10
+  docsHome: 'https://docs.usegoodai.com/'
 } as const
 
 /** 收起横条右侧的小提示：顺序就是轮换顺序，action 为可选的跳转或弹窗 */

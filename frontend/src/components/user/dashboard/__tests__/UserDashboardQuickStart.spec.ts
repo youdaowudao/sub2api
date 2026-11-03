@@ -24,6 +24,12 @@ const key = (id: number, name: string, platform: string, created_at: string, sta
   id, name, key: `sk-${id}`, status, created_at, group: { platform }
 })
 
+async function collapsedPanel() {
+  const w = await panel({ totalRequests: 11 })
+  await w.get('[data-testid="quick-start-collapse"]').trigger('click')
+  return w
+}
+
 async function panel(props: { totalApiKeys?: number; totalRequests?: number; balance?: number } = {}) {
   const w = mount(UserDashboardQuickStart, {
     props: { totalApiKeys: 0, totalRequests: 0, balance: 0, ...props },
@@ -43,20 +49,20 @@ beforeEach(() => {
 })
 
 describe('quick start panel', () => {
-  it('stays expanded up to 10 usage records and collapses after that', async () => {
-    expect((await panel({ totalRequests: 0 })).find('[data-testid="quick-start"]').exists()).toBe(true)
-    expect((await panel({ totalRequests: 10 })).find('[data-testid="quick-start"]').exists()).toBe(true)
-    const old = await panel({ totalRequests: 11 })
-    expect(old.find('[data-testid="quick-start"]').exists()).toBe(false)
-    expect(old.find('[data-testid="quick-start-collapsed"]').exists()).toBe(true)
-    await old.get('[data-testid="quick-start-expand"]').trigger('click')
-    expect(old.find('[data-testid="quick-start"]').exists()).toBe(true)
+  it('never collapses on its own, however many usage records there are', async () => {
+    for (const totalRequests of [0, 10, 11, 5000]) {
+      const w = await panel({ totalRequests })
+      expect(w.find('[data-testid="quick-start"]').exists()).toBe(true)
+      expect(w.find('[data-testid="quick-start-collapsed"]').exists()).toBe(false)
+    }
   })
 
   it('collapses on click for this visit only', async () => {
     const w = await panel()
     await w.get('[data-testid="quick-start-collapse"]').trigger('click')
     expect(w.find('[data-testid="quick-start-collapsed"]').exists()).toBe(true)
+    await w.get('[data-testid="quick-start-expand"]').trigger('click')
+    expect(w.find('[data-testid="quick-start"]').exists()).toBe(true)
     expect((await panel()).find('[data-testid="quick-start"]').exists()).toBe(true)
   })
 
@@ -193,17 +199,17 @@ describe('rotating tips on the collapsed bar', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     try {
       vi.setSystemTime(0)
-      const invite = await panel({ totalRequests: 11 })
+      const invite = await collapsedPanel()
       expect(invite.get('[data-testid="quick-start-tip"]').attributes('data-tip')).toBe('invite')
       expect(invite.get('[data-testid="quick-start-tip"]').text()).toContain('dashboard.quickStart.tips.invite')
       expect(invite.get('[data-testid="quick-start-tip-action"]').attributes('data-to')).toBe('/affiliate')
       expect((await panel()).find('[data-testid="quick-start-tip"]').exists()).toBe(false)
 
       vi.setSystemTime(5 * H)
-      expect((await panel({ totalRequests: 11 })).find('[data-testid="quick-start-tip-action"]').exists()).toBe(false)
+      expect((await collapsedPanel()).find('[data-testid="quick-start-tip-action"]').exists()).toBe(false)
 
       vi.setSystemTime(4 * 5 * H)
-      const error = await panel({ totalRequests: 11 })
+      const error = await collapsedPanel()
       const dialog = error.findAllComponents({ name: 'QqGroupDialog' }).at(0)!
       await error.get('[data-testid="quick-start-tip-action"]').trigger('click')
       expect(dialog.props('show')).toBe(true)
