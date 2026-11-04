@@ -212,6 +212,7 @@ export default {
     noKeysYet: '暂无 API 密钥',
     createFirstKey: '创建您的第一个 API 密钥以开始使用 API。',
     keyCreatedSuccess: 'API 密钥创建成功',
+    keyCreatedCopied: '已复制，请通过助手接入',
     keyUpdatedSuccess: 'API 密钥更新成功',
     keyDeletedSuccess: 'API 密钥删除成功',
     keyEnabledSuccess: 'API 密钥已启用',
