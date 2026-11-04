@@ -3,7 +3,7 @@
   <span
     role="tooltip"
     class="guide-bubble"
-    :class="[`gb-${placement}`, `gb-align-${align}`, xl ? `gb-xl-${xl}` : '']"
+    :class="[`gb-${placement}`, `gb-align-${align}`, xl ? `gb-xl-${xl}` : '', wrap ? 'gb-wrap' : '']"
     data-testid="guide-bubble"
     :data-placement="placement"
   >
@@ -23,8 +23,10 @@ withDefaults(
     xl?: Placement
     /** 上/下方时与目标的对齐方式 */
     align?: 'start' | 'center' | 'end'
+    /** 允许换行：最宽不超过 --gb-max-width（由使用方按可用空间给出），放不下就折成多行 */
+    wrap?: boolean
   }>(),
-  { placement: 'top', align: 'start', xl: undefined }
+  { placement: 'top', align: 'start', xl: undefined, wrap: false }
 )
 </script>
 
@@ -48,6 +50,13 @@ withDefaults(
   animation:
     gb-in 0.35s ease-out both,
     gb-float 2.4s ease-in-out 0.35s infinite;
+}
+
+/* 可换行：宽度随文字，最宽不超过使用方给的可用空间 */
+.gb-wrap {
+  white-space: normal;
+  width: max-content;
+  max-width: var(--gb-max-width, none);
 }
 
 /* 小三角 */

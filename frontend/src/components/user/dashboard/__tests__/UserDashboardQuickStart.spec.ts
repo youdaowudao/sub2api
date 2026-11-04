@@ -166,7 +166,11 @@ describe('quick start panel', () => {
     const step3 = w.get('[data-testid="quick-start-step-3"]')
     expect(step3.get('[data-testid="quick-start-step-badge"]').text()).toBe('dashboard.quickStart.step3Badge')
     expect(w.findAll('[data-testid="quick-start-step-badge"]')).toHaveLength(1)
-    expect(step3.get('[data-testid="quick-start-step3-hint"]').text()).toBe('dashboard.quickStart.step3Hint:{"app":"Codex"}')
+    expect(step3.get('[data-testid="quick-start-step3-hint"]').text()).toBe('dashboard.quickStart.step3Hint')
+    // 先下载、再导入两句引导，说明下面一行是放行提醒（测试环境的浏览器标识不是 Mac，按 Windows 显示）
+    expect(step3.get('[data-testid="quick-start-download-lead"]').text()).toBe('dashboard.quickStart.step3DownloadLead')
+    expect(step3.get('[data-testid="quick-start-import-lead"]').text()).toBe('dashboard.quickStart.step3ImportLead')
+    expect(step3.get('[data-testid="quick-start-trust"]').text()).toBe('dashboard.quickStart.step3Trust')
 
     // 第 3 步不再放进群链接，求助入口只留在底部 QQ 群栏
     expect(step3.find('[data-testid="quick-start-support"]').exists()).toBe(false)
@@ -243,27 +247,33 @@ describe('newcomer guidance', () => {
     const noBalance = await panel({ totalApiKeys: 1 })
     expect(guided(noBalance)).toEqual([2])
     expect(bubbleIn(noBalance, '[data-testid="quick-start-reward"]')?.textContent).toContain('dashboard.quickStart.guide.step2')
+    // 第一、二步的气泡允许折行，收在卡片内；指引第二步时底部按钮行带上窄卡片重排用的标记
+    expect(bubbleIn(fresh, '[data-testid="quick-start-create"]')?.classList.contains('gb-wrap')).toBe(true)
+    expect(bubbleIn(noBalance, '[data-testid="quick-start-reward"]')?.classList.contains('gb-wrap')).toBe(true)
+    expect(noBalance.get('[data-testid="quick-start-recharge"]').element.parentElement!.classList.contains('step2-foot-guided')).toBe(true)
+    expect(fresh.get('[data-testid="quick-start-recharge"]').element.parentElement!.classList.contains('step2-foot-guided')).toBe(false)
 
     const done = await panel({ totalApiKeys: 1, balance: 3, totalRequests: 2 })
     expect(guided(done)).toEqual([])
     expect(done.find('[data-testid="guide-bubble"]').exists()).toBe(false)
   })
 
-  it('points at the download first, then at one-click import 10 seconds after downloading', async () => {
+  it('never puts a bubble on the download button, and points at one-click import 10 seconds after downloading', async () => {
     vi.useFakeTimers()
     try {
       const w = await panel({ totalApiKeys: 1, balance: 3 })
       expect(guided(w)).toEqual([3])
-      expect(bubbleIn(w, '[data-testid="quick-start-download"]')?.textContent).toContain('guide.download')
-      // 气泡指着下载时先让出另一个系统的下载链接
-      expect(w.find('[data-testid="quick-start-download-other"]').exists()).toBe(false)
+      expect(bubbleIn(w, '[data-testid="quick-start-download"]')).toBeNull()
+      expect(w.find('[data-testid="guide-bubble"]').exists()).toBe(false)
+      // 另一个系统的下载链接一直显示
+      expect(w.find('[data-testid="quick-start-download-other"]').exists()).toBe(true)
 
       const link = w.get('[data-testid="quick-start-download"]')
       link.element.addEventListener('click', (e) => e.preventDefault())
       await link.trigger('click')
       vi.advanceTimersByTime(9_000)
       await flushPromises()
-      expect(bubbleIn(w, '[data-testid="quick-start-download"]')).not.toBeNull()
+      expect(w.find('[data-testid="guide-bubble"]').exists()).toBe(false)
       vi.advanceTimersByTime(1_000)
       await flushPromises()
       expect(bubbleIn(w, '[data-testid="quick-start-download"]')).toBeNull()
