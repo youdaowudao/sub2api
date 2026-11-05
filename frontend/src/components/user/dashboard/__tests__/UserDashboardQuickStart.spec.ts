@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import UserDashboardQuickStart from '../UserDashboardQuickStart.vue'
-import { buildQuickConnectLink, canQuickImport, currentTipIndex, importAppForGroup, quickStartTips } from '@/features/brand/config'
+import en from '@/i18n/locales/en/dashboard'
+import zh from '@/i18n/locales/zh/dashboard'
+import { buildQuickConnectLink, canQuickImport, currentTipIndex, importAppForGroup, quickConnect, quickStartTips } from '@/features/brand/config'
 import { nextTestKeyName, pickFirstGptGroup } from '@/features/brand/quickKey'
 
 const { list, create, getAvailable, showSuccess, showError, copyToClipboard, settings, push } = vi.hoisted(() => ({
@@ -150,7 +152,7 @@ describe('quick start panel', () => {
     const fresh = await panel()
     expect(fresh.find('[data-testid="quick-start-import"]').exists()).toBe(true)
     expect(fresh.get('[data-testid="quick-start-key-select"]').text()).toContain('step3NoKey')
-    expect(none.get('[data-testid="quick-start-fallback"]').attributes('href')).toContain('docs.usegoodai.com/quick-start#')
+    expect(none.find('[data-testid="quick-start-fallback"]').exists()).toBe(false)
   })
 
   it('copies the QQ number on desktop and links to the group on mobile', async () => {
@@ -160,19 +162,22 @@ describe('quick start panel', () => {
     expect(w.get('[data-testid="quick-start-qq-mobile"]').attributes('href')).toBe('https://qm.qq.com/q/o80PFAbey4')
   })
 
-  it('promises one-click import in the header and step 3, with free help only in the QQ bar', async () => {
+  it('shows the import guidance and QQ group entry while preserving the existing support actions', async () => {
     const w = await panel()
     expect(w.get('[data-testid="quick-start-tagline"]').text()).toContain('dashboard.quickStart.tagline')
     const step3 = w.get('[data-testid="quick-start-step-3"]')
     expect(step3.get('[data-testid="quick-start-step-badge"]').text()).toBe('dashboard.quickStart.step3Badge')
     expect(w.findAll('[data-testid="quick-start-step-badge"]')).toHaveLength(1)
     expect(step3.get('[data-testid="quick-start-step3-hint"]').text()).toBe('dashboard.quickStart.step3Hint')
-    // 先下载、再导入两句引导，说明下面一行是放行提醒（测试环境的浏览器标识不是 Mac，按 Windows 显示）
-    expect(step3.get('[data-testid="quick-start-download-lead"]').text()).toBe('dashboard.quickStart.step3DownloadLead')
+    expect(step3.get('[data-testid="quick-start-group-lead"]').text()).toContain('dashboard.quickStart.step3GroupLead')
+    expect(step3.get('[data-testid="quick-start-group-lead"]').text()).toContain('dashboard.quickStart.step3GroupTail')
+    expect(step3.get('[data-testid="quick-start-group-join"]').text()).toContain('dashboard.quickStart.step3GroupLabel')
+    expect(step3.get('[data-testid="quick-start-group-join"]').text()).toContain('1020015031')
+    expect(step3.get('[data-testid="quick-start-group-join"] img').attributes('src')).toBe('/brand/qq-penguin.png')
     expect(step3.get('[data-testid="quick-start-import-lead"]').text()).toBe('dashboard.quickStart.step3ImportLead')
     expect(step3.get('[data-testid="quick-start-trust"]').text()).toBe('dashboard.quickStart.step3Trust')
 
-    // 第 3 步不再放进群链接，求助入口只留在底部 QQ 群栏
+    // 原求助入口保留，群文件说明复用同一二维码弹窗。
     expect(step3.find('[data-testid="quick-start-support"]').exists()).toBe(false)
     expect(w.get('[data-testid="quick-start-qq-help-mobile"]').attributes('href')).toBe('https://qm.qq.com/q/o80PFAbey4')
     const dialog = w.findAllComponents({ name: 'QqGroupDialog' }).at(-1)!
@@ -258,25 +263,19 @@ describe('newcomer guidance', () => {
     expect(done.find('[data-testid="guide-bubble"]').exists()).toBe(false)
   })
 
-  it('never puts a bubble on the download button, and points at one-click import 10 seconds after downloading', async () => {
+  it('points at one-click import 10 seconds after copying the helper command and restores the existing record', async () => {
     vi.useFakeTimers()
     try {
       const w = await panel({ totalApiKeys: 1, balance: 3 })
       expect(guided(w)).toEqual([3])
-      expect(bubbleIn(w, '[data-testid="quick-start-download"]')).toBeNull()
       expect(w.find('[data-testid="guide-bubble"]').exists()).toBe(false)
-      // 另一个系统的下载链接一直显示
-      expect(w.find('[data-testid="quick-start-download-other"]').exists()).toBe(true)
-
-      const link = w.get('[data-testid="quick-start-download"]')
-      link.element.addEventListener('click', (e) => e.preventDefault())
-      await link.trigger('click')
+      await w.get('[data-testid="quick-start-helper-command"]').trigger('click')
+      await flushPromises()
       vi.advanceTimersByTime(9_000)
       await flushPromises()
       expect(w.find('[data-testid="guide-bubble"]').exists()).toBe(false)
       vi.advanceTimersByTime(1_000)
       await flushPromises()
-      expect(bubbleIn(w, '[data-testid="quick-start-download"]')).toBeNull()
       expect(bubbleIn(w, '[data-testid="quick-start-import"]')?.textContent).toContain('guide.import')
 
       // 刷新后直接指一键导入
@@ -290,6 +289,81 @@ describe('newcomer guidance', () => {
   it('step 1 opens the keys page with the create dialog', async () => {
     const w = await panel()
     expect(JSON.parse(w.get('[data-testid="quick-start-create"]').attributes('data-to')!)).toEqual({ path: '/keys', query: { create: 'quick' } })
+  })
+})
+
+describe('PowerShell helper instructions', () => {
+  const command = 'irm https://docs.usegoodai.com/install/helper.ps1 | iex'
+
+  it('names the one-click import button and the Windows Run anyway action', () => {
+    expect(zh.dashboard.quickStart.step3Hint).toBe('打开助手后，点一下网站一键导入按钮就好（浏览器询问时点「打开」）')
+    expect(zh.dashboard.quickStart.step3Trust).toBe('Windows 保护阻止运行时，点「更多信息」→「仍要运行」。')
+    expect(en.dashboard.quickStart.step3Trust).toBe('If Windows Security blocks the helper, click "More info" → "Run anyway".')
+  })
+
+  it('opens the existing QQ group QR dialog from the inline mascot and colored group number', async () => {
+    const w = await panel()
+    const dialog = w.findAllComponents({ name: 'QqGroupDialog' }).at(-1)!
+    expect(dialog.props('show')).toBe(false)
+    await w.get('[data-testid="quick-start-group-join"]').trigger('click')
+    expect(dialog.props('show')).toBe(true)
+  })
+
+  it('replaces download links with the QQ note and a closed three-step disclosure below the import controls', async () => {
+    const w = await panel()
+    const step = w.get('[data-testid="quick-start-step-3"]')
+    expect(quickConnect).not.toHaveProperty('downloads')
+    expect(quickConnect.helperCommand).toBe(command)
+    expect(step.find('[data-testid="quick-start-download"]').exists()).toBe(false)
+    expect(step.find('[data-testid="quick-start-download-other"]').exists()).toBe(false)
+    expect(step.find('[data-testid="quick-start-fallback"]').exists()).toBe(false)
+    const help = step.get<HTMLDetailsElement>('[data-testid="quick-start-helper-help"]')
+    expect(help.element.open).toBe(false)
+    expect(help.findAll('ol > li')).toHaveLength(3)
+    expect(help.get('summary').text()).toBe('dashboard.quickStart.step3HelperTitle')
+    expect(help.text()).not.toContain('1020015031')
+    expect(step.html().indexOf('quick-start-import')).toBeLessThan(step.html().indexOf('quick-start-helper-help'))
+    expect(help.element.parentElement?.lastElementChild).toBe(help.element)
+    expect(step.get('[data-testid="quick-start-step3-hint"]').element.compareDocumentPosition(help.element) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(step.get('[data-testid="quick-start-trust"]').element.compareDocumentPosition(help.element) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(help.get('[data-testid="quick-start-helper-command"] code').text()).toBe(command)
+  })
+
+  it.each(['quick-start-helper-command', 'quick-start-helper-copy'])('copies the exact command and toast message when clicking %s', async (testId) => {
+    const w = await panel()
+    await w.get(`[data-testid="${testId}"]`).trigger('click')
+    await flushPromises()
+    expect(copyToClipboard).toHaveBeenCalledTimes(1)
+    expect(copyToClipboard).toHaveBeenCalledWith(command, 'dashboard.quickStart.step3HelperCopied')
+    expect(localStorage.getItem('quick-start-helper-downloaded-at')).not.toBeNull()
+  })
+
+  it('does not advance the helper guidance after a failed copy and allows retrying', async () => {
+    copyToClipboard.mockResolvedValueOnce(false)
+    const w = await panel()
+    await w.get('[data-testid="quick-start-helper-copy"]').trigger('click')
+    await flushPromises()
+    expect(localStorage.getItem('quick-start-helper-downloaded-at')).toBeNull()
+    await w.get('[data-testid="quick-start-helper-command"]').trigger('click')
+    await flushPromises()
+    expect(copyToClipboard).toHaveBeenCalledTimes(2)
+    expect(localStorage.getItem('quick-start-helper-downloaded-at')).not.toBeNull()
+  })
+
+  it('hides PowerShell on Mac while preserving the QQ note, key picker, import and system hint', async () => {
+    const userAgent = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')
+    try {
+      const w = await panel()
+      expect(w.find('[data-testid="quick-start-helper-help"]').exists()).toBe(false)
+      expect(w.find('[data-testid="quick-start-group-lead"]').exists()).toBe(true)
+      expect(w.get('[data-testid="quick-start-group-join"]').text()).toContain('1020015031')
+      expect(w.find('[data-testid="quick-start-key-select"]').exists()).toBe(true)
+      expect(w.find('[data-testid="quick-start-import"]').exists()).toBe(true)
+      expect(w.get('[data-testid="quick-start-trust"]').text()).toBe('dashboard.quickStart.step3TrustMac')
+      expect(w.find('[data-testid="quick-start-fallback"]').exists()).toBe(false)
+    } finally {
+      userAgent.mockRestore()
+    }
   })
 })
 

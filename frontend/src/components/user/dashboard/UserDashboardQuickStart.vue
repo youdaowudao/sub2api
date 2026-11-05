@@ -43,7 +43,7 @@
     </div>
 
     <!-- 四个步骤做成独立小卡片：已完成 / 当前 / 未开始三种状态一眼区分 -->
-    <ol class="grid grid-cols-1 gap-3 p-4 sm:gap-4 sm:p-5 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.45fr_1fr]">
+    <ol class="quick-start-steps grid grid-cols-1 gap-3 p-4 sm:gap-4 sm:p-5 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.45fr_1fr]">
       <!-- ① 创建密钥 -->
       <li class="step" :class="stepClass(1, hasKey)" data-testid="quick-start-step-1">
         <div class="step-inner">
@@ -96,18 +96,15 @@
         <div class="step-inner step3-inner">
           <StepHead :index="3" :done="hasUsage" :active="guideStep === 3" :title="t('dashboard.quickStart.step3', { app: appLabel })" :badge="t('dashboard.quickStart.step3Badge')" />
           <div class="mt-4 flex flex-col gap-3">
-            <p class="step3-lead" data-testid="quick-start-download-lead">{{ t('dashboard.quickStart.step3DownloadLead') }}</p>
-            <!-- 卡片太窄放不下时，另一个系统的下载链接换到下一行，不伸出卡片 -->
-            <div class="-mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 whitespace-nowrap">
-              <span class="relative inline-flex">
-                <a :href="quickConnect.downloads[os]" class="download-btn" data-testid="quick-start-download" @click="markDownloaded">
-                  <Icon name="download" size="sm" class="mr-1" />{{ t('dashboard.quickStart.step3Download', { os: osLabel[os] }) }}
-                </a>
-              </span>
-              <a :href="quickConnect.downloads[otherOs]" class="text-[13px] text-gray-500 hover:text-primary-600 hover:underline dark:text-dark-400" data-testid="quick-start-download-other" @click="markDownloaded">
-                {{ t('dashboard.quickStart.step3OtherOs', { os: osLabel[otherOs] }) }}
-              </a>
-            </div>
+            <p class="step3-lead" data-testid="quick-start-group-lead">
+              {{ t('dashboard.quickStart.step3GroupLead') }}
+              <button type="button" class="step3-group-qq-link" :title="t('community.scanToJoin')" :aria-label="`${t('community.scanToJoin')} ${qqGroup.number}`" data-testid="quick-start-group-join" @click="showQr = true">
+                <img :src="qqGroup.penguinImage" alt="" />
+                <span>{{ t('dashboard.quickStart.step3GroupLabel', { number: qqGroup.number }) }}</span>
+              </button>
+              {{ t('dashboard.quickStart.step3GroupTail') }}
+              <span class="helper-file-name">{{ t('dashboard.quickStart.step3HelperFile') }}</span>
+            </p>
 
             <p class="step3-lead mt-1" data-testid="quick-start-import-lead">{{ t('dashboard.quickStart.step3ImportLead') }}</p>
             <!-- 手机上下拉框和一键导入上下排、各占满一行；电脑上同一行，卡片窄时下拉框自动变窄，再窄就上下排，按钮不伸出卡片 -->
@@ -126,18 +123,48 @@
               </span>
             </div>
           </div>
-          <!-- w-0 min-w-full：说明文字不撑宽这一列，跟随上面按钮的宽度换行 -->
           <p class="mt-3 max-w-md text-[13px] leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint') }}</p>
-          <!-- 助手没有签名，下载和第一次打开时会被浏览器或系统拦一下：红字告诉用户放行的按钮在哪 -->
           <p class="mt-1.5 flex max-w-md items-start gap-1.5 text-[13px] leading-relaxed text-red-600 dark:text-red-400" data-testid="quick-start-trust">
             <Icon name="shield" size="sm" class="mt-0.5 flex-none" />
             <span>{{ t(os === 'mac' ? 'dashboard.quickStart.step3TrustMac' : 'dashboard.quickStart.step3Trust') }}</span>
           </p>
-          <div class="step-foot-stack">
-            <a :href="quickConnect.fallbackDoc" target="_blank" rel="noopener noreferrer" class="step-link text-gray-500 dark:text-dark-400" data-testid="quick-start-fallback">
-              {{ t(os === 'mac' ? 'dashboard.quickStart.step3NoResponseMac' : 'dashboard.quickStart.step3NoResponse') }} →
-            </a>
-          </div>
+          <details v-if="os === 'windows'" class="helper-help mt-3" data-testid="quick-start-helper-help">
+            <summary class="helper-summary">
+              <Icon name="chevronRight" size="sm" class="helper-chevron" />
+              <span>{{ t('dashboard.quickStart.step3HelperTitle') }}</span>
+            </summary>
+            <ol class="helper-steps">
+              <li>
+                <span class="helper-number" aria-hidden="true">1.</span>
+                <div>
+                  <p class="helper-step-title">{{ t('dashboard.quickStart.step3HelperOpenTitle') }}</p>
+                  <p>{{ t('dashboard.quickStart.step3HelperOpen') }}</p>
+                </div>
+              </li>
+              <li>
+                <span class="helper-number" aria-hidden="true">2.</span>
+                <div>
+                  <div class="helper-copy-row">
+                    <p class="helper-step-title">{{ t('dashboard.quickStart.step3HelperRunTitle') }}</p>
+                    <button type="button" class="helper-copy" data-testid="quick-start-helper-copy" @click="copyHelperCommand">
+                      <Icon :name="helperCommandCopied ? 'check' : 'copy'" size="sm" />
+                      {{ helperCommandCopied ? t('common.copied') : t('dashboard.quickStart.step3HelperCopy') }}
+                    </button>
+                  </div>
+                  <button type="button" class="helper-command" :aria-label="t('dashboard.quickStart.step3HelperCopyLabel')" :title="t('dashboard.quickStart.step3HelperCopyLabel')" data-testid="quick-start-helper-command" @click="copyHelperCommand">
+                    <code>{{ quickConnect.helperCommand }}</code>
+                  </button>
+                </div>
+              </li>
+              <li>
+                <span class="helper-number" aria-hidden="true">3.</span>
+                <div>
+                  <p class="helper-step-title">{{ t('dashboard.quickStart.step3HelperImportTitle') }}</p>
+                  <p>{{ t('dashboard.quickStart.step3HelperImport', { app: appLabel }) }}</p>
+                </div>
+              </li>
+            </ol>
+          </details>
         </div>
       </li>
 
@@ -244,8 +271,12 @@ const rechargePath = computed(() => (appStore.cachedPublicSettings?.payment_enab
 
 type Os = 'windows' | 'mac'
 const os: Os = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.userAgent) ? 'mac' : 'windows'
-const otherOs: Os = os === 'mac' ? 'windows' : 'mac'
-const osLabel: Record<Os, string> = { windows: 'Windows', mac: 'Mac' }
+const { copied: helperCommandCopied, copyToClipboard: copyHelperText } = useClipboard()
+
+async function copyHelperCommand() {
+  const copied = await copyHelperText(quickConnect.helperCommand, t('dashboard.quickStart.step3HelperCopied'))
+  if (copied) markDownloaded()
+}
 
 const selectedKeyId = ref<number | null>(null)
 const byNewest = (a: ApiKey, b: ApiKey) => (b.created_at || '').localeCompare(a.created_at || '') || b.id - a.id
@@ -280,7 +311,7 @@ function stepClass(index: number, done: boolean) {
 /** 新人指引：当前该做哪一步（全部完成后不再指引） */
 const guideStep = computed<1 | 2 | 3 | null>(() => (!hasKey.value ? 1 : !hasBalance.value ? 2 : !hasUsage.value ? 3 : null))
 
-// 第三步：点过下载 10 秒后指「一键导入」。记在本浏览器，刷新后不用重来
+// 复用原下载指引记录：复制助手命令成功 10 秒后指「一键导入」。
 const DOWNLOADED_KEY = 'quick-start-helper-downloaded-at'
 const IMPORT_HINT_DELAY = 10_000
 const importHintReady = ref(false)
@@ -452,10 +483,6 @@ const StepHead = defineComponent({
   @apply text-[15px] font-medium text-primary-600 hover:underline dark:text-primary-400;
 }
 
-.step-foot-stack {
-  @apply mt-auto flex flex-col items-start gap-1.5 pt-4;
-}
-
 /* 每张卡片都是尺寸容器：气泡和排法按卡片自身宽度来 */
 .step-inner {
   container-type: inline-size;
@@ -481,9 +508,26 @@ const StepHead = defineComponent({
   container: step3 / inline-size;
 }
 
-/* 第三步里「先下载」「再导入」两句引导 */
+/* 第三步里群文件说明与导入引导 */
 .step3-lead {
   @apply text-[15px] font-medium text-gray-700 dark:text-dark-200;
+}
+.helper-file-name {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.step3-group-qq-link {
+  @apply inline-flex max-w-full items-center gap-1 rounded text-[15px] font-medium text-primary-600 hover:underline dark:text-primary-400;
+  overflow-wrap: anywhere;
+  vertical-align: baseline;
+}
+.step3-group-qq-link img {
+  @apply h-4 w-auto flex-none;
+}
+.step3-group-qq-link span {
+  @apply min-w-0 tabular-nums;
 }
 
 /* 下拉框 + 一键导入：手机上下排、各占满一行 */
@@ -508,9 +552,63 @@ const StepHead = defineComponent({
   }
 }
 
-/* 下载助手：浅靛蓝底色，和青蓝渐变的“一键导入”按钮区分开 */
-.download-btn {
-  @apply inline-flex h-11 items-center whitespace-nowrap rounded-xl bg-indigo-50 px-4 text-[15px] font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 transition-colors hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30 dark:hover:bg-indigo-500/20;
+/* 展开帮助只增加当前卡片高度；临时隐藏导入气泡，避免遮住三步说明。 */
+.quick-start-steps:has(.helper-help[open]) {
+  align-items: start;
+}
+.step3-inner:has(.helper-help[open]) .import-btn-wrap :deep(.guide-bubble) {
+  display: none;
+}
+
+.helper-help {
+  @apply min-w-0 border-t border-gray-100 pt-3 dark:border-dark-700;
+}
+.helper-summary {
+  @apply flex cursor-pointer list-none items-start gap-1.5 rounded text-sm leading-6 text-primary-600 dark:text-primary-400;
+  overflow-wrap: anywhere;
+}
+.helper-summary::-webkit-details-marker {
+  display: none;
+}
+.helper-chevron {
+  @apply mt-1 flex-none transition-transform;
+}
+.helper-help[open] .helper-chevron {
+  transform: rotate(90deg);
+}
+.helper-steps {
+  @apply mt-4 grid gap-4 text-sm leading-6 text-gray-600 dark:text-dark-300;
+}
+.helper-steps > li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.helper-number,
+.helper-step-title {
+  @apply font-medium text-gray-800 dark:text-dark-100;
+}
+.helper-copy-row {
+  @apply flex flex-wrap items-start justify-between gap-x-2 gap-y-1;
+}
+.helper-copy {
+  @apply inline-flex min-w-[88px] flex-none items-center justify-center gap-1 rounded py-0.5 text-[13px] leading-5 text-primary-600 hover:underline dark:text-primary-400;
+}
+.helper-command {
+  @apply mt-2 block w-full min-w-0 rounded-md border border-gray-200 bg-gray-50 p-1.5 text-left text-[12px] leading-6 text-gray-800 hover:border-primary-400 dark:border-dark-600 dark:bg-dark-900/60 dark:text-dark-100;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.helper-command code {
+  font: inherit;
+  word-break: break-all;
+  @apply font-mono;
+}
+.helper-summary:focus-visible,
+.helper-copy:focus-visible,
+.helper-command:focus-visible {
+  @apply outline-none ring-2 ring-primary-500 ring-offset-2 dark:ring-offset-dark-800;
 }
 
 .support-link {
