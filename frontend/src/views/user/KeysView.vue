@@ -387,60 +387,54 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div data-tour="key-actions" class="flex items-center gap-1">
-              <!-- Use Key Button -->
-              <button
-                data-tour="key-use"
-                @click="openUseKeyModal(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
-              >
-                <Icon name="terminal" size="sm" />
-                <span class="text-xs">{{ t('keys.useKey') }}</span>
-              </button>
-              <!-- Import to CC Switch Button -->
-              <button
-                v-if="!publicSettings?.hide_ccs_import_button"
-                data-tour="key-ccs"
-                @click="importToCcswitch(row)"
-                :title="t('keys.importToCcSwitchHint')"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
-              >
-                <Icon name="upload" size="sm" />
-                <span class="text-xs">{{ t('keys.importToCcSwitch') }}</span>
-              </button>
-              <!-- Toggle Status Button -->
-              <button
-                data-tour="key-toggle"
-                @click="toggleKeyStatus(row)"
-                :class="[
-                  'flex flex-col items-center gap-0.5 rounded-lg p-1.5 transition-colors',
-                  row.status === 'active'
-                    ? 'text-gray-500 hover:bg-yellow-50 hover:text-yellow-600 dark:hover:bg-yellow-900/20 dark:hover:text-yellow-400'
-                    : 'text-gray-500 hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400'
-                ]"
-              >
-                <Icon v-if="row.status === 'active'" name="ban" size="sm" />
-                <Icon v-else name="checkCircle" size="sm" />
-                <span class="text-xs">{{ row.status === 'active' ? t('keys.disable') : t('keys.enable') }}</span>
-              </button>
-              <!-- Edit Button -->
-              <button
-                data-tour="key-edit"
-                @click="editKey(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
-              >
-                <Icon name="edit" size="sm" />
-                <span class="text-xs">{{ t('common.edit') }}</span>
-              </button>
-              <!-- Delete Button -->
-              <button
-                data-tour="key-delete"
-                @click="confirmDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-              >
-                <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t('common.delete') }}</span>
-              </button>
+            <!-- 一行操作：一键导入（双行字，强调色）+ 手动配置 + 导入到 CC Switch + 编辑 + 删除 -->
+            <div data-tour="key-actions" class="flex items-stretch">
+              <!-- 一键导入区：OpenAI 分组导入 Codex，Anthropic 分组导入 Claude（规则见 importAppForGroup）。
+                   没有可导入目标的行保留同宽空位，各行按钮对齐 -->
+              <div class="mr-0.5 flex w-[3.6rem] flex-none items-center">
+                <CodexImportButton
+                  v-if="canQuickImport(row.group) && row.status === 'active'"
+                  :api-key="row.key"
+                  :app="importAppForGroup(row.group)"
+                  :name="row.name"
+                  stacked
+                  data-tour="key-codex"
+                />
+              </div>
+                <button
+                  data-tour="key-use"
+                  @click="openUseKeyModal(row)"
+                  class="key-action hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
+                >
+                  <Icon name="terminal" size="sm" />
+                  <span>{{ t('keys.useKey') }}</span>
+                </button>
+                <button
+                  v-if="!publicSettings?.hide_ccs_import_button"
+                  data-tour="key-ccs"
+                  @click="importToCcswitch(row)"
+                  :title="t('keys.importToCcSwitchHint')"
+                  class="key-action justify-center leading-tight hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                >
+                  <span>{{ t('keys.importToCcSwitchLine1') }}</span>
+                  <span>CC Switch</span>
+                </button>
+                <button
+                  data-tour="key-edit"
+                  @click="editKey(row)"
+                  class="key-action hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                >
+                  <Icon name="edit" size="sm" />
+                  <span>{{ t('common.edit') }}</span>
+                </button>
+                <button
+                  data-tour="key-delete"
+                  @click="confirmDelete(row)"
+                  class="key-action hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                >
+                  <Icon name="trash" size="sm" />
+                  <span>{{ t('common.delete') }}</span>
+                </button>
             </div>
           </template>
 
@@ -480,7 +474,7 @@
           <input
             v-model="formData.name"
             type="text"
-            required
+            :required="showEditModal"
             class="input"
             :placeholder="t('keys.namePlaceholder')"
             data-tour="key-form-name"
@@ -990,6 +984,13 @@
           <button @click="closeModals" type="button" class="btn btn-secondary">
             {{ t('common.cancel') }}
           </button>
+          <!-- 从首页「去创建」进来时，在创建按钮上方提示直接点创建 -->
+          <span class="relative inline-flex">
+          <GuideBubble
+            v-if="quickCreate && showCreateModal && !showEditModal"
+            :text="t('keys.quickCreateHint')"
+            align="end"
+          />
           <button
             form="key-form"
             type="submit"
@@ -1025,6 +1026,7 @@
                   : t('common.create')
             }}
           </button>
+          </span>
         </div>
       </template>
     </BaseDialog>
@@ -1219,6 +1221,9 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
 import { keysAPI, authAPI, usageAPI, userGroupsAPI } from '@/api'
+import { useRoute, useRouter } from 'vue-router'
+import GuideBubble from '@/features/brand/components/GuideBubble.vue'
+import { nextTestKeyName, pickFirstGptGroup } from '@/features/brand/quickKey'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import BulkEditKeysModal from '@/components/keys/BulkEditKeysModal.vue'
@@ -1247,6 +1252,8 @@ import {
   buildCcSwitchImportDeeplink,
   type CcSwitchClientType
 } from '@/utils/ccswitchImport'
+import CodexImportButton from '@/features/brand/components/CodexImportButton.vue'
+import { canQuickImport, importAppForGroup } from '@/features/brand/config'
 
 // Helper to format date for datetime-local input
 const formatDateTimeLocal = (isoDate: string): string => {
@@ -1286,7 +1293,8 @@ const allColumns = computed<Column[]>(() => [
   { key: 'last_used_at', label: t('keys.lastUsedAt'), sortable: true },
   { key: 'last_used_ip', label: t('keys.lastUsedIP'), sortable: false },
   { key: 'created_at', label: t('keys.created'), sortable: true },
-  { key: 'actions', label: t('common.actions'), sortable: false }
+  // 操作列按钮已经很紧凑，左右只留很小的边距
+  { key: 'actions', label: t('common.actions'), sortable: false, class: '!px-2' }
 ])
 
 const ALWAYS_VISIBLE_COLUMNS = new Set(['name', 'actions'])
@@ -1568,6 +1576,29 @@ watch([showCreateModal, createProviderOptions], ([isOpen, providers], [wasOpen])
   }
 })
 
+// 首页「去创建」带 ?create=quick 进来：直接打开创建窗口，选好 GPT 第一个分组，并提示直接点创建
+const route = useRoute()
+const router = useRouter()
+const quickCreate = ref(false)
+let quickCreatePending = false
+function openQuickCreate() {
+  quickCreate.value = true
+  quickCreatePending = true
+  showCreateModal.value = true
+  // 去掉 create 参数，刷新页面时不再自动打开
+  const { create: _create, ...rest } = route?.query ?? {}
+  void router?.replace({ query: rest })
+}
+// 分组可能在窗口打开后才加载完，等到有分组再选
+watch([showCreateModal, groups], () => {
+  if (!quickCreatePending || !showCreateModal.value || !groups.value.length) return
+  quickCreatePending = false
+  const group = pickFirstGptGroup(groups.value)
+  if (!group) return
+  selectCreateProvider('openai')
+  formData.value.group_id = group.id
+})
+
 // Group dropdown search
 const groupSearchQuery = ref('')
 const filteredGroupOptions = computed(() => {
@@ -1736,19 +1767,6 @@ const editKey = (key: ApiKey) => {
   showEditModal.value = true
 }
 
-const toggleKeyStatus = async (key: ApiKey) => {
-  const newStatus = key.status === 'active' ? 'inactive' : 'active'
-  try {
-    await keysAPI.toggleStatus(key.id, newStatus)
-    appStore.showSuccess(
-      newStatus === 'active' ? t('keys.keyEnabledSuccess') : t('keys.keyDisabledSuccess')
-    )
-    loadApiKeys()
-  } catch (error) {
-    appStore.showError(t('keys.failedToUpdateStatus'))
-  }
-}
-
 const openGroupSelector = (key: ApiKey) => {
   if (groupSelectorKeyId.value === key.id) {
     groupSelectorKeyId.value = null
@@ -1816,6 +1834,10 @@ const confirmDelete = (key: ApiKey) => {
 
 const handleSubmit = async () => {
   const guideTicket = beginGuideAction('key-create')
+  // 新建时名称可以不填：用占位的「测试」，重名就依次用「测试1」「测试2」……
+  if (!showEditModal.value && !formData.value.name.trim()) {
+    formData.value.name = nextTestKeyName(apiKeys.value.map((k) => k.name), t('keys.namePlaceholder'))
+  }
   // Validate group_id is required
   if (formData.value.group_id === null) {
     appStore.showError(t('keys.groupRequired'))
@@ -1901,7 +1923,9 @@ const handleSubmit = async () => {
         rateLimitData
       )
       if (guideTicket) completeGuideAction(guideTicket, { keyId: createdKey.id })
-      appStore.showSuccess(t('keys.keyCreatedSuccess'))
+      // 创建成功后直接把新密钥复制好，右上角提示去助手里接入；浏览器不让复制时，右上角会提示复制失败，这里照常提示创建成功
+      const copied = await clipboardCopy(createdKey.key, t('keys.keyCreatedCopied'))
+      if (!copied) appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded
       if (onboardingStore.isCurrentStep('[data-tour="key-form-submit"]')) {
         onboardingStore.nextStep(500)
@@ -1939,6 +1963,8 @@ const handleDelete = async () => {
 }
 
 const closeModals = () => {
+  quickCreate.value = false
+  quickCreatePending = false
   showCreateModal.value = false
   showEditModal.value = false
   selectedKey.value = null
@@ -2098,6 +2124,7 @@ function formatResetTime(resetAt: string | null): string {
 }
 
 onMounted(() => {
+  if (route?.query?.create === 'quick') openQuickCreate()
   loadSavedColumns()
   loadApiKeys()
   loadGroups()
@@ -2112,3 +2139,9 @@ onUnmounted(() => {
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>
+
+<style scoped>
+.key-action {
+  @apply flex flex-col items-center gap-0.5 whitespace-nowrap rounded-lg px-1 py-1 text-[11px] leading-tight text-gray-500 transition-colors;
+}
+</style>

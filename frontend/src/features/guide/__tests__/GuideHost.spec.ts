@@ -11,6 +11,11 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => stores.auth }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => stores.app }))
 vi.mock('vue-router', () => ({ useRoute: () => stores.route }))
 vi.mock('../driver/driver.mjs', async () => ({ driver: (await import('./fixture')).fakeDriver }))
+// The shipped build turns every chapter off. Host tests keep the shipped bindings with every chapter on.
+vi.mock('../config/onboarding.json', async (importOriginal) => {
+  const shipped = (await importOriginal<any>()).default
+  return { default: { ...shipped, modules: shipped.modules.map((module: any) => ({ ...module, enabled: true })) } }
+})
 
 describe('ordinary guide host and replay picker', () => {
   let wrapper: VueWrapper | undefined

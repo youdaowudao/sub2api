@@ -23,7 +23,7 @@ describe('guide source wiring boundaries (static evidence)', () => {
   })
   it('marks every page target and keeps the settings card immediately after custom menus', () => {
     for (const id of ['header-menu', 'header-balance', 'header-user-menu', 'header-balance-mobile']) expect(read('components/layout/AppHeader.vue')).toContain(`data-tour="${id}"`)
-    for (const id of ['key-name', 'key-copy', 'key-group', 'key-actions', 'key-use', 'key-ccs', 'key-toggle', 'key-edit', 'key-delete', 'key-group-dropdown', 'key-group-option', 'key-form-quota']) expect(read('views/user/KeysView.vue')).toContain(`data-tour="${id}"`)
+    for (const id of ['key-name', 'key-copy', 'key-group', 'key-actions', 'key-use', 'key-ccs', 'key-codex', 'key-edit', 'key-delete', 'key-group-dropdown', 'key-group-option', 'key-form-quota']) expect(read('views/user/KeysView.vue')).toContain(`data-tour="${id}"`)
     for (const id of ['recharge-amount', 'recharge-method', 'recharge-submit']) expect(read('views/user/PaymentView.vue')).toContain(`data-tour="${id}"`)
     expect(read('views/user/UserOrdersView.vue')).toContain('<OrderTable data-tour="orders-list"')
     expect(read('views/user/CustomPageView.vue')).toContain('<QuickStartArticle v-else-if="isBuiltinQuickStart" />')

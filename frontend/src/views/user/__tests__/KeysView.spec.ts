@@ -19,7 +19,11 @@ const {
   copyToClipboard,
   isCurrentStep,
   nextStep,
+  routeState,
+  routerReplace,
 } = vi.hoisted(() => ({
+  routeState: { query: {} as Record<string, string> },
+  routerReplace: vi.fn(),
   listKeys: vi.fn(),
   updateKey: vi.fn(),
   getPublicSettings: vi.fn(),
@@ -57,6 +61,8 @@ const messages: Record<string, string> = {
   'keys.status.inactive': 'Inactive',
   'keys.status.quota_exhausted': 'Quota exhausted',
   'keys.usage': 'Usage',
+  'keys.namePlaceholder': '测试',
+  'keys.quickCreateHint': '直接点创建',
 }
 
 vi.mock('@/api', () => ({
@@ -78,6 +84,11 @@ vi.mock('@/api', () => ({
     getUserGroupRates,
   },
 }))
+
+vi.mock('vue-router', async () => {
+  const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
+  return { ...actual, useRoute: () => routeState, useRouter: () => ({ replace: routerReplace, push: vi.fn() }) }
+})
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
@@ -298,6 +309,8 @@ describe('user KeysView column settings', () => {
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
     isCurrentStep.mockReturnValue(false)
+    routeState.query = {}
+    routerReplace.mockReset()
   })
 
   it.each([
@@ -500,6 +513,65 @@ describe('user KeysView column settings', () => {
     expect(columnMenuText).not.toContain('Actions')
   })
 
+  it('shows one import button per row, Claude for anthropic groups and Codex for openai groups', async () => {
+    const row = (id: number, platform: string | null, status = 'active') => ({
+      ...createApiKey(),
+      id,
+      name: `k${id}`,
+      key: `sk-${id}`,
+      status,
+      group: platform ? { id, name: `g${id}`, platform } : undefined,
+    })
+    listKeys.mockResolvedValueOnce({
+      items: [row(1, 'anthropic'), row(2, 'openai'), row(3, 'gemini'), row(4, null), row(5, 'anthropic', 'inactive')],
+      total: 5,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    const wrapper = await mountView()
+
+    const buttons = wrapper.findAll('[data-testid="codex-import"]')
+    expect(buttons.map((b) => b.attributes('data-app'))).toEqual(['claude', 'codex'])
+    expect(buttons[0].text()).toContain('Claude')
+    expect(buttons[1].text()).toContain('Codex')
+
+    const location = { href: '' }
+    vi.stubGlobal('location', location)
+    await buttons[0].trigger('click')
+    expect(location.href).toBe('usegoodai://import?v=1&app=claude&key=sk-1&name=k1')
+    await buttons[1].trigger('click')
+    expect(location.href).toBe('usegoodai://import?v=1&app=codex&key=sk-2&name=k2')
+    vi.unstubAllGlobals()
+  })
+
+  it('switches the row import button between Codex and Claude after changing the key group', async () => {
+    const openai = { id: 21, name: 'GPT 组', platform: 'openai', rate_multiplier: 1, status: 'active', subscription_type: 'standard', is_exclusive: false }
+    const anthropic = { id: 22, name: 'Claude 组', platform: 'anthropic', rate_multiplier: 1, status: 'active', subscription_type: 'standard', is_exclusive: false }
+    getAvailableGroups.mockResolvedValue([openai, anthropic])
+    const before = { ...createApiKey(), id: 7, key: 'sk-7', name: 'k7', group_id: 21, group: openai }
+    const page = (item: unknown) => ({ items: [item], total: 1, page: 1, page_size: 20, pages: 1 })
+    listKeys.mockResolvedValueOnce(page(before))
+    const wrapper = await mountView()
+    expect(wrapper.get('[data-testid="codex-import"]').attributes('data-app')).toBe('codex')
+
+    // 和真实页面一样：改分组后重新拉列表，新数据里带新分组
+    updateKey.mockResolvedValueOnce({ ...before, group_id: 22, group: anthropic })
+    listKeys.mockResolvedValueOnce(page({ ...before, group_id: 22, group: anthropic }))
+    await wrapper.get('[data-tour="key-group"]').trigger('click')
+    await nextTick()
+    const option = wrapper
+      .findAll('[data-tour="key-group-option"]')
+      .find((o) => o.findComponent({ name: 'GroupOptionItem' }).exists() && o.findComponent({ name: 'GroupOptionItem' }).props('name') === 'Claude 组')
+    expect(option).toBeTruthy()
+    await option!.trigger('click')
+    await flushPromises()
+
+    expect(updateKey).toHaveBeenCalledWith(7, { group_id: 22 })
+    expect(wrapper.get('[data-testid="codex-import"]').attributes('data-app')).toBe('claude')
+    expect(wrapper.get('[data-testid="codex-import"]').text()).toContain('Claude')
+  })
+
   it('renders the current concurrency value', async () => {
     const wrapper = await mountView()
 
@@ -627,6 +699,43 @@ describe('user KeysView column settings', () => {
       await flushPromises()
       expect(keysAPI.create).toHaveBeenCalledOnce()
       expect(vi.mocked(keysAPI.create).mock.calls[0].slice(0, 2)).toEqual(['My key', 5])
+    })
+
+    it('copies the new key right after creating it and tells the user to connect with the helper', async () => {
+      const wrapper = await openCreate()
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 2)
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), key: 'sk-new-key', group_id: 2 })
+      copyToClipboard.mockResolvedValue(true)
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(copyToClipboard).toHaveBeenCalledOnce()
+      expect(copyToClipboard).toHaveBeenCalledWith('sk-new-key', 'keys.keyCreatedCopied')
+      // 复制成功时只提示「已复制，请通过助手接入」，不再重复弹「创建成功」
+      expect(showSuccess).not.toHaveBeenCalledWith('keys.keyCreatedSuccess')
+    })
+
+    it('still says the key was created when the browser refuses to copy', async () => {
+      const wrapper = await openCreate()
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 2)
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), key: 'sk-new-key', group_id: 2 })
+      copyToClipboard.mockResolvedValue(false)
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(copyToClipboard).toHaveBeenCalledWith('sk-new-key', 'keys.keyCreatedCopied')
+      expect(showSuccess).toHaveBeenCalledWith('keys.keyCreatedSuccess')
+    })
+
+    it('does not copy anything when only editing a key', async () => {
+      const key = { ...createApiKey(), group_id: 2 }
+      listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      updateKey.mockResolvedValue(key)
+      const wrapper = await mountView()
+      ;(wrapper.vm as any).editKey(key)
+      await flushPromises()
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(updateKey).toHaveBeenCalled()
+      expect(copyToClipboard).not.toHaveBeenCalled()
     })
 
     it('keeps guide markers on real group buttons and excludes headings from search-only results', async () => {
@@ -782,6 +891,47 @@ describe('user KeysView column settings', () => {
       release = bindGuideBusinessSession({ sessionId: {}, userId: 7, accepts: () => true, complete })
       done(true); await flushPromises()
       expect(complete).not.toHaveBeenCalled()
+    })
+  })
+
+
+  describe('quick create from the dashboard', () => {
+    const group = (id: number, platform: string, sort_order: number) => ({ id, name: `g${id}`, platform, sort_order, rate_multiplier: 1, status: 'active', subscription_type: 'standard', is_exclusive: false })
+
+    it('opens the create dialog with the first GPT group, hints at the create button and clears the query', async () => {
+      routeState.query = { create: 'quick', tab: 'x' }
+      getAvailableGroups.mockResolvedValue([group(1, 'anthropic', 1), group(8, 'openai', 9), group(4, 'openai', 2)])
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), id: 2 })
+      const wrapper = await mountView()
+
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
+      expect(routerReplace).toHaveBeenCalledWith({ query: { tab: 'x' } })
+      expect(wrapper.get('[data-testid="guide-bubble"]').text()).toBe('直接点创建')
+      expect(wrapper.get('[data-tour="key-form-name"]').attributes('placeholder')).toBe('测试')
+      expect(wrapper.get('[data-tour="key-form-name"]').attributes('required')).toBeUndefined()
+
+      // 名称留空直接创建：用「测试」，分组是 GPT 第一个
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(vi.mocked(keysAPI.create).mock.calls[0].slice(0, 2)).toEqual(['测试', 4])
+      expect(wrapper.find('[data-testid="guide-bubble"]').exists()).toBe(false)
+    })
+
+    it('numbers the default name when test keys already exist, and stays normal without the query', async () => {
+      listKeys.mockResolvedValue({ items: [{ ...createApiKey(), name: '测试' }, { ...createApiKey(), id: 2, name: '测试1' }], total: 2, page: 1, page_size: 20, pages: 1 })
+      getAvailableGroups.mockResolvedValue([group(4, 'openai', 2)])
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), id: 3 })
+      const wrapper = await mountView()
+      expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+      expect(routerReplace).not.toHaveBeenCalled()
+
+      await getButtonByText(wrapper, 'Create API Key').trigger('click')
+      await flushPromises()
+      expect(wrapper.find('[data-testid="guide-bubble"]').exists()).toBe(false)
+      ;(wrapper.vm as unknown as { formData: { group_id: number } }).formData.group_id = 4
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(vi.mocked(keysAPI.create).mock.calls[0][0]).toBe('测试2')
     })
   })
 
