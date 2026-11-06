@@ -3,7 +3,7 @@
     type="button"
     class="codex-import-btn"
     :class="stacked ? 'codex-import-btn-stacked' : compact ? 'codex-import-btn-compact' : ''"
-    :title="app === 'claude' ? t('keys.importToClaudeHint') : t('keys.importToCodex')"
+    title="到群文件里下载接入助手打开再点击这里哦"
     :data-app="app"
     data-testid="codex-import"
     @click="launch"
