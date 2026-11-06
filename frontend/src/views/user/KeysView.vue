@@ -1923,7 +1923,9 @@ const handleSubmit = async () => {
         rateLimitData
       )
       if (guideTicket) completeGuideAction(guideTicket, { keyId: createdKey.id })
-      appStore.showSuccess(t('keys.keyCreatedSuccess'))
+      // 创建成功后直接把新密钥复制好，右上角提示去助手里接入；浏览器不让复制时，右上角会提示复制失败，这里照常提示创建成功
+      const copied = await clipboardCopy(createdKey.key, t('keys.keyCreatedCopied'))
+      if (!copied) appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded
       if (onboardingStore.isCurrentStep('[data-tour="key-form-submit"]')) {
         onboardingStore.nextStep(500)

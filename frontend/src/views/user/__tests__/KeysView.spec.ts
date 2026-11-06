@@ -701,6 +701,43 @@ describe('user KeysView column settings', () => {
       expect(vi.mocked(keysAPI.create).mock.calls[0].slice(0, 2)).toEqual(['My key', 5])
     })
 
+    it('copies the new key right after creating it and tells the user to connect with the helper', async () => {
+      const wrapper = await openCreate()
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 2)
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), key: 'sk-new-key', group_id: 2 })
+      copyToClipboard.mockResolvedValue(true)
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(copyToClipboard).toHaveBeenCalledOnce()
+      expect(copyToClipboard).toHaveBeenCalledWith('sk-new-key', 'keys.keyCreatedCopied')
+      // 复制成功时只提示「已复制，请通过助手接入」，不再重复弹「创建成功」
+      expect(showSuccess).not.toHaveBeenCalledWith('keys.keyCreatedSuccess')
+    })
+
+    it('still says the key was created when the browser refuses to copy', async () => {
+      const wrapper = await openCreate()
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 2)
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), key: 'sk-new-key', group_id: 2 })
+      copyToClipboard.mockResolvedValue(false)
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(copyToClipboard).toHaveBeenCalledWith('sk-new-key', 'keys.keyCreatedCopied')
+      expect(showSuccess).toHaveBeenCalledWith('keys.keyCreatedSuccess')
+    })
+
+    it('does not copy anything when only editing a key', async () => {
+      const key = { ...createApiKey(), group_id: 2 }
+      listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      updateKey.mockResolvedValue(key)
+      const wrapper = await mountView()
+      ;(wrapper.vm as any).editKey(key)
+      await flushPromises()
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(updateKey).toHaveBeenCalled()
+      expect(copyToClipboard).not.toHaveBeenCalled()
+    })
+
     it('keeps guide markers on real group buttons and excludes headings from search-only results', async () => {
       const wrapper = await mountView()
       await wrapper.get('[data-tour="key-group"]').trigger('click')

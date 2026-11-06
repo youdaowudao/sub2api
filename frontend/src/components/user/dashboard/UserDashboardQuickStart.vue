@@ -43,7 +43,7 @@
     </div>
 
     <!-- 四个步骤做成独立小卡片：已完成 / 当前 / 未开始三种状态一眼区分 -->
-    <ol class="grid grid-cols-1 gap-3 p-4 sm:gap-4 sm:p-5 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.45fr_1fr]">
+    <ol class="quick-start-steps grid grid-cols-1 gap-3 p-4 sm:gap-4 sm:p-5 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.45fr_1fr]">
       <!-- ① 创建密钥 -->
       <li class="step" :class="stepClass(1, hasKey)" data-testid="quick-start-step-1">
         <div class="step-inner">
@@ -61,7 +61,7 @@
             <!-- 带上 create=quick：密钥页直接打开创建窗口，并默认选好 GPT 第一个分组 -->
             <span v-else class="relative inline-flex">
               <router-link :to="quickCreateRoute" class="btn" :class="guideStep === 1 ? 'btn-primary' : 'btn-secondary'" data-testid="quick-start-create">{{ t('dashboard.quickStart.step1Action') }}</router-link>
-              <GuideBubble v-if="guideStep === 1" :text="t('dashboard.quickStart.guide.step1')" />
+              <GuideBubble v-if="guideStep === 1" :text="t('dashboard.quickStart.guide.step1')" wrap class="card-bubble" />
             </span>
             <button type="button" class="btn btn-secondary whitespace-nowrap" data-testid="quick-start-key-guide" @click="showKeyGuide = true">
               <Icon name="eye" size="sm" />{{ t('dashboard.quickStart.step1Guide') }}
@@ -72,19 +72,20 @@
 
       <!-- ② 充值 -->
       <li class="step" :class="stepClass(2, hasBalance)" data-testid="quick-start-step-2">
-        <div class="step-inner">
+        <div class="step-inner step2-inner">
           <StepHead :index="2" :done="hasBalance" :active="guideStep === 2" :title="t('dashboard.quickStart.step2')" />
           <div class="step-body">
             <p class="step-label">{{ t('dashboard.quickStart.step2Label') }}</p>
             <p class="step-value tabular-nums" :class="hasBalance ? 'text-emerald-600 dark:text-emerald-400' : ''" data-testid="quick-start-balance">${{ balance.toFixed(2) }}</p>
           </div>
-          <div class="step-foot flex-wrap gap-x-3 gap-y-2" :class="{ '!pt-14': guideStep === 2 }">
+          <!-- 指引第二步时卡片又窄、一行放不下：「进群领 2 元」排上面、「去充值」排下面，气泡在上方留出的空位里，不压住按钮 -->
+          <div class="step-foot flex-wrap gap-x-3 gap-y-2" :class="{ '!pt-14 step2-foot-guided': guideStep === 2 }">
             <router-link :to="rechargePath" class="btn" :class="guideStep === 2 ? 'btn-primary' : 'btn-secondary'" data-testid="quick-start-recharge">{{ t('dashboard.quickStart.step2Action') }}</router-link>
             <span class="relative inline-flex">
               <button type="button" class="inline-flex items-center gap-1.5 whitespace-nowrap text-[15px] font-medium text-primary-600 hover:underline dark:text-primary-400" data-testid="quick-start-reward" @click="showQr = true">
                 <img :src="qqGroup.penguinImage" alt="" class="h-4 w-auto" />{{ t('dashboard.quickStart.step2Reward') }}
               </button>
-              <GuideBubble v-if="guideStep === 2" :text="t('dashboard.quickStart.guide.step2')" align="end" />
+              <GuideBubble v-if="guideStep === 2" :text="t('dashboard.quickStart.guide.step2')" align="end" wrap class="card-bubble" />
             </span>
           </div>
         </div>
@@ -92,25 +93,23 @@
 
       <!-- ③ 连接 Codex：出现使用记录就算连接成功 -->
       <li class="step" :class="stepClass(3, hasUsage)" data-testid="quick-start-step-3">
-        <div class="step-inner">
+        <div class="step-inner step3-inner">
           <StepHead :index="3" :done="hasUsage" :active="guideStep === 3" :title="t('dashboard.quickStart.step3', { app: appLabel })" :badge="t('dashboard.quickStart.step3Badge')" />
           <div class="mt-4 flex flex-col gap-3">
-            <div class="flex items-center gap-3 whitespace-nowrap">
-              <span class="relative inline-flex">
-                <a :href="quickConnect.downloads[os]" class="download-btn" data-testid="quick-start-download" @click="markDownloaded">
-                  <Icon name="download" size="sm" class="mr-1" />{{ t('dashboard.quickStart.step3Download', { os: osLabel[os] }) }}
-                </a>
-                <GuideBubble v-if="step3Guide === 'download'" :text="t('dashboard.quickStart.guide.download')" placement="right" />
-              </span>
-              <!-- 气泡指着下载按钮时，先把另一个系统的下载链接让出位置 -->
-              <a v-if="step3Guide !== 'download'" :href="quickConnect.downloads[otherOs]" class="text-[13px] text-gray-500 hover:text-primary-600 hover:underline dark:text-dark-400" data-testid="quick-start-download-other">
-                {{ t('dashboard.quickStart.step3OtherOs', { os: osLabel[otherOs] }) }}
-              </a>
-            </div>
+            <p class="step3-lead" data-testid="quick-start-group-lead">
+              {{ t('dashboard.quickStart.step3GroupLead') }}
+              <button type="button" class="step3-group-qq-link" :title="t('community.scanToJoin')" :aria-label="`${t('community.scanToJoin')} ${qqGroup.number}`" data-testid="quick-start-group-join" @click="showQr = true">
+                <img :src="qqGroup.penguinImage" alt="" />
+                <span>{{ t('dashboard.quickStart.step3GroupLabel', { number: qqGroup.number }) }}</span>
+              </button>
+              {{ t('dashboard.quickStart.step3GroupTail') }}
+              <span class="helper-file-name">{{ t('dashboard.quickStart.step3HelperFile') }}</span>
+            </p>
 
-            <!-- 手机上下拉框和一键导入上下排、各占满一行；电脑上同一行 -->
-            <div class="flex flex-col gap-2.5 whitespace-nowrap sm:flex-row sm:items-center">
-              <div class="relative w-full sm:w-40 sm:flex-none">
+            <p class="step3-lead mt-1" data-testid="quick-start-import-lead">{{ t('dashboard.quickStart.step3ImportLead') }}</p>
+            <!-- 手机上下拉框和一键导入上下排、各占满一行；电脑上同一行，卡片窄时下拉框自动变窄，再窄就上下排，按钮不伸出卡片 -->
+            <div class="import-row -mt-1">
+              <div class="import-select relative">
               <select v-model="selectedKeyId" class="h-11 w-full cursor-pointer appearance-none truncate rounded-xl border border-gray-200 bg-white py-0 pl-3 pr-7 text-[15px] text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-100" :aria-label="t('dashboard.quickStart.step3KeyLabel')" data-testid="quick-start-key-select">
                 <option v-if="!importKeys.length" :value="null">{{ t('dashboard.quickStart.step3NoKey') }}</option>
                 <option v-for="k in importKeys" :key="k.id" :value="k.id" :title="k.name">{{ k.name }}</option>
@@ -118,19 +117,54 @@
               <Icon name="chevronDown" size="xs" class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400" />
             </div>
               <!-- 还没有可导入的密钥时：自动建一把「测试」密钥（GPT 第一个分组）再继续导入；按选中密钥的分组切换 Codex / Claude -->
-              <span class="relative flex sm:inline-flex">
-                <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" :app="importApp" :disabled="creatingKey" class="import-big w-full sm:w-auto" data-testid="quick-start-import" @missing-key="createKeyAndImport" />
-                <GuideBubble v-if="step3Guide === 'import'" :text="t('dashboard.quickStart.guide.import')" placement="bottom" xl="right" />
+              <span class="import-btn-wrap relative flex">
+                <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" :app="importApp" :disabled="creatingKey" class="import-big w-full" data-testid="quick-start-import" @missing-key="createKeyAndImport" />
+                <GuideBubble v-if="showImportGuide" :text="t('dashboard.quickStart.guide.import')" placement="bottom" xl="right" />
               </span>
             </div>
           </div>
-          <!-- w-0 min-w-full：说明文字不撑宽这一列，跟随上面按钮的宽度换行 -->
-          <p class="mt-3 max-w-md text-[13px] leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint', { app: appLabel }) }}</p>
-          <div class="step-foot-stack">
-            <a :href="quickConnect.fallbackDoc" target="_blank" rel="noopener noreferrer" class="step-link text-gray-500 dark:text-dark-400" data-testid="quick-start-fallback">
-              {{ t(os === 'mac' ? 'dashboard.quickStart.step3NoResponseMac' : 'dashboard.quickStart.step3NoResponse') }} →
-            </a>
-          </div>
+          <p class="mt-3 max-w-md text-[13px] leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint') }}</p>
+          <p class="mt-1.5 flex max-w-md items-start gap-1.5 text-[13px] leading-relaxed text-red-600 dark:text-red-400" data-testid="quick-start-trust">
+            <Icon name="shield" size="sm" class="mt-0.5 flex-none" />
+            <span>{{ t(os === 'mac' ? 'dashboard.quickStart.step3TrustMac' : 'dashboard.quickStart.step3Trust') }}</span>
+          </p>
+          <details v-if="os === 'windows'" class="helper-help mt-3" data-testid="quick-start-helper-help">
+            <summary class="helper-summary">
+              <Icon name="chevronRight" size="sm" class="helper-chevron" />
+              <span>{{ t('dashboard.quickStart.step3HelperTitle') }}</span>
+            </summary>
+            <ol class="helper-steps">
+              <li>
+                <span class="helper-number" aria-hidden="true">1.</span>
+                <div>
+                  <p class="helper-step-title">{{ t('dashboard.quickStart.step3HelperOpenTitle') }}</p>
+                  <p>{{ t('dashboard.quickStart.step3HelperOpen') }}</p>
+                </div>
+              </li>
+              <li>
+                <span class="helper-number" aria-hidden="true">2.</span>
+                <div>
+                  <div class="helper-copy-row">
+                    <p class="helper-step-title">{{ t('dashboard.quickStart.step3HelperRunTitle') }}</p>
+                    <button type="button" class="helper-copy" data-testid="quick-start-helper-copy" @click="copyHelperCommand">
+                      <Icon :name="helperCommandCopied ? 'check' : 'copy'" size="sm" />
+                      {{ helperCommandCopied ? t('common.copied') : t('dashboard.quickStart.step3HelperCopy') }}
+                    </button>
+                  </div>
+                  <button type="button" class="helper-command" :aria-label="t('dashboard.quickStart.step3HelperCopyLabel')" :title="t('dashboard.quickStart.step3HelperCopyLabel')" data-testid="quick-start-helper-command" @click="copyHelperCommand">
+                    <code>{{ quickConnect.helperCommand }}</code>
+                  </button>
+                </div>
+              </li>
+              <li>
+                <span class="helper-number" aria-hidden="true">3.</span>
+                <div>
+                  <p class="helper-step-title">{{ t('dashboard.quickStart.step3HelperImportTitle') }}</p>
+                  <p>{{ t('dashboard.quickStart.step3HelperImport', { app: appLabel }) }}</p>
+                </div>
+              </li>
+            </ol>
+          </details>
         </div>
       </li>
 
@@ -237,8 +271,12 @@ const rechargePath = computed(() => (appStore.cachedPublicSettings?.payment_enab
 
 type Os = 'windows' | 'mac'
 const os: Os = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.userAgent) ? 'mac' : 'windows'
-const otherOs: Os = os === 'mac' ? 'windows' : 'mac'
-const osLabel: Record<Os, string> = { windows: 'Windows', mac: 'Mac' }
+const { copied: helperCommandCopied, copyToClipboard: copyHelperText } = useClipboard()
+
+async function copyHelperCommand() {
+  const copied = await copyHelperText(quickConnect.helperCommand, t('dashboard.quickStart.step3HelperCopied'))
+  if (copied) markDownloaded()
+}
 
 const selectedKeyId = ref<number | null>(null)
 const byNewest = (a: ApiKey, b: ApiKey) => (b.created_at || '').localeCompare(a.created_at || '') || b.id - a.id
@@ -273,7 +311,7 @@ function stepClass(index: number, done: boolean) {
 /** 新人指引：当前该做哪一步（全部完成后不再指引） */
 const guideStep = computed<1 | 2 | 3 | null>(() => (!hasKey.value ? 1 : !hasBalance.value ? 2 : !hasUsage.value ? 3 : null))
 
-// 第三步先指下载按钮；点过下载 10 秒后改指「一键导入」。记在本浏览器，刷新后不用重来
+// 复用原下载指引记录：复制助手命令成功 10 秒后指「一键导入」。
 const DOWNLOADED_KEY = 'quick-start-helper-downloaded-at'
 const IMPORT_HINT_DELAY = 10_000
 const importHintReady = ref(false)
@@ -302,7 +340,7 @@ function markDownloaded() {
   if (!importHintReady.value) scheduleImportHint(at)
 }
 onUnmounted(() => clearTimeout(importHintTimer))
-const step3Guide = computed(() => (guideStep.value !== 3 ? null : importHintReady.value ? 'import' : 'download'))
+const showImportGuide = computed(() => guideStep.value === 3 && importHintReady.value)
 
 /** 第三步没有可导入的密钥时：自动建一把 GPT 第一个分组的「测试」密钥，选中后继续导入 */
 const creatingKey = ref(false)
@@ -445,13 +483,132 @@ const StepHead = defineComponent({
   @apply text-[15px] font-medium text-primary-600 hover:underline dark:text-primary-400;
 }
 
-.step-foot-stack {
-  @apply mt-auto flex flex-col items-start gap-1.5 pt-4;
+/* 每张卡片都是尺寸容器：气泡和排法按卡片自身宽度来 */
+.step-inner {
+  container-type: inline-size;
 }
 
-/* 下载助手：浅靛蓝底色，和青蓝渐变的“一键导入”按钮区分开 */
-.download-btn {
-  @apply inline-flex h-11 items-center whitespace-nowrap rounded-xl bg-indigo-50 px-4 text-[15px] font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200 transition-colors hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-500/30 dark:hover:bg-indigo-500/20;
+/* 第一、二步的气泡最宽不超过卡片内容宽度（可伸进内边距 8px），放不下就折成两行，不伸出卡片 */
+.card-bubble {
+  --gb-max-width: calc(100cqw + 8px);
+}
+
+.step2-inner {
+  container: step2 / inline-size;
+}
+@container step2 (max-width: 239.98px) {
+  .step2-foot-guided {
+    flex-direction: column-reverse;
+    align-items: flex-start;
+  }
+}
+
+/* 第三步按卡片自身宽度决定下拉框和一键导入怎么排（容器查询） */
+.step3-inner {
+  container: step3 / inline-size;
+}
+
+/* 第三步里群文件说明与导入引导 */
+.step3-lead {
+  @apply text-[15px] font-medium text-gray-700 dark:text-dark-200;
+}
+.helper-file-name {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.step3-group-qq-link {
+  @apply inline-flex max-w-full items-center gap-1 rounded text-[15px] font-medium text-primary-600 hover:underline dark:text-primary-400;
+  overflow-wrap: anywhere;
+  vertical-align: baseline;
+}
+.step3-group-qq-link img {
+  @apply h-4 w-auto flex-none;
+}
+.step3-group-qq-link span {
+  @apply min-w-0 tabular-nums;
+}
+
+/* 下拉框 + 一键导入：手机上下排、各占满一行 */
+.import-row {
+  @apply flex flex-col gap-2.5 whitespace-nowrap;
+}
+
+/* 电脑上同一行：下拉框原本 10rem，卡片窄时最窄缩到 5.5rem；连这样都放不下就保持上下排 */
+@media (min-width: 640px) {
+  @container step3 (min-width: 274px) {
+    .import-row {
+      flex-direction: row;
+      align-items: center;
+    }
+    .import-select {
+      flex: 0 1 10rem;
+      min-width: 5.5rem;
+    }
+    .import-btn-wrap {
+      flex: none;
+    }
+  }
+}
+
+/* 展开帮助只增加当前卡片高度；临时隐藏导入气泡，避免遮住三步说明。 */
+.quick-start-steps:has(.helper-help[open]) {
+  align-items: start;
+}
+.step3-inner:has(.helper-help[open]) .import-btn-wrap :deep(.guide-bubble) {
+  display: none;
+}
+
+.helper-help {
+  @apply min-w-0 border-t border-gray-100 pt-3 dark:border-dark-700;
+}
+.helper-summary {
+  @apply flex cursor-pointer list-none items-start gap-1.5 rounded text-sm leading-6 text-primary-600 dark:text-primary-400;
+  overflow-wrap: anywhere;
+}
+.helper-summary::-webkit-details-marker {
+  display: none;
+}
+.helper-chevron {
+  @apply mt-1 flex-none transition-transform;
+}
+.helper-help[open] .helper-chevron {
+  transform: rotate(90deg);
+}
+.helper-steps {
+  @apply mt-4 grid gap-4 text-sm leading-6 text-gray-600 dark:text-dark-300;
+}
+.helper-steps > li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.helper-number,
+.helper-step-title {
+  @apply font-medium text-gray-800 dark:text-dark-100;
+}
+.helper-copy-row {
+  @apply flex flex-wrap items-start justify-between gap-x-2 gap-y-1;
+}
+.helper-copy {
+  @apply inline-flex min-w-[88px] flex-none items-center justify-center gap-1 rounded py-0.5 text-[13px] leading-5 text-primary-600 hover:underline dark:text-primary-400;
+}
+.helper-command {
+  @apply mt-2 block w-full min-w-0 rounded-md border border-gray-200 bg-gray-50 p-1.5 text-left text-[12px] leading-6 text-gray-800 hover:border-primary-400 dark:border-dark-600 dark:bg-dark-900/60 dark:text-dark-100;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.helper-command code {
+  font: inherit;
+  word-break: break-all;
+  @apply font-mono;
+}
+.helper-summary:focus-visible,
+.helper-copy:focus-visible,
+.helper-command:focus-visible {
+  @apply outline-none ring-2 ring-primary-500 ring-offset-2 dark:ring-offset-dark-800;
 }
 
 .support-link {

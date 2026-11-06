@@ -29,14 +29,9 @@ export const streamModels = {
   right: ['DeepSeek', 'Grok', 'Kimi', 'MiniMax']
 } as const
 
-/** 仪表盘「快速开始」：接入助手下载地址、导入失败时的教程、文档首页 */
+/** 仪表盘「快速开始」：固定的助手命令与文档首页；命令不含密钥 */
 export const quickConnect = {
-  downloads: {
-    windows: 'https://docs.usegoodai.com/download/usegoodai-quick-connect-windows-x64.exe',
-    mac: 'https://docs.usegoodai.com/download/usegoodai-quick-connect-mac-arm64.zip'
-  },
-  /** 一键导入没反应时，跳到文档「快速开始」的「运行接入命令」一节 */
-  fallbackDoc: 'https://docs.usegoodai.com/quick-start#_2-运行接入命令',
+  helperCommand: 'irm https://docs.usegoodai.com/install/helper.ps1 | iex',
   docsHome: 'https://docs.usegoodai.com/'
 } as const
 
