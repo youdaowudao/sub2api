@@ -68,7 +68,9 @@ func (t *transport) Forward(stream pluginv1.TransportPlugin_ForwardServer) error
 		if body.Len()+len(frame.GetBodyChunk()) > 32*1024*1024 {
 			return errors.New("example request limit exceeded")
 		}
-		body.Write(frame.GetBodyChunk())
+		if _, err := body.Write(frame.GetBodyChunk()); err != nil {
+			return err
+		}
 	}
 	request, err := http.NewRequestWithContext(stream.Context(), start.Method, start.Url, &body)
 	if err != nil {
@@ -89,7 +91,7 @@ func (t *transport) Forward(stream pluginv1.TransportPlugin_ForwardServer) error
 	if err != nil {
 		return stream.Send(&pluginv1.ForwardResponse{Frame: &pluginv1.ForwardResponse_Error{Error: &pluginv1.ForwardResponseError{Code: "EXAMPLE_UPSTREAM_FAILED", Message: err.Error(), RequestSent: true}}})
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	headers := map[string]*pluginv1.HeaderValues{}
 	for key, values := range response.Header {
 		headers[key] = &pluginv1.HeaderValues{Values: values}

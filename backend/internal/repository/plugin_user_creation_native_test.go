@@ -132,7 +132,9 @@ func pluginCreationNativeDSNOptions(dsn string) (map[string]string, error) {
 			if value[i] == '\\' {
 				i++
 			}
-			decoded.WriteByte(value[i])
+			if err := decoded.WriteByte(value[i]); err != nil {
+				return nil, err
+			}
 		}
 		options[key] = decoded.String()
 		remaining = remaining[match[1]:]

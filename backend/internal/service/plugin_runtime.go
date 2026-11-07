@@ -63,7 +63,7 @@ func startPluginRuntime(ctx context.Context, installation *PluginInstallation, s
 	if err != nil || len(checksum) != sha256.Size {
 		return nil, errors.New("插件二进制哈希无效")
 	}
-	cmd := exec.CommandContext(context.WithoutCancel(ctx), installation.BinaryPath)
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), installation.BinaryPath) //nolint:gosec // G702: 路径来自已验证清单的安装记录，SecureConfig 在启动前核对 SHA256；不经 shell、不拼接请求参数。
 	pluginMap := pluginv1.ClientPluginMap()
 	var dialOptions []grpc.DialOption
 	if installation.Manifest.IsGeneric() {

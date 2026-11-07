@@ -66,7 +66,8 @@ func genericSecurityFixture(t *testing.T) (*PluginManager, *pluginHostServiceSer
 	installation := &PluginInstallation{ID: 171, PluginKey: manifest.ID, Version: manifest.Version, Manifest: manifest, BinarySHA256: strings.Repeat("a", 64), State: PluginStateEnabled}
 	repo := &genericSecurityRepo{installation: installation}
 	manager := &PluginManager{repo: repo, hostInfo: PluginHostInfo{Version: "0.1.179"}, kvStore: newFakePluginKVStore(), runtimes: make(map[int64]*pluginRuntime)}
-	host := manager.buildHostServices(installation).(*pluginHostServiceServer)
+	host, ok := manager.buildHostServices(installation).(*pluginHostServiceServer)
+	require.True(t, ok)
 	return manager, host, repo
 }
 
@@ -105,7 +106,8 @@ func TestPluginGenericGrantScopesAndRevocation(t *testing.T) {
 	revoke()
 	_, err = host.KVGet(context.Background(), &pluginv1.KVGetRequest{Namespace: "state", Key: "key", AccessToken: writer})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
-	otherHost := manager.buildHostServices(repo.installation).(*pluginHostServiceServer)
+	otherHost, ok := manager.buildHostServices(repo.installation).(*pluginHostServiceServer)
+	require.True(t, ok)
 	_, err = otherHost.KVGet(context.Background(), &pluginv1.KVGetRequest{Namespace: "state", Key: "key", AccessToken: shared})
 	require.Equal(t, codes.PermissionDenied, status.Code(err))
 	repo.change(func(value *PluginInstallation) { value.State = PluginStateDisabled })

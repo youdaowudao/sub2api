@@ -68,7 +68,7 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	packagesDir := filepath.Join(i.rootDir, "packages")
 	installedDir := filepath.Join(i.rootDir, "installed")
 	for _, dir := range []string{stagingDir, packagesDir, installedDir} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // G703: 根目录来自运维配置，子目录固定；不使用上传包中的路径。
 			return nil, fmt.Errorf("创建插件目录: %w", err)
 		}
 	}
@@ -82,7 +82,7 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	defer func() {
 		_ = tempFile.Close()
 		if !committed {
-			_ = os.Remove(tempPath)
+			_ = os.Remove(tempPath) //nolint:gosec // G703: 仅清理 CreateTemp 在受控 staging 根中生成的本次上传文件。
 		}
 	}()
 
@@ -126,7 +126,7 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	}
 
 	installParent := filepath.Join(installedDir, manifest.ID)
-	if err := os.MkdirAll(installParent, 0o700); err != nil {
+	if err := os.MkdirAll(installParent, 0o700); err != nil { //nolint:gosec // G703: inspectArchive 已按命名空间正则验证 manifest.ID，不允许路径分隔符；父目录为受控 installed 根。
 		return nil, fmt.Errorf("创建插件安装父目录: %w", err)
 	}
 	extractPath, err := os.MkdirTemp(installParent, ".install-*")
@@ -138,7 +138,7 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	extracted := false
 	defer func() {
 		if !extracted {
-			_ = os.RemoveAll(extractPath)
+			_ = os.RemoveAll(extractPath) //nolint:gosec // G703: 仅清理 MkdirTemp 在已校验 ID 对应安装目录中生成的本次临时目录。
 		}
 	}()
 	if err := i.extractArchive(ctx, &archive.Reader, manifest, extractPath); err != nil {
@@ -146,21 +146,21 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	}
 	// Windows 不允许重命名仍被打开的文件，提交前先释放 ZIP 读取器。
 	closeArchive()
-	if err := os.Rename(extractPath, installPath); err != nil {
+	if err := os.Rename(extractPath, installPath); err != nil { //nolint:gosec // G703: ID/Version 已校验，后缀仅 SHA256 与 MkdirTemp 随机名；ZIP 成员名不参与目标目录。
 		return nil, fmt.Errorf("提交插件安装目录: %w", err)
 	}
 	extracted = true
 
 	artifactPath := filepath.Join(packagesDir, manifest.ID+"-"+manifest.Version+"-"+artifactSHA[:12]+"-"+installNonce+".s2plugin")
-	if err := os.Rename(tempPath, artifactPath); err != nil {
-		_ = os.RemoveAll(installPath)
+	if err := os.Rename(tempPath, artifactPath); err != nil { //nolint:gosec // G703: 源路径由 CreateTemp 生成；目标仅受控 packages 根、已校验 ID/Version、SHA256 与随机名。
+		_ = os.RemoveAll(installPath) //nolint:gosec // G703: 仅清理本次已提交目录，路径由已校验 ID/Version、SHA256 与 MkdirTemp 随机名组成。
 		return nil, fmt.Errorf("保存插件包: %w", err)
 	}
 	committed = true
-	artifactData, err := os.ReadFile(artifactPath)
+	artifactData, err := os.ReadFile(artifactPath) //nolint:gosec // G703: 读取刚提交的包，路径仅由受控 packages 根、已校验 ID/Version、SHA256 与随机名组成。
 	if err != nil {
-		_ = os.Remove(artifactPath)
-		_ = os.RemoveAll(installPath)
+		_ = os.Remove(artifactPath)   //nolint:gosec // G703: 仅清理上述受控路径上的本次插件包。
+		_ = os.RemoveAll(installPath) //nolint:gosec // G703: 仅清理本次安装目录；ID/Version 已校验，后缀为 SHA256 与 MkdirTemp 随机名。
 		return nil, fmt.Errorf("读取已保存插件包: %w", err)
 	}
 	runtimeEntry := manifest.Runtimes[manifest.RuntimeKey()]

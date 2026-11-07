@@ -32,7 +32,7 @@ func main() {
 	}
 }
 
-func run() error {
+func run() (returnErr error) {
 	kind := flag.String("kind", "", "frontend, backend, combined, or legacy")
 	version := flag.String("version", "1.0.0", "example package version")
 	hostRange := flag.String("host-range", ">=0.0.0", "required host version range")
@@ -193,7 +193,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { returnErr = errors.Join(returnErr, file.Close()) }()
 	writer := zip.NewWriter(file)
 	paths := make([]string, 0, len(files))
 	for name := range files {

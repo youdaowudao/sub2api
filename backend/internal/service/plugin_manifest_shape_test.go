@@ -55,7 +55,8 @@ func TestPluginManifestShapeRequiresExplicitProtocols(t *testing.T) {
 			for _, mode := range []string{"missing", "null"} {
 				t.Run(kind+"/"+field+"/"+mode, func(t *testing.T) {
 					err := inspectGenericManifestShape(t, kind, func(shape map[string]any) {
-						requires := shape["requires"].(map[string]any)
+						requires, ok := shape["requires"].(map[string]any)
+						require.True(t, ok)
 						if mode == "missing" {
 							delete(requires, field)
 						} else {

@@ -28,7 +28,7 @@ func TestPluginLegacyExampleNativeForward(t *testing.T) {
 	require.NoError(t, err)
 	file, err := os.Open(packagePath)
 	require.NoError(t, err)
-	defer file.Close()
+	defer func() { require.NoError(t, file.Close()) }()
 	root := t.TempDir()
 	cfg := testPluginConfig(root, false)
 	cfg.Plugins.TrustedPublishers = map[string]string{"local-example": strings.TrimSpace(string(publicKey))}

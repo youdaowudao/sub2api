@@ -96,13 +96,31 @@ func TestPluginGenericManifestRejectsUnknownFieldsBeforeExecution(t *testing.T) 
 			case "root":
 				shape["unknown"] = true
 			case "backend":
-				shape["backend"].(map[string]any)["unknown"] = true
+				backend, ok := shape["backend"].(map[string]any)
+				require.True(t, ok)
+				backend["unknown"] = true
 			case "method":
-				shape["backend"].(map[string]any)["methods"].([]any)[0].(map[string]any)["unknown"] = true
+				backend, ok := shape["backend"].(map[string]any)
+				require.True(t, ok)
+				methods, ok := backend["methods"].([]any)
+				require.True(t, ok)
+				require.NotEmpty(t, methods)
+				method, ok := methods[0].(map[string]any)
+				require.True(t, ok)
+				method["unknown"] = true
 			case "entry":
-				shape["ui"].(map[string]any)["entries"].([]any)[0].(map[string]any)["unknown"] = true
+				ui, ok := shape["ui"].(map[string]any)
+				require.True(t, ok)
+				entries, ok := ui["entries"].([]any)
+				require.True(t, ok)
+				require.NotEmpty(t, entries)
+				entry, ok := entries[0].(map[string]any)
+				require.True(t, ok)
+				entry["unknown"] = true
 			case "legacy new field":
-				shape["requires"].(map[string]any)["backend_api"] = 0
+				requires, ok := shape["requires"].(map[string]any)
+				require.True(t, ok)
+				requires["backend_api"] = 0
 			}
 			installer := NewPluginPackageInstaller(testPluginConfig(t.TempDir(), true), PluginHostInfo{Version: "0.1.179"})
 			_, err = installer.Install(context.Background(), bytes.NewReader(genericManifestOnlyArchive(t, shape)), nil)
