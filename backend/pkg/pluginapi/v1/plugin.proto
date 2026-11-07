@@ -18,6 +18,19 @@ service TransportPlugin {
   rpc InitHostServices(InitHostServicesRequest) returns (InitHostServicesResponse);
 }
 
+// BackendPlugin is independent of TransportPlugin: generic plugins never need
+// to implement Forward. Lifecycle RPCs receive no business authorization.
+service BackendPlugin {
+  rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc ValidateConfig(ValidateConfigRequest) returns (ValidateConfigResponse);
+  rpc ApplyConfig(ApplyConfigRequest) returns (ApplyConfigResponse);
+  rpc TestConfig(TestConfigRequest) returns (TestConfigResponse);
+  rpc InitHostServices(InitHostServicesRequest) returns (InitHostServicesResponse);
+  rpc Invoke(InvokeRequest) returns (InvokeResponse);
+  rpc RunOnce(RunOnceRequest) returns (RunOnceResponse);
+}
+
 // HostService is implemented by the host and dialed by the plugin over the
 // go-plugin broker id delivered via InitHostServices. It exposes generic,
 // capability-neutral facilities that any plugin may use; new facilities are
@@ -36,6 +49,7 @@ service HostService {
   // ResolveOutboundIdentity, the dedicated (equally sensitive) credential channel.
   rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
   rpc ResolveOutboundIdentity(ResolveOutboundIdentityRequest) returns (ResolveOutboundIdentityResponse);
+  rpc ListUserCreations(ListUserCreationsRequest) returns (ListUserCreationsResponse);
 }
 
 message GetInfoRequest {}
@@ -46,6 +60,8 @@ message GetInfoResponse {
   uint32 protocol_version = 3;
   uint32 transport_api_version = 4;
   repeated string capabilities = 5;
+  uint32 backend_api_version = 6;
+  uint32 host_service_api_version = 7;
 }
 
 message HealthRequest {}
@@ -169,6 +185,7 @@ message InitHostServicesResponse {
 message KVGetRequest {
   string namespace = 1;
   string key = 2;
+  string access_token = 3;
 }
 
 message KVGetResponse {
@@ -182,6 +199,7 @@ message KVSetRequest {
   bytes value = 3;
   // ttl_seconds > 0 sets an expiry; 0 stores the entry without expiry.
   int64 ttl_seconds = 4;
+  string access_token = 5;
 }
 
 message KVSetResponse {}
@@ -189,6 +207,7 @@ message KVSetResponse {}
 message KVDeleteRequest {
   string namespace = 1;
   string key = 2;
+  string access_token = 3;
 }
 
 message KVDeleteResponse {}
@@ -197,6 +216,7 @@ message KVListRequest {
   string namespace = 1;
   string key_prefix = 2;
   int32 limit = 3;
+  string access_token = 4;
 }
 
 message KVListResponse {
@@ -271,4 +291,54 @@ message ResolveOutboundIdentityResponse {
   string proxy_url = 5;
   string token = 6;
   map<string, HeaderValues> headers = 7;
+}
+
+// PluginError describes a plugin-reported failure. The host applies its own
+// retry policy and redacts/truncates both code and message before display.
+message PluginError {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+  bool outcome_unknown = 4;
+}
+message PluginCaller {
+  int64 user_id = 1;
+  string role = 2;
+}
+message InvokeRequest {
+  string request_id = 1;
+  string method = 2;
+  bytes payload_json = 3;
+  PluginCaller caller = 4;
+  string access_token = 5;
+}
+message InvokeResponse {
+  bytes payload_json = 1;
+  PluginError error = 2;
+}
+message RunOnceRequest {
+  string run_id = 1;
+  int64 deadline_unix_ms = 2;
+  string access_token = 3;
+}
+message RunOnceResponse { PluginError error = 1; }
+message ListUserCreationsRequest {
+  int64 after_user_id = 1;
+  int64 through_user_id = 2;
+  int32 limit = 3;
+  string access_token = 4;
+}
+message UserCreation {
+  string event_id = 1;
+  int64 user_id = 2;
+  string created_at = 3;
+  string completed_at = 4;
+  string signup_source = 5;
+  string email = 6;
+}
+message ListUserCreationsResponse {
+  repeated UserCreation items = 1;
+  int64 next_user_id = 2;
+  int64 through_user_id = 3;
+  bool done = 4;
 }

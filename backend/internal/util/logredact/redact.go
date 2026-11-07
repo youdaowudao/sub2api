@@ -43,11 +43,18 @@ var (
 	reGOCSPX = regexp.MustCompile(`GOCSPX-[0-9A-Za-z_-]{24,}`)
 	reAIza   = regexp.MustCompile(`AIza[0-9A-Za-z_-]{35}`)
 	// Gemini auth key：AQ.Ab 前缀 + 48 位，长度放宽以覆盖格式变体。
-	reGeminiAuthKey = regexp.MustCompile(`AQ\.Ab[0-9A-Za-z_-]{40,}`)
+	reGeminiAuthKey   = regexp.MustCompile(`AQ\.Ab[0-9A-Za-z_-]{40,}`)
+	rePluginAssetPath = regexp.MustCompile(`(/api/v1/(?:plugin-ui/|plugin-entry-ui/[^/\s?#"'<>]+/))[^/\s?#"'<>]+`)
 
 	defaultTextRedactPatterns = compileTextRedactPatterns(nil)
 	extraTextPatternCache     sync.Map // map[string]*textRedactPatterns
 )
+
+// RedactPluginAssetPaths removes only the capability segment from plugin asset
+// paths, preserving surrounding log text and the remaining path.
+func RedactPluginAssetPaths(input string) string {
+	return rePluginAssetPath.ReplaceAllString(input, `${1}***`)
+}
 
 func RedactMap(input map[string]any, extraKeys ...string) map[string]any {
 	if input == nil {

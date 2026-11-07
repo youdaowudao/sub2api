@@ -368,7 +368,7 @@ func (h *AuthHandler) LinuxDoOAuthCallback(c *gin.Context) {
 			h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
 			clearOAuthPendingSessionCookie(c, secureCookie)
 			clearOAuthPendingBrowserCookie(c, secureCookie)
-			redirectOAuthTokenPair(c, frontendCallback, tokenPair, redirectTo)
+			redirectOAuthTokenPair(c, frontendCallback, tokenPair, redirectTo, user.ID)
 			return
 		}
 		if !errors.Is(err, service.ErrOAuthInvitationRequired) {
@@ -608,12 +608,7 @@ func (h *AuthHandler) CompleteLinuxDoOAuthRegistration(c *gin.Context) {
 	clearOAuthPendingSessionCookie(c, secureCookie)
 	clearOAuthPendingBrowserCookie(c, secureCookie)
 
-	c.JSON(http.StatusOK, gin.H{
-		"access_token":  tokenPair.AccessToken,
-		"refresh_token": tokenPair.RefreshToken,
-		"expires_in":    tokenPair.ExpiresIn,
-		"token_type":    "Bearer",
-	})
+	writeOAuthTokenPairResponse(c, tokenPair, user.ID)
 }
 
 func (h *AuthHandler) getLinuxDoOAuthConfig(ctx context.Context) (config.LinuxDoConnectConfig, error) {
@@ -819,7 +814,7 @@ func redirectOAuthError(c *gin.Context, frontendCallback string, code string, me
 	redirectWithFragment(c, frontendCallback, fragment)
 }
 
-func redirectOAuthTokenPair(c *gin.Context, frontendCallback string, tokenPair *service.TokenPair, redirectTo string) {
+func redirectOAuthTokenPair(c *gin.Context, frontendCallback string, tokenPair *service.TokenPair, redirectTo string, userID int64) {
 	fragment := url.Values{}
 	if tokenPair != nil {
 		fragment.Set("access_token", truncateFragmentValue(tokenPair.AccessToken))
@@ -845,7 +840,31 @@ func redirectOAuthTokenPair(c *gin.Context, frontendCallback string, tokenPair *
 		}
 		fragment.Set("redirect", truncateFragmentValue(redirect))
 	}
-	redirectWithFragment(c, frontendCallback, fragment)
+	redirectUserCreationWithFragment(c, frontendCallback, fragment, userID)
+}
+
+// Only a prepared token redirect can confirm a captured creation. Error,
+// choice, and payment redirects continue to use redirectWithFragment directly.
+func redirectUserCreationWithFragment(c *gin.Context, frontendCallback string, fragment url.Values, userID int64) {
+	if fragment.Get("access_token") == "" || fragment.Get("error") != "" || fragment.Get("step") != "" {
+		redirectWithFragment(c, frontendCallback, fragment)
+		return
+	}
+	u, err := url.Parse(frontendCallback)
+	if err != nil || (u.Scheme != "" && !strings.EqualFold(u.Scheme, "http") && !strings.EqualFold(u.Scheme, "https")) {
+		// Preserve the original invalid-callback fallback without recording it.
+		c.Redirect(http.StatusFound, linuxDoOAuthDefaultRedirectTo)
+		return
+	}
+	u.Fragment = fragment.Encode()
+	target := u.String()
+	if err := service.CompleteUserCreation(c.Request.Context(), userID); err != nil {
+		redirectOAuthError(c, frontendCallback, infraerrors.Reason(err), infraerrors.Message(err), "")
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	c.Redirect(http.StatusFound, target)
 }
 
 func redirectWithFragment(c *gin.Context, frontendCallback string, fragment url.Values) {

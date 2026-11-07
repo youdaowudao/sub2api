@@ -318,7 +318,12 @@ func (h *UserHandler) Create(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	payload := dto.UserFromServiceAdmin(user)
+	if err := service.CompleteUserCreation(c.Request.Context(), user.ID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, payload)
 }
 
 // Update handles updating a user

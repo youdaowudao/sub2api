@@ -15,10 +15,10 @@
             class="mt-3 flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-300"
           >
             <span class="rounded bg-gray-100 px-2 py-1 dark:bg-dark-700">{{
-              t("admin.plugins.onlyOpenAI")
+              t("admin.plugins.pluginKinds")
             }}</span>
             <span class="rounded bg-gray-100 px-2 py-1 dark:bg-dark-700">{{
-              t("admin.plugins.noAccountCoupling")
+              t("admin.plugins.permissionNotice")
             }}</span>
           </div>
         </div>
@@ -103,6 +103,7 @@
                 <span class="font-mono text-xs text-gray-500"
                   >v{{ plugin.version }}</span
                 >
+                <span class="rounded bg-gray-100 px-2 py-0.5 text-xs dark:bg-dark-700">{{ pluginKind(plugin) }}</span>
                 <span
                   class="rounded px-2 py-0.5 text-xs font-medium"
                   :class="stateClass(plugin.state)"
@@ -179,13 +180,15 @@
                 <span
                   class="rounded px-2 py-0.5"
                   :class="
-                    plugin.runtime_healthy
+                    plugin.runtime_healthy || isFrontendOnly(plugin)
                       ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
                       : 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
                   "
                 >
                   {{
-                    plugin.runtime_healthy
+                    isFrontendOnly(plugin)
+                      ? t("admin.plugins.noProcess")
+                      : plugin.runtime_healthy
                       ? t("admin.plugins.healthy")
                       : t("admin.plugins.unhealthy")
                   }}
@@ -211,7 +214,13 @@
               </p>
             </div>
 
-            <div class="md:col-span-2">
+            <div v-if="plugin.manifest.schema_version === 2" class="md:col-span-2 space-y-1 text-xs text-gray-600 dark:text-gray-300">
+              <p class="font-medium">{{ t('admin.plugins.permissions') }}</p>
+              <p v-if="!plugin.manifest.capabilities.length">{{ t('admin.plugins.noHostPermissions') }}</p>
+              <p v-for="capability in plugin.manifest.capabilities" :key="capability.id">{{ permissionLabel(capability.id) }}</p>
+            </div>
+
+            <div v-if="plugin.manifest.schema_version === 1" class="md:col-span-2">
               <label
                 class="flex items-center justify-between gap-4 text-xs font-medium text-gray-600 dark:text-gray-300"
               >
@@ -292,7 +301,16 @@
         width="full"
         @close="closeConfiguration"
       >
+        <div v-if="configPlugin && !configPlugin.manifest.ui.entrypoint" class="space-y-4 p-4">
+          <p class="text-sm text-gray-500">{{ t('admin.plugins.jsonConfigHint') }}</p>
+          <p v-if="uiLoading" class="text-sm text-gray-500">{{ t('common.loading') }}</p>
+          <p v-if="uiError" role="alert" class="text-sm text-red-600">{{ uiError }}</p>
+          <textarea v-model="jsonConfig" :disabled="!jsonLoaded || jsonSaving" class="input min-h-72 w-full font-mono text-sm" :aria-label="t('admin.plugins.jsonConfigLabel')" spellcheck="false" />
+          <button v-if="uiError && !jsonLoaded" type="button" class="btn btn-secondary" @click="openConfiguration(configPlugin)">{{ t('admin.plugins.retry') }}</button>
+          <button type="button" class="btn btn-primary" :disabled="!jsonLoaded || jsonSaving" @click="saveJSONConfiguration">{{ t('common.save') }}</button>
+        </div>
         <div
+          v-else
           class="relative min-h-[520px] overflow-hidden bg-gray-50 dark:bg-dark-900"
           :style="{ height: `${iframeHeight}px` }"
         >
@@ -333,7 +351,8 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { createPluginBridge, type PluginBridgeMessage, type PluginBridgeRequest } from "@/components/plugins/bridge";
 import { useI18n } from "vue-i18n";
 import {
   adminAPI,
@@ -341,6 +360,7 @@ import {
   type PluginUISession,
 } from "@/api/admin";
 import { useAppStore } from "@/stores";
+import { useAuthStore } from "@/stores/auth";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
 import Icon from "@/components/icons/Icon.vue";
@@ -352,19 +372,9 @@ import {
   useStepUp,
 } from "@/composables/useStepUp";
 
-interface PluginBridgeMessage {
-  source?: string;
-  bridge_token?: string;
-  type?: string;
-  request_id?: string;
-  config?: unknown;
-  height?: unknown;
-  level?: unknown;
-  message?: unknown;
-}
-
 const { t } = useI18n();
 const appStore = useAppStore();
+const auth = useAuthStore();
 const pluginStepUp = useStepUp();
 const plugins = ref<PluginInstallation[]>([]);
 const loading = ref(false);
@@ -379,7 +389,23 @@ const uiLoading = ref(false);
 const uiError = ref("");
 const iframeHeight = ref(640);
 const pluginFrameLoaded = ref(false);
-const pendingBridgeRequests = new Map<string, number>();
+const jsonConfig = ref("{}");
+const jsonSaving = ref(false);
+const jsonLoaded = ref(false);
+let configController: AbortController | undefined;
+let uiLoadTimeout: number | undefined;
+const bridge = createPluginBridge({
+  frame: () => pluginFrame.value,
+  token: () => uiSession.value?.bridge_token,
+  version: () => uiSession.value?.ui_bridge_version || 1,
+  accepts: type => ["sub2api.plugin.ready", "config.load", "config.save", "config.test", "plugin.status", "ui.resize", "ui.notify"].includes(type),
+  expectsResponse: type => ["config.load", "config.save", "config.test", "plugin.status"].includes(type),
+  handle: handleBridgeMessage,
+  connected: () => {
+    window.clearTimeout(uiLoadTimeout);
+    uiLoading.value = false;
+  },
+});
 let uiSessionVersion = 0;
 
 function errorMessage(error: unknown): string {
@@ -447,7 +473,9 @@ function currentRollout(plugin: PluginInstallation): number {
 }
 
 function hasEnabledBinding(plugin: PluginInstallation): boolean {
-  return plugin.bindings.some((binding) => binding.enabled);
+  return plugin.manifest.schema_version === 2
+    ? plugin.state === "enabled" || plugin.state === "starting"
+    : plugin.bindings.some((binding) => binding.enabled);
 }
 
 function setRollout(id: number, event: Event): void {
@@ -523,19 +551,55 @@ async function testPlugin(plugin: PluginInstallation): Promise<void> {
   }
 }
 
+function isFrontendOnly(plugin: PluginInstallation): boolean {
+  return plugin.manifest.schema_version === 2 && !Object.keys(plugin.manifest.runtimes || {}).length;
+}
+
+function pluginKind(plugin: PluginInstallation): string {
+  if (plugin.manifest.schema_version === 1) return t("admin.plugins.transportKind");
+  if (isFrontendOnly(plugin)) return t("admin.plugins.frontendKind");
+  return t(plugin.manifest.ui.entrypoint || plugin.manifest.ui.entries?.length ? "admin.plugins.combinedKind" : "admin.plugins.backendKind");
+}
+
+function permissionLabel(id: string): string {
+  const labels: Record<string, string> = {
+    "backend.invoke.v1": "invokePermission", "backend.background.v1": "backgroundPermission",
+    "storage.read.v1": "storageReadPermission", "storage.write.v1": "storageWritePermission",
+    "users.created.read.v1": "usersReadPermission", "users.email.read.v1": "emailReadPermission",
+  };
+  return labels[id] ? t(`admin.plugins.${labels[id]}`) : id;
+}
+
 async function openConfiguration(plugin: PluginInstallation): Promise<void> {
   const version = ++uiSessionVersion;
+  configController?.abort();
+  configController = new AbortController();
+  const signal = configController.signal;
   configPlugin.value = plugin;
+  window.clearTimeout(uiLoadTimeout);
   uiSession.value = null;
   pluginFrameLoaded.value = false;
-  clearPendingBridgeRequests();
+  bridge.disconnect();
+  pluginStepUp.onCancel?.();
   uiLoading.value = true;
   uiError.value = "";
+  jsonConfig.value = "{}";
+  jsonSaving.value = false;
+  jsonLoaded.value = false;
   iframeHeight.value = 640;
   try {
-    const session = await adminAPI.plugins.createUISession(plugin.id);
-    if (version !== uiSessionVersion) return;
-    uiSession.value = session;
+    if (!plugin.manifest.ui.entrypoint) {
+      const config = await adminAPI.plugins.getConfig(plugin.id, signal);
+      if (version !== uiSessionVersion) return;
+      jsonConfig.value = JSON.stringify(config, null, 2);
+      jsonLoaded.value = true;
+      uiLoading.value = false;
+    } else {
+      const session = await adminAPI.plugins.createUISession(plugin.id, signal);
+      if (version !== uiSessionVersion) return;
+      uiSession.value = session;
+      if (session.ui_bridge_version === 2) uiLoadTimeout = window.setTimeout(configurationFrameFailed, 30_000);
+    }
   } catch (error: unknown) {
     if (version !== uiSessionVersion) return;
     uiLoading.value = false;
@@ -543,149 +607,129 @@ async function openConfiguration(plugin: PluginInstallation): Promise<void> {
   }
 }
 
+async function saveJSONConfiguration(): Promise<void> {
+  const plugin = configPlugin.value;
+  if (!plugin || !jsonLoaded.value || jsonSaving.value) return;
+  let config: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(jsonConfig.value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+    config = parsed as Record<string, unknown>;
+  } catch {
+    uiError.value = t("admin.plugins.jsonObjectRequired");
+    return;
+  }
+  const version = uiSessionVersion;
+  const signal = configController?.signal;
+  jsonSaving.value = true;
+  uiError.value = "";
+  try {
+    const result = await pluginStepUp.run(() => {
+      if (version !== uiSessionVersion || signal?.aborted) throw new Error("Request expired");
+      return adminAPI.plugins.saveConfig(plugin.id, config, signal);
+    });
+    if (version !== uiSessionVersion) return;
+    jsonConfig.value = JSON.stringify(result, null, 2);
+    appStore.showSuccess(t("common.saved"));
+  } catch (error) {
+    if (version !== uiSessionVersion) return;
+    if (!isStepUpCancelled(error)) uiError.value = errorMessage(error);
+    if (isStepUpBlocked(error)) reportSensitiveActionError(error);
+  } finally {
+    if (version === uiSessionVersion) jsonSaving.value = false;
+  }
+}
+
 function closeConfiguration(): void {
   uiSessionVersion++;
-  clearPendingBridgeRequests();
+  configController?.abort();
+  configController = undefined;
+  bridge.disconnect();
+  window.clearTimeout(uiLoadTimeout);
+  pluginStepUp.onCancel?.();
   pluginFrameLoaded.value = false;
   configPlugin.value = null;
   uiSession.value = null;
   uiLoading.value = false;
   uiError.value = "";
-}
-
-function clearPendingBridgeRequests(): void {
-  for (const timeout of pendingBridgeRequests.values()) window.clearTimeout(timeout);
-  pendingBridgeRequests.clear();
+  jsonSaving.value = false;
+  jsonLoaded.value = false;
 }
 
 function handlePluginFrameLoad(): void {
-  // A load can also be caused by a plugin navigating its iframe. Drop all
-  // outstanding responses so a late config response is never sent to the new document.
-  if (pluginFrameLoaded.value) clearPendingBridgeRequests();
+  if (uiSession.value?.ui_bridge_version === 2) {
+    pluginStepUp.onCancel?.();
+    window.clearTimeout(uiLoadTimeout);
+    uiLoadTimeout = window.setTimeout(configurationFrameFailed, 30_000);
+    uiLoading.value = true;
+    bridge.documentLoaded();
+    return;
+  }
+  if (pluginFrameLoaded.value) {
+    bridge.reset();
+    pluginStepUp.onCancel?.();
+  }
   pluginFrameLoaded.value = true;
   uiLoading.value = false;
 }
 
-function registerBridgeRequest(requestID: string): void {
-  const timeout = window.setTimeout(() => {
-    pendingBridgeRequests.delete(requestID);
-  }, 30_000);
-  pendingBridgeRequests.set(requestID, timeout);
+function configurationFrameFailed(): void {
+  bridge.disconnect();
+  pluginStepUp.onCancel?.();
+  window.clearTimeout(uiLoadTimeout);
+  uiSession.value = null;
+  uiLoading.value = false;
+  uiError.value = t("admin.plugins.pageLoadFailed");
 }
 
-function postBridgeResult(
-  request: PluginBridgeMessage,
-  payload: Record<string, unknown>,
-): void {
-  if (!pluginFrame.value?.contentWindow || !uiSession.value) return;
-  const requestID = typeof request.request_id === "string" ? request.request_id.trim() : "";
-  const timeout = pendingBridgeRequests.get(requestID);
-  if (!requestID || timeout === undefined) return;
-  window.clearTimeout(timeout);
-  pendingBridgeRequests.delete(requestID);
-  pluginFrame.value.contentWindow.postMessage(
-    {
-      source: "sub2api-plugin-host",
-      bridge_token: uiSession.value.bridge_token,
-      type: `${request.type}.result`,
-      request_id: requestID,
-      ...payload,
-    },
-    // The sandboxed iframe has an opaque origin, so no fixed target origin exists.
-    // Pending request tracking plus load invalidation prevents cross-navigation leaks.
-    "*",
-  );
-}
-
-async function handleBridgeMessage(event: MessageEvent): Promise<void> {
-  if (
-    !uiSession.value ||
-    !configPlugin.value ||
-    event.source !== pluginFrame.value?.contentWindow ||
-    event.origin !== "null"
-  )
-    return;
-  const message = event.data as PluginBridgeMessage;
-  if (
-    !message ||
-    message.source !== "sub2api-plugin-ui" ||
-    message.bridge_token !== uiSession.value.bridge_token
-  )
-    return;
-
-  const requestID = typeof message.request_id === "string" ? message.request_id.trim() : "";
-  const expectsResponse =
-    message.type === "config.load" ||
-    message.type === "config.save" ||
-    message.type === "config.test" ||
-    message.type === "plugin.status";
-  if (expectsResponse) {
-    if (!requestID || pendingBridgeRequests.has(requestID)) return;
-    registerBridgeRequest(requestID);
-  }
-
+async function handleBridgeMessage(message: PluginBridgeMessage, request: PluginBridgeRequest): Promise<void> {
+  const pluginID = configPlugin.value?.id;
+  if (!pluginID) return;
+  const legacy = uiSession.value?.ui_bridge_version === 1;
+  const sensitive = <T,>(action: () => Promise<T>) => {
+    const cancelStepUp = () => pluginStepUp.onCancel?.();
+    request.signal.addEventListener("abort", cancelStepUp, { once: true });
+    return pluginStepUp.run(() => {
+      if (request.signal.aborted) throw new Error("Request expired");
+      return action();
+    }).finally(() => request.signal.removeEventListener("abort", cancelStepUp));
+  };
   try {
     switch (message.type) {
       case "sub2api.plugin.ready":
         uiLoading.value = false;
         break;
       case "config.load": {
-        const config = await adminAPI.plugins.getConfig(configPlugin.value.id);
-        postBridgeResult(message, { ok: true, config });
+        const config = await adminAPI.plugins.getConfig(pluginID, request.signal);
+        request.reply({ ok: true, config });
         break;
       }
       case "config.save": {
-        if (
-          !message.config ||
-          typeof message.config !== "object" ||
-          Array.isArray(message.config)
-        ) {
+        if (!message.config || typeof message.config !== "object" || Array.isArray(message.config)) {
           throw new Error(t("admin.plugins.bridgeRejected"));
         }
-        const config = await pluginStepUp.run(() =>
-          adminAPI.plugins.saveConfig(
-            configPlugin.value!.id,
-            message.config as Record<string, unknown>,
-          ),
-        );
-        postBridgeResult(message, { ok: true, config });
-        appStore.showSuccess(t("common.saved"));
+        const config = await sensitive(() => adminAPI.plugins.saveConfig(pluginID, message.config as Record<string, unknown>, request.signal));
+        if (request.reply({ ok: true, config }) || (legacy && !request.signal.aborted)) appStore.showSuccess(t("common.saved"));
         break;
       }
       case "config.test": {
-        const result = await pluginStepUp.run(() =>
-          adminAPI.plugins.test(configPlugin.value!.id),
-        );
-        postBridgeResult(message, { ok: result.success, result });
-        // A successful result is delivered back to the plugin UI, which owns how it
-        // presents it (inline status, or an explicit ui.notify). Only force a host
-        // toast on failure so genuine errors are never silently dropped — plugins
-        // may call config.test for lightweight status polling, not just as an
-        // explicit "test" action, and those must not spam a success toast.
-        if (!result.success)
-          appStore.showError(result.message || t("common.error"));
+        const result = await sensitive(() => adminAPI.plugins.test(pluginID, request.signal));
+        const notify = request.reply({ ok: result.success, result }) || (legacy && !request.signal.aborted);
+        if (notify && !result.success) appStore.showError(result.message || t("common.error"));
         break;
       }
       case "plugin.status": {
-        // Read-only runtime status (the plugin's Health snapshot). It has no side
-        // effects, so it is intentionally NOT step-up gated and never raises a host
-        // toast — the plugin UI renders it however it likes. This is the generic
-        // channel for any plugin to surface live state without abusing config.test.
-        const result = await adminAPI.plugins.status(configPlugin.value!.id);
-        postBridgeResult(message, { ok: true, result });
+        const result = await adminAPI.plugins.status(pluginID, request.signal);
+        request.reply({ ok: true, result });
         break;
       }
       case "ui.resize": {
         const height = Number(message.height);
-        if (Number.isFinite(height))
-          iframeHeight.value = Math.min(960, Math.max(520, Math.round(height)));
+        if (Number.isFinite(height)) iframeHeight.value = Math.min(960, Math.max(520, Math.round(height)));
         break;
       }
       case "ui.notify": {
-        const text =
-          typeof message.message === "string"
-            ? message.message.slice(0, 500)
-            : "";
+        const text = typeof message.message === "string" ? message.message.slice(0, 500) : "";
         if (!text) break;
         if (message.level === "error") appStore.showError(text);
         else if (message.level === "success") appStore.showSuccess(text);
@@ -694,11 +738,9 @@ async function handleBridgeMessage(event: MessageEvent): Promise<void> {
       }
     }
   } catch (error: unknown) {
+    if (request.signal.aborted) return;
     if (isStepUpBlocked(error)) reportSensitiveActionError(error);
-    postBridgeResult(message, {
-      ok: false,
-      error: isStepUpCancelled(error) ? t("common.cancel") : errorMessage(error),
-    });
+    request.reply({ ok: false, error: isStepUpCancelled(error) ? t("common.cancel") : errorMessage(error) });
   }
 }
 
@@ -722,13 +764,17 @@ function compatibilityClass(
   return "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300";
 }
 
+watch(() => `${auth.token || ""}:${auth.user?.id || ""}:${auth.user?.role || ""}:${auth.user?.status || ""}`, () => {
+  if (configPlugin.value?.manifest.schema_version === 2) closeConfiguration();
+}, { flush: "sync" });
+
 onMounted(() => {
-  window.addEventListener("message", handleBridgeMessage);
+  bridge.start();
   void loadPlugins();
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener("message", handleBridgeMessage);
+  bridge.stop();
   closeConfiguration();
 });
 </script>

@@ -33,6 +33,42 @@ func TestDeriveAuditAction(t *testing.T) {
 	}
 }
 
+func TestPluginArbitraryPayloadRemainsAvailableButIsOmittedFromAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct{ method, pattern, path string }{
+		{http.MethodPost, "/api/v1/plugins/:id/calls/:method", "/api/v1/plugins/7/calls/echo"},
+		{http.MethodPost, "/api/v1/plugins/:id/actions/:method", "/api/v1/plugins/7/actions/save"},
+		{http.MethodPut, "/api/v1/admin/plugins/:id/config", "/api/v1/admin/plugins/7/config"},
+	} {
+		t.Run(tc.method+" "+tc.pattern, func(t *testing.T) {
+			repository := &auditCaptureRepository{}
+			auditService := service.NewAuditLogService(repository, nil)
+			auditService.Start()
+			router := gin.New()
+			router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+			router.Handle(tc.method, tc.pattern, func(c *gin.Context) {
+				var payload map[string]any
+				require.NoError(t, c.ShouldBindJSON(&payload))
+				require.Equal(t, "private-plugin-canary", payload["value"], "omitting audit body must not consume the actual request")
+				c.Status(http.StatusOK)
+			})
+			request := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(`{"value":"private-plugin-canary"}`))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			auditService.Stop()
+			require.Equal(t, http.StatusOK, recorder.Code)
+			repository.mu.Lock()
+			defer repository.mu.Unlock()
+			require.Len(t, repository.logs, 1)
+			entry := repository.logs[0]
+			require.Equal(t, "<credential-bearing body omitted>", entry.RequestBody)
+			require.Equal(t, tc.pattern, entry.Path)
+			require.NotContains(t, entry.RequestBody, "private-plugin-canary")
+		})
+	}
+}
+
 type auditCaptureRepository struct {
 	mu   sync.Mutex
 	logs []*service.AuditLog

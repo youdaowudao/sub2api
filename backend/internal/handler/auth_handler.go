@@ -130,20 +130,30 @@ func respondWithTokenPair(c *gin.Context, authService *service.AuthService, user
 			response.InternalError(c, "Failed to generate token")
 			return
 		}
-		response.Success(c, AuthResponse{
+		respondWithUserCreationSuccess(c, user.ID, AuthResponse{
 			AccessToken: token,
 			TokenType:   "Bearer",
 			User:        dto.UserFromService(user),
 		})
 		return
 	}
-	response.Success(c, AuthResponse{
+	respondWithUserCreationSuccess(c, user.ID, AuthResponse{
 		AccessToken:  tokenPair.AccessToken,
 		RefreshToken: tokenPair.RefreshToken,
 		ExpiresIn:    tokenPair.ExpiresIn,
 		TokenType:    "Bearer",
 		User:         dto.UserFromService(user),
 	})
+}
+
+// This is an explicit credential-success exit. Existing users have no matching
+// creation candidate, so their normal login response does not depend on storage.
+func respondWithUserCreationSuccess(c *gin.Context, userID int64, data any) {
+	if err := service.CompleteUserCreation(c.Request.Context(), userID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, data)
 }
 
 func (h *AuthHandler) ensureBackendModeAllowsUser(ctx context.Context, user *service.User) error {

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,7 +19,11 @@ import (
 // It preserves Gin's broken-pipe handling by not attempting to write a response
 // when the client connection is already gone.
 func Recovery() gin.HandlerFunc {
-	return gin.CustomRecoveryWithWriter(gin.DefaultErrorWriter, func(c *gin.Context, recovered any) {
+	writer := gin.DefaultErrorWriter
+	if writer != nil {
+		writer = pluginAssetRedactingWriter{writer: writer}
+	}
+	return gin.CustomRecoveryWithWriter(writer, func(c *gin.Context, recovered any) {
 		recoveredErr, _ := recovered.(error)
 
 		if isBrokenPipe(recoveredErr) {
@@ -42,6 +48,22 @@ func Recovery() gin.HandlerFunc {
 		)
 		c.Abort()
 	})
+}
+
+type pluginAssetRedactingWriter struct {
+	writer io.Writer
+}
+
+func (w pluginAssetRedactingWriter) Write(input []byte) (int, error) {
+	redacted := []byte(logredact.RedactPluginAssetPaths(string(input)))
+	n, err := w.writer.Write(redacted)
+	if n != len(redacted) {
+		if err == nil {
+			err = io.ErrShortWrite
+		}
+		return 0, err
+	}
+	return len(input), err
 }
 
 func isBrokenPipe(err error) bool {

@@ -164,6 +164,13 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 		return nil, fmt.Errorf("读取已保存插件包: %w", err)
 	}
 	runtimeEntry := manifest.Runtimes[manifest.RuntimeKey()]
+	binaryPath, revision := "", manifest.Files[runtimeEntry.Path]
+	if runtimeEntry.Path != "" {
+		binaryPath = filepath.Join(installPath, filepath.FromSlash(runtimeEntry.Path))
+	}
+	if manifest.IsGeneric() {
+		revision = artifactSHA
+	}
 	return &PluginInstallation{
 		PluginKey:       manifest.ID,
 		Name:            manifest.Name,
@@ -174,8 +181,8 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 		ArtifactData:    artifactData,
 		ArtifactPath:    artifactPath,
 		InstallPath:     installPath,
-		BinaryPath:      filepath.Join(installPath, filepath.FromSlash(runtimeEntry.Path)),
-		BinarySHA256:    manifest.Files[runtimeEntry.Path],
+		BinaryPath:      binaryPath,
+		BinarySHA256:    revision,
 		SignatureStatus: signatureStatus,
 		State:           initialState,
 		InstalledBy:     installedBy,
@@ -229,6 +236,24 @@ func (i *PluginPackageInstaller) inspectArchive(archive *zip.Reader) (PluginMani
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return PluginManifest{}, nil, "", errors.New("插件清单只能包含一个 JSON 对象")
 	}
+	if manifest.SchemaVersion == 1 {
+		var shape map[string]json.RawMessage
+		_ = json.Unmarshal(manifestRaw, &shape)
+		var req, ui map[string]json.RawMessage
+		_ = json.Unmarshal(shape["requires"], &req)
+		_ = json.Unmarshal(shape["ui"], &ui)
+		_, backend := shape["backend"]
+		_, backendAPI := req["backend_api"]
+		_, hostAPI := req["host_service_api"]
+		_, entries := ui["entries"]
+		if backend || backendAPI || hostAPI || entries {
+			return PluginManifest{}, nil, "", errors.New("旧版插件清单不接受通用后台或业务入口字段")
+		}
+	} else if manifest.IsGeneric() {
+		if err := validateGenericPluginManifestShape(manifestRaw); err != nil {
+			return PluginManifest{}, nil, "", err
+		}
+	}
 	if err := manifest.Validate(); err != nil {
 		return PluginManifest{}, nil, "", err
 	}
@@ -250,6 +275,42 @@ func (i *PluginPackageInstaller) inspectArchive(archive *zip.Reader) (PluginMani
 		return PluginManifest{}, nil, "", err
 	}
 	return manifest, manifestRaw, signatureStatus, nil
+}
+
+// Typed decoding checks field types but collapses missing or null values into
+// Go zero values. Schema 2 requires explicit negotiation versions, an explicit
+// capabilities array (which may be empty), and no null values at any depth.
+func validateGenericPluginManifestShape(raw []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("解析通用插件清单字段: %w", err)
+		}
+		if token == nil {
+			return errors.New("通用插件清单字段不允许为 null")
+		}
+	}
+	var shape map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &shape); err != nil {
+		return fmt.Errorf("解析通用插件清单字段: %w", err)
+	}
+	var requires map[string]json.RawMessage
+	if err := json.Unmarshal(shape["requires"], &requires); err != nil {
+		return fmt.Errorf("解析通用插件清单 requires 字段: %w", err)
+	}
+	for _, field := range []string{"plugin_protocol", "transport_api", "ui_bridge", "backend_api", "host_service_api"} {
+		if _, exists := requires[field]; !exists {
+			return fmt.Errorf("通用插件清单必须显式声明 requires.%s", field)
+		}
+	}
+	if _, exists := shape["capabilities"]; !exists {
+		return errors.New("通用插件清单必须显式声明 capabilities 数组")
+	}
+	return nil
 }
 
 func (i *PluginPackageInstaller) verifySignature(file *zip.File, manifestRaw []byte, pluginID string) (string, error) {

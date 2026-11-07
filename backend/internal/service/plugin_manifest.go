@@ -16,6 +16,12 @@ import (
 
 const (
 	PluginCapabilityOpenAIOAuthOutbound = "openai.oauth.outbound_transport.v1"
+	PluginCapabilityBackendInvoke       = "backend.invoke.v1"
+	PluginCapabilityBackendBackground   = "backend.background.v1"
+	PluginCapabilityStorageRead         = "storage.read.v1"
+	PluginCapabilityStorageWrite        = "storage.write.v1"
+	PluginCapabilityUsersCreatedRead    = "users.created.read.v1"
+	PluginCapabilityUsersEmailRead      = "users.email.read.v1"
 	PluginStateDisabled                 = "disabled"
 	PluginStateStarting                 = "starting"
 	PluginStateEnabled                  = "enabled"
@@ -41,6 +47,7 @@ type PluginManifest struct {
 	Capabilities  []PluginCapability       `json:"capabilities"`
 	Runtimes      map[string]PluginRuntime `json:"runtimes"`
 	UI            PluginUIManifest         `json:"ui"`
+	Backend       PluginBackendManifest    `json:"backend,omitzero"`
 	Files         map[string]string        `json:"files"`
 }
 
@@ -51,6 +58,8 @@ type PluginRequirements struct {
 	PluginProtocol            int      `json:"plugin_protocol"`
 	TransportAPI              int      `json:"transport_api"`
 	UIBridge                  int      `json:"ui_bridge"`
+	BackendAPI                int      `json:"backend_api,omitempty"`
+	HostServiceAPI            int      `json:"host_service_api,omitempty"`
 }
 
 type PluginCapability struct {
@@ -64,7 +73,26 @@ type PluginRuntime struct {
 }
 
 type PluginUIManifest struct {
-	Entrypoint string `json:"entrypoint"`
+	Entrypoint string          `json:"entrypoint,omitempty"`
+	Entries    []PluginUIEntry `json:"entries,omitempty"`
+}
+
+type PluginUIEntry struct {
+	ID    string   `json:"id"`
+	Label string   `json:"label"`
+	Path  string   `json:"path"`
+	Mount string   `json:"mount"`
+	Roles []string `json:"roles"`
+}
+
+type PluginBackendManifest struct {
+	Methods []PluginBackendMethod `json:"methods,omitempty"`
+}
+
+type PluginBackendMethod struct {
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+	Access string `json:"access"`
 }
 
 type PluginSignature struct {
@@ -85,6 +113,8 @@ type PluginCompatibility struct {
 	PluginProtocol     int    `json:"plugin_protocol"`
 	TransportAPI       int    `json:"transport_api"`
 	UIBridge           int    `json:"ui_bridge"`
+	BackendAPI         int    `json:"backend_api"`
+	HostServiceAPI     int    `json:"host_service_api"`
 }
 
 type PluginInstallation struct {
@@ -145,7 +175,7 @@ func (m PluginManifest) RuntimeKey() string {
 }
 
 func (m PluginManifest) Validate() error {
-	if m.SchemaVersion != 1 {
+	if m.SchemaVersion != 1 && m.SchemaVersion != 2 {
 		return fmt.Errorf("不支持的插件清单版本: %d", m.SchemaVersion)
 	}
 	if !pluginIDPattern.MatchString(m.ID) || len(m.ID) > 160 {
@@ -159,6 +189,12 @@ func (m PluginManifest) Validate() error {
 	}
 	if strings.TrimSpace(m.Requires.Sub2API) == "" {
 		return errors.New("插件必须声明 requires.sub2api")
+	}
+	if m.SchemaVersion == 2 {
+		return m.validateGeneric()
+	}
+	if m.Requires.BackendAPI != 0 || m.Requires.HostServiceAPI != 0 || len(m.Backend.Methods) != 0 || len(m.UI.Entries) != 0 {
+		return errors.New("旧版插件不能声明通用后台或业务入口")
 	}
 	if m.Requires.PluginProtocol != pluginv1.ProtocolVersion ||
 		m.Requires.TransportAPI != pluginv1.TransportAPIVersion ||
@@ -211,4 +247,145 @@ func (m PluginManifest) SortedCapabilities() []PluginCapability {
 	out := append([]PluginCapability(nil), m.Capabilities...)
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+func (m PluginManifest) IsGeneric() bool  { return m.SchemaVersion == 2 }
+func (m PluginManifest) HasRuntime() bool { return len(m.Runtimes) > 0 }
+func (m PluginManifest) HasCapability(id string) bool {
+	for _, capability := range m.Capabilities {
+		if capability.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+var pluginExtensionIdentifier = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._-]{0,63}$`)
+var pluginFileHashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
+func (m PluginManifest) validateGeneric() error {
+	hasUI := m.UI.Entrypoint != "" || len(m.UI.Entries) > 0
+	bridge := 0
+	if hasUI {
+		bridge = pluginv1.ApplicationUIBridgeVersion
+	}
+	protocol, backend, host := 0, 0, 0
+	if m.HasRuntime() {
+		protocol, backend, host = pluginv1.ProtocolVersion, pluginv1.BackendAPIVersion, pluginv1.GenericHostServiceAPIVersion
+	}
+	if m.Requires.PluginProtocol != protocol || m.Requires.TransportAPI != 0 || m.Requires.BackendAPI != backend || m.Requires.HostServiceAPI != host || m.Requires.UIBridge != bridge {
+		return errors.New("通用插件的后台、宿主服务或 UI Bridge 版本与声明类型不匹配")
+	}
+	if !hasUI && !m.HasRuntime() {
+		return errors.New("通用插件必须声明页面或后台运行时")
+	}
+	allowed := map[string]bool{
+		PluginCapabilityBackendInvoke: true, PluginCapabilityBackendBackground: true,
+		PluginCapabilityStorageRead: true, PluginCapabilityStorageWrite: true,
+		PluginCapabilityUsersCreatedRead: true, PluginCapabilityUsersEmailRead: true,
+	}
+	seen := make(map[string]bool)
+	for _, cap := range m.Capabilities {
+		if !allowed[cap.ID] || seen[cap.ID] || cap.Platform != "" || cap.AccountType != "" {
+			return fmt.Errorf("通用插件能力无效或重复: %s", cap.ID)
+		}
+		seen[cap.ID] = true
+	}
+	if !m.HasRuntime() && (len(m.Capabilities) > 0 || len(m.Backend.Methods) > 0) {
+		return errors.New("纯前端插件不能申请后台或敏感宿主能力")
+	}
+	if m.HasRuntime() && !seen[PluginCapabilityBackendInvoke] && !seen[PluginCapabilityBackendBackground] {
+		return errors.New("后台运行时必须声明调用或后台工作能力")
+	}
+	if seen[PluginCapabilityStorageWrite] && !seen[PluginCapabilityStorageRead] {
+		return errors.New("写入存储必须同时声明读取存储能力")
+	}
+	if seen[PluginCapabilityUsersEmailRead] && !seen[PluginCapabilityUsersCreatedRead] {
+		return errors.New("读取邮箱必须同时声明用户创建观察能力")
+	}
+	if len(m.Backend.Methods) > 32 {
+		return errors.New("后台方法不能超过 32 项")
+	}
+	methods := make(map[string]bool)
+	for _, method := range m.Backend.Methods {
+		if !pluginExtensionIdentifier.MatchString(method.Name) || methods[method.Name] || (method.Role != RoleAdmin && method.Role != RoleUser) || (method.Access != "read" && method.Access != "write") {
+			return fmt.Errorf("后台方法的名称、角色或读写级别无效: %s", method.Name)
+		}
+		methods[method.Name] = true
+	}
+	if len(methods) > 0 && !seen[PluginCapabilityBackendInvoke] {
+		return errors.New("声明后台方法必须申请 backend.invoke.v1")
+	}
+	if len(m.Files) == 0 {
+		return errors.New("插件清单必须声明文件哈希")
+	}
+	for path, hash := range m.Files {
+		if normalized, err := normalizePluginArchivePath(path); err != nil || normalized != path || !pluginFileHashPattern.MatchString(hash) {
+			return fmt.Errorf("插件文件声明无效: %s", path)
+		}
+	}
+	if m.HasRuntime() {
+		if _, ok := m.Runtimes[m.RuntimeKey()]; !ok {
+			return fmt.Errorf("插件不支持当前运行平台 %s", m.RuntimeKey())
+		}
+		for key, entry := range m.Runtimes {
+			if !regexp.MustCompile(`^[a-z0-9]+-[a-z0-9]+$`).MatchString(key) {
+				return errors.New("插件运行平台标识无效")
+			}
+			if normalized, err := normalizePluginArchivePath(entry.Path); err != nil || normalized != entry.Path {
+				return errors.New("插件运行时路径无效")
+			}
+			if _, ok := m.Files[entry.Path]; !ok {
+				return errors.New("运行时二进制未包含在文件哈希声明中")
+			}
+		}
+	}
+	validUIPath := func(path string) bool {
+		normalized, err := normalizePluginArchivePath(path)
+		_, declared := m.Files[path]
+		return err == nil && normalized == path && strings.HasPrefix(path, "ui/") && declared
+	}
+	if m.UI.Entrypoint != "" && !validUIPath(m.UI.Entrypoint) {
+		return errors.New("管理页面入口必须是已声明哈希的 ui/ 文件")
+	}
+	entries := make(map[string]bool)
+	for _, entry := range m.UI.Entries {
+		if !pluginExtensionIdentifier.MatchString(entry.ID) || entries[entry.ID] || strings.TrimSpace(entry.Label) == "" || len(entry.Label) > 160 || !validUIPath(entry.Path) {
+			return errors.New("插件业务入口的标识、名称或路径无效")
+		}
+		entries[entry.ID] = true
+		if entry.Mount != "admin" && entry.Mount != "user" && entry.Mount != "shell" {
+			return errors.New("插件业务入口挂载位置无效")
+		}
+		if len(entry.Roles) == 0 || len(entry.Roles) > 2 {
+			return errors.New("插件业务入口必须明确声明角色")
+		}
+		roles := make(map[string]bool)
+		for _, role := range entry.Roles {
+			if (role != RoleAdmin && role != RoleUser) || roles[role] || (entry.Mount == "admin" && role != RoleAdmin) {
+				return errors.New("插件业务入口角色无效或重复")
+			}
+			roles[role] = true
+		}
+	}
+	return nil
+}
+
+// Keep schema 1 serialization unchanged while explicitly representing all four
+// backend negotiation versions (including zero) in a schema 2 public manifest.
+func (m PluginManifest) MarshalJSON() ([]byte, error) {
+	type manifestValue PluginManifest
+	if !m.IsGeneric() {
+		return json.Marshal(manifestValue(m))
+	}
+	type requirementsValue PluginRequirements
+	type genericRequirements struct {
+		requirementsValue
+		BackendAPI     int `json:"backend_api"`
+		HostServiceAPI int `json:"host_service_api"`
+	}
+	return json.Marshal(struct {
+		manifestValue
+		Requires genericRequirements `json:"requires"`
+	}{manifestValue: manifestValue(m), Requires: genericRequirements{requirementsValue: requirementsValue(m.Requires), BackendAPI: m.Requires.BackendAPI, HostServiceAPI: m.Requires.HostServiceAPI}})
 }

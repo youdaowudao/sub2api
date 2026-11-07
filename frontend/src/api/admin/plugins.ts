@@ -2,8 +2,8 @@ import { apiClient } from '../client'
 
 export interface PluginCapability {
   id: string
-  platform: string
-  account_type: string
+  platform?: string
+  account_type?: string
 }
 
 export interface PluginRequirements {
@@ -12,6 +12,8 @@ export interface PluginRequirements {
   tested_sub2api_versions?: string[]
   plugin_protocol: number
   transport_api: number
+  backend_api?: number
+  host_service_api?: number
   ui_bridge: number
 }
 
@@ -24,7 +26,9 @@ export interface PluginManifest {
   author?: string
   requires: PluginRequirements
   capabilities: PluginCapability[]
-  ui: { entrypoint: string }
+  ui: { entrypoint?: string; entries?: Array<{ id: string; label: string; path: string; mount: 'admin' | 'user' | 'shell'; roles: Array<'admin' | 'user'> }> }
+  runtimes?: Record<string, { path: string }>
+  backend?: { methods?: import('../plugins').PluginMethod[] }
 }
 
 export interface PluginCompatibility {
@@ -37,6 +41,8 @@ export interface PluginCompatibility {
   recommended_sub2api_version: string
   plugin_protocol: number
   transport_api: number
+  backend_api?: number
+  host_service_api?: number
   ui_bridge: number
 }
 
@@ -127,31 +133,32 @@ export async function remove(id: number): Promise<void> {
   await apiClient.delete(`/admin/plugins/${id}`)
 }
 
-export async function getConfig(id: number): Promise<Record<string, unknown>> {
-  const { data } = await apiClient.get<Record<string, unknown>>(`/admin/plugins/${id}/config`)
+export async function getConfig(id: number, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  const { data } = await apiClient.get<Record<string, unknown>>(`/admin/plugins/${id}/config`, { signal })
   return data
 }
 
 export async function saveConfig(
   id: number,
-  config: Record<string, unknown>
+  config: Record<string, unknown>,
+  signal?: AbortSignal
 ): Promise<Record<string, unknown>> {
-  const { data } = await apiClient.put<Record<string, unknown>>(`/admin/plugins/${id}/config`, config)
+  const { data } = await apiClient.put<Record<string, unknown>>(`/admin/plugins/${id}/config`, config, { signal })
   return data
 }
 
-export async function test(id: number): Promise<PluginTestResult> {
-  const { data } = await apiClient.post<PluginTestResult>(`/admin/plugins/${id}/test`)
+export async function test(id: number, signal?: AbortSignal): Promise<PluginTestResult> {
+  const { data } = await apiClient.post<PluginTestResult>(`/admin/plugins/${id}/test`, undefined, { signal })
   return data
 }
 
-export async function status(id: number): Promise<PluginStatusResult> {
-  const { data } = await apiClient.get<PluginStatusResult>(`/admin/plugins/${id}/status`)
+export async function status(id: number, signal?: AbortSignal): Promise<PluginStatusResult> {
+  const { data } = await apiClient.get<PluginStatusResult>(`/admin/plugins/${id}/status`, { signal })
   return data
 }
 
-export async function createUISession(id: number): Promise<PluginUISession> {
-  const { data } = await apiClient.post<PluginUISession>(`/admin/plugins/${id}/ui-session`)
+export async function createUISession(id: number, signal?: AbortSignal): Promise<PluginUISession> {
+  const { data } = await apiClient.post<PluginUISession>(`/admin/plugins/${id}/ui-session`, undefined, { signal })
   return data
 }
 
