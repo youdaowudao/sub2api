@@ -118,6 +118,7 @@ func registerRoutes(
 
 	// API v1
 	v1 := r.Group("/api/v1")
+	v1.Use(h.Admin.Plugin.CaptureUserCreations)
 
 	// 面板 API 限流器：认证接口按用户 ID、公开接口按安全客户端 IP，
 	// 防止高频刷管理面接口打爆数据库（阈值可在系统设置中调整）。
@@ -128,6 +129,9 @@ func registerRoutes(
 	routes.RegisterUserRoutes(v1, h, jwtAuth, auditLog, settingService, panelRateLimiter)
 	routes.RegisterModelPlazaRoutes(v1, h, optionalJWTAuth, settingService, panelRateLimiter)
 	routes.RegisterAdminRoutes(v1, h, adminAuth, auditLog, stepUpAuth, settingService, panelRateLimiter)
+	routes.RegisterPluginExtensionRoutes(v1, h, jwtAuth, stepUpAuth, auditLog, settingService, panelRateLimiter)
+	routes.RegisterMCPRoutes(v1, h, auditLog, stepUpAuth, settingService, panelRateLimiter, cfg.CORS.AllowedOrigins, redisClient)
+	routes.RegisterMCPOAuthRoutes(r, v1, h, redisClient)
 	routes.RegisterGatewayRoutes(r, h, apiKeyAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg)
 	routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, auditLog, settingService, panelRateLimiter, redisClient)
 

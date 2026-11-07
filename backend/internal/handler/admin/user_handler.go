@@ -151,7 +151,7 @@ func (h *UserHandler) List(c *gin.Context) {
 		includeSubscriptions := parseBoolQueryWithDefault(raw, true)
 		filters.IncludeSubscriptions = &includeSubscriptions
 	}
-	principal := adminaccess.FromContext(c.Request.Context())
+	principal := adminaccess.RestrictedFromContext(c.Request.Context())
 	if principal != nil {
 		includeSubscriptions := false
 		filters.IncludeSubscriptions = &includeSubscriptions
@@ -318,7 +318,12 @@ func (h *UserHandler) Create(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, dto.UserFromServiceAdmin(user))
+	payload := dto.UserFromServiceAdmin(user)
+	if err := service.CompleteUserCreation(c.Request.Context(), user.ID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, payload)
 }
 
 // Update handles updating a user
@@ -430,7 +435,7 @@ func (h *UserHandler) UpdateBalance(c *gin.Context) {
 		return dto.UserFromServiceAdmin(user), nil
 	}, func(data any) any {
 		// 成功确认不隐式授予用户资料或余额读取权限；缓存重放也必须经过此边界。
-		if adminaccess.FromContext(c.Request.Context()) != nil {
+		if adminaccess.RestrictedFromContext(c.Request.Context()) != nil {
 			return gin.H{"id": userID}
 		}
 		return data

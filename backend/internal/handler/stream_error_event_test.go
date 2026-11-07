@@ -375,3 +375,37 @@ func TestMapResponsesErrorCode(t *testing.T) {
 	}
 	assert.Equal(t, gatewayQueueFullCode, mapResponsesErrorCode("rate_limit_error", gatewayQueueFullCode))
 }
+
+func TestGatewayStreamingError_ChineseHintJSON(t *testing.T) {
+	c, w := newGinContextForEndpoint(t, EndpointMessages)
+	message := "Too many pending requests, please retry later（排队请求过多，请稍后重试）"
+	(&GatewayHandler{}).handleStreamingAwareErrorWithCode(c, http.StatusTooManyRequests,
+		"rate_limit_error", gatewayQueueFullCode, message, true)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	require.True(t, strings.HasPrefix(body, "data: "))
+	require.True(t, strings.HasSuffix(body, "\n\n"))
+	payload := strings.TrimSuffix(strings.TrimPrefix(body, "data: "), "\n\n")
+	var event map[string]any
+	require.NoError(t, json.Unmarshal([]byte(payload), &event))
+	errorObject, ok := event["error"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, message, errorObject["message"])
+	require.Equal(t, "error", event["type"])
+	require.Equal(t, "rate_limit_error", errorObject["type"])
+	require.Equal(t, gatewayQueueFullCode, errorObject["code"])
+	require.NotContains(t, event, "response")
+}
+
+func TestResponsesFailedSSE_ChineseHintJSON(t *testing.T) {
+	c, w := newGinContextForEndpoint(t, EndpointResponses)
+	message := "Too many pending requests, please retry later（排队请求过多，请稍后重试）"
+	require.True(t, writeResponsesFailedSSE(c, "rate_limit_error", gatewayQueueFullCode, message))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	_, errorObject := parseResponsesFailedSSE(t, w.Body.String())
+	require.Equal(t, message, errorObject["message"])
+	require.Equal(t, gatewayQueueFullCode, errorObject["code"])
+	require.NotContains(t, errorObject, "type")
+}

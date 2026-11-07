@@ -654,7 +654,7 @@ func TestOpenAIEnsureResponsesDependencies(t *testing.T) {
 		errorObj, exists := parsed["error"].(map[string]any)
 		require.True(t, exists)
 		assert.Equal(t, "api_error", errorObj["type"])
-		assert.Equal(t, "Service temporarily unavailable", errorObj["message"])
+		assert.Equal(t, "Service temporarily unavailable（服务暂时不可用，请稍后重试）", errorObj["message"])
 	})
 
 	t.Run("already_written_response_not_overridden", func(t *testing.T) {
@@ -870,7 +870,7 @@ func TestOpenAIResponses_MissingDependencies_ReturnsServiceUnavailable(t *testin
 	errorObj, ok := parsed["error"].(map[string]any)
 	require.True(t, ok)
 	assert.Equal(t, "api_error", errorObj["type"])
-	assert.Equal(t, "Service temporarily unavailable", errorObj["message"])
+	assert.Equal(t, "Service temporarily unavailable（服务暂时不可用，请稍后重试）", errorObj["message"])
 }
 
 func TestOpenAIResponses_SetsClientTransportHTTP(t *testing.T) {

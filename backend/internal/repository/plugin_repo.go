@@ -171,7 +171,10 @@ func (r *pluginRepository) MarkRuntimeHealthy(ctx context.Context, id int64, bin
 		UPDATE sub2api_plugin_installations p
 		SET state = 'enabled', last_error = '', enabled_at = COALESCE(enabled_at, NOW()), updated_at = NOW()
 		WHERE p.id = $1 AND p.binary_sha256 = $2 AND p.config_encrypted = $3
-		  AND EXISTS (SELECT 1 FROM sub2api_plugin_bindings b WHERE b.plugin_id = p.id AND b.enabled = TRUE)
+		  AND (
+		    (p.manifest->>'schema_version' = '2' AND p.state IN ('starting', 'enabled'))
+		    OR (p.manifest->>'schema_version' = '1' AND EXISTS (SELECT 1 FROM sub2api_plugin_bindings b WHERE b.plugin_id = p.id AND b.enabled = TRUE))
+		  )
 	`, id, binarySHA256, configEncrypted)
 	if err != nil {
 		return err

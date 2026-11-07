@@ -1324,15 +1324,6 @@ func TestClassifyOpsLocalBusinessLimitErrorsExcludedFromSLA(t *testing.T) {
 			wantErrType: "invalid_request_error",
 			wantPhase:   "request",
 		},
-		{
-			name:        "openai passthrough instructions policy block",
-			errType:     "forbidden_error",
-			message:     "OpenAI codex passthrough requires a non-empty instructions field",
-			code:        "",
-			status:      http.StatusForbidden,
-			wantErrType: "forbidden_error",
-			wantPhase:   "request",
-		},
 	}
 
 	for _, tt := range tests {
@@ -1560,12 +1551,6 @@ func TestClassifyOpsUpstreamAuthTextStillCountsForSLA(t *testing.T) {
 			message: "OpenAI WSv1 is temporarily unsupported. Please enable responses_websockets_v2.",
 			code:    "400",
 			status:  http.StatusBadRequest,
-		},
-		{
-			name:    "provider passthrough instructions shaped error",
-			message: "OpenAI codex passthrough requires a non-empty instructions field",
-			code:    "403",
-			status:  http.StatusForbidden,
 		},
 	}
 
@@ -2247,4 +2232,52 @@ func TestOpsErrorLoggerMiddleware_RecordsClientClosedWhenIgnoreContextCanceledDi
 	require.Equal(t, int64(1), OpsErrorLogQueueLength())
 	job := <-opsErrorLogQueue
 	require.Equal(t, statusClientClosedRequest, job.entry.StatusCode)
+}
+
+func TestClassifyOpsPhase_ChineseHints(t *testing.T) {
+	tests := []struct {
+		message string
+		phase   string
+	}{
+		{"Insufficient account balance（账户余额不足，请及时充值）", "request"},
+		{"insufficient balance（账户余额不足，请及时充值）", "request"},
+		{"Invalid API key（API Key 无效，请检查是否填写正确）", "auth"},
+		{"daily usage limit exceeded（订阅日用量已达上限，请等待重置）", "request"},
+		{"weekly usage limit exceeded（订阅周用量已达上限，请等待重置）", "request"},
+		{"monthly usage limit exceeded（订阅月用量已达上限，请等待重置）", "request"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.message, func(t *testing.T) {
+			// 不传专用 type/code，确保确实按英文关键词归类。
+			require.Equal(t, tt.phase, classifyOpsPhase("api_error", tt.message, ""))
+		})
+	}
+}
+
+func TestShouldSkipOpsErrorLog_ChineseBalanceHints(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings string
+		ignore   bool
+	}{
+		{"enabled", `{"ignore_insufficient_balance_errors":true}`, true},
+		{"disabled", `{"ignore_insufficient_balance_errors":false}`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &opsAdvancedSettingsRepoStub{advanced: tt.settings}
+			ops := service.NewOpsService(nil, repo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			require.Equal(t, tt.ignore, ops.OpsAdvancedSettingsSnapshot().IgnoreInsufficientBalanceErrors)
+			for _, message := range []string{
+				"Insufficient account balance（账户余额不足，请及时充值）",
+				"insufficient balance（账户余额不足，请及时充值）",
+			} {
+				require.Equal(t, tt.ignore, shouldSkipOpsErrorLog(context.Background(), ops, message, "", EndpointMessages))
+				body := `{"error":{"message":"` + message + `"}}`
+				require.Equal(t, tt.ignore, shouldSkipOpsErrorLog(context.Background(), ops, "", body, EndpointMessages))
+			}
+			require.False(t, shouldSkipOpsErrorLog(context.Background(), ops,
+				"Billing service temporarily unavailable. Please retry later.（计费服务暂时不可用，请稍后重试）", "", EndpointMessages))
+		})
+	}
 }

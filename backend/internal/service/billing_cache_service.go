@@ -24,19 +24,19 @@ import (
 var errBillingCacheUnavailable = fmt.Errorf("billing cache unavailable")
 
 var (
-	ErrSubscriptionInvalid       = infraerrors.Forbidden("SUBSCRIPTION_INVALID", "subscription is invalid or expired")
-	ErrBillingServiceUnavailable = infraerrors.ServiceUnavailable("BILLING_SERVICE_ERROR", "Billing service temporarily unavailable. Please retry later.")
+	ErrSubscriptionInvalid       = infraerrors.Forbidden("SUBSCRIPTION_INVALID", "subscription is invalid or expired（订阅无效或已过期）")
+	ErrBillingServiceUnavailable = infraerrors.ServiceUnavailable("BILLING_SERVICE_ERROR", "Billing service temporarily unavailable. Please retry later.（计费服务暂时不可用，请稍后重试）")
 	// RPM 超限错误。gateway_handler 负责映射为 HTTP 429。
-	ErrGroupRPMExceeded = infraerrors.TooManyRequests("GROUP_RPM_EXCEEDED", "group requests-per-minute limit exceeded")
-	ErrUserRPMExceeded  = infraerrors.TooManyRequests("USER_RPM_EXCEEDED", "user requests-per-minute limit exceeded")
+	ErrGroupRPMExceeded = infraerrors.TooManyRequests("GROUP_RPM_EXCEEDED", "group requests-per-minute limit exceeded（请求过于频繁，请稍后再试）")
+	ErrUserRPMExceeded  = infraerrors.TooManyRequests("USER_RPM_EXCEEDED", "user requests-per-minute limit exceeded（请求过于频繁，请稍后再试）")
 
 	// user × platform quota（HTTP 429 Too Many Requests + Retry-After header）。
 	// 选用 429 而非 403：限额耗尽属于"暂时性资源用尽，重试可恢复"的场景（RFC 6585），
 	// 大量 SDK（如 OpenAI 兼容客户端）只对 429 触发自动退避并读取 Retry-After，
 	// 用 403 会被视为"权限不足，重试无意义"导致客户端直接报错且不退避。
-	ErrUserPlatformDailyQuotaExhausted   = infraerrors.TooManyRequests("USER_PLATFORM_DAILY_QUOTA_EXHAUSTED", "Daily usage quota exhausted for this platform.")
-	ErrUserPlatformWeeklyQuotaExhausted  = infraerrors.TooManyRequests("USER_PLATFORM_WEEKLY_QUOTA_EXHAUSTED", "Weekly usage quota exhausted for this platform.")
-	ErrUserPlatformMonthlyQuotaExhausted = infraerrors.TooManyRequests("USER_PLATFORM_MONTHLY_QUOTA_EXHAUSTED", "Monthly usage quota exhausted for this platform.")
+	ErrUserPlatformDailyQuotaExhausted   = infraerrors.TooManyRequests("USER_PLATFORM_DAILY_QUOTA_EXHAUSTED", "Daily usage quota exhausted for this platform.（该平台日额度已用完，请等待重置）")
+	ErrUserPlatformWeeklyQuotaExhausted  = infraerrors.TooManyRequests("USER_PLATFORM_WEEKLY_QUOTA_EXHAUSTED", "Weekly usage quota exhausted for this platform.（该平台周额度已用完，请等待重置）")
+	ErrUserPlatformMonthlyQuotaExhausted = infraerrors.TooManyRequests("USER_PLATFORM_MONTHLY_QUOTA_EXHAUSTED", "Monthly usage quota exhausted for this platform.（该平台月额度已用完，请等待重置）")
 )
 
 // subscriptionCacheData 订阅缓存数据结构（内部使用）
@@ -714,7 +714,7 @@ func (s *BillingCacheService) QueueUpdateAPIKeyRateLimitUsage(apiKeyID int64, co
 // 把 TOCTOU 超支窗口限制在并发 in-flight 请求数量内（而非随时间无限累积）。
 // 写延迟通常 < 1ms（本地 Redis），换取 quota 视图实时性的取舍合理。
 //
-// Redis 写失败用 ALERT 级 log；DB 持久化由 caller 单独 goroutine 兜底（gateway_service.go）。
+// Redis 写失败用 ALERT 级 log；DB 持久化由计费 worker 内同步执行或批量 flusher 处理。
 func (s *BillingCacheService) IncrementUserPlatformQuotaUsage(userID int64, platform string, cost float64) {
 	if s.cache == nil {
 		return
@@ -938,9 +938,9 @@ func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *G
 
 	// ── 第一层：分组级检查（override 或 group.rpm_limit） ──
 	if group != nil {
-		// 解析 override：优先从 auth cache snapshot，nil 时回退 DB。
+		// 解析 override：优先从 auth cache snapshot；snapshot 未确认该分组时回退 DB。
 		var override *int
-		if user.UserGroupRPMOverride != nil {
+		if user.UserGroupRPMOverride != nil || user.UserGroupRPMOverrideGroupID == group.ID {
 			override = user.UserGroupRPMOverride
 		} else if s.userGroupRateRepo != nil {
 			dbOverride, err := s.userGroupRateRepo.GetRPMOverrideByUserAndGroup(ctx, user.ID, group.ID)

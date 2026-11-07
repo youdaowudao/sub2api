@@ -65,11 +65,12 @@ func (h *GatewayHandler) geminiCachedContentsPreamble(c *gin.Context, component 
 func readGeminiCachedContentBody(c *gin.Context) ([]byte, bool) {
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
-		if maxErr, ok := extractMaxBytesError(err); ok {
-			googleError(c, http.StatusRequestEntityTooLarge, buildBodyTooLargeMessage(maxErr.Limit))
+		bodyLog := requestLogger(c, "handler.gemini_cached_contents")
+		if handleRequestBodyReadError(c, bodyLog, err) {
 			return nil, false
 		}
-		googleError(c, http.StatusBadRequest, "Failed to read request body")
+		status, message := requestBodyReadFailure(bodyLog, c.Request, err)
+		googleErrorWithType(c, status, "invalid_request_error", "", message)
 		return nil, false
 	}
 	if len(body) == 0 {
@@ -635,7 +636,7 @@ func (h *GatewayHandler) acquireGeminiCachedContentAccountSlot(c *gin.Context, r
 	if err != nil {
 		reqLog.Warn("gemini.cached_content.account_wait_counter_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	} else if !canWait {
-		googleError(c, http.StatusTooManyRequests, "Too many pending requests, please retry later")
+		googleError(c, http.StatusTooManyRequests, "Too many pending requests, please retry later（排队请求过多，请稍后重试）")
 		return nil, false
 	}
 	streamStarted := false

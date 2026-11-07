@@ -1,0 +1,538 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sub2api.local/schemas/plugin-manifest-v2.json",
+  "title": "Sub2API Plugin Manifest v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "name",
+    "version",
+    "requires",
+    "capabilities",
+    "files"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "id": {
+      "type": "string",
+      "maxLength": 160,
+      "pattern": "^[a-z0-9]+([._-][a-z0-9]+)+$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 160
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sub2api",
+        "plugin_protocol",
+        "transport_api",
+        "ui_bridge",
+        "backend_api",
+        "host_service_api"
+      ],
+      "properties": {
+        "sub2api": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recommended_sub2api_version": {
+          "type": "string"
+        },
+        "tested_sub2api_versions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "plugin_protocol": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "transport_api": {
+          "const": 0
+        },
+        "ui_bridge": {
+          "enum": [
+            0,
+            2
+          ]
+        },
+        "backend_api": {
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "host_service_api": {
+          "enum": [
+            0,
+            3
+          ]
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "enum": [
+              "backend.invoke.v1",
+              "backend.background.v1",
+              "storage.read.v1",
+              "storage.write.v1",
+              "users.created.read.v1",
+              "users.email.read.v1"
+            ]
+          },
+          "platform": {
+            "const": ""
+          },
+          "account_type": {
+            "const": ""
+          }
+        }
+      },
+      "uniqueItems": true,
+      "maxItems": 6
+    },
+    "runtimes": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-z0-9]+-[a-z0-9]+$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/safePath"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "entrypoint": {
+          "type": "string",
+          "pattern": "^ui/.+"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "label",
+              "path",
+              "mount",
+              "roles"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "path": {
+                "allOf": [
+                  {
+                    "$ref": "#/$defs/safePath"
+                  },
+                  {
+                    "pattern": "^ui/.+"
+                  }
+                ]
+              },
+              "mount": {
+                "enum": [
+                  "admin",
+                  "user",
+                  "shell"
+                ]
+              },
+              "roles": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 2,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "admin",
+                    "user"
+                  ]
+                }
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "mount": {
+                      "const": "admin"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "roles": {
+                      "const": [
+                        "admin"
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "files": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/safePath"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      }
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "methods": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "role",
+              "access"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[A-Za-z][A-Za-z0-9._-]*$"
+              },
+              "role": {
+                "enum": [
+                  "admin",
+                  "user"
+                ]
+              },
+              "access": {
+                "enum": [
+                  "read",
+                  "write"
+                ]
+              }
+            }
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  },
+  "$defs": {
+    "safePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!\\s)(?!.*\\s$)(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)(?!.*\\\\)(?!.*[\\x00-\\x1f])[^/]+(?:/[^/]+)*$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "runtimes": {
+            "maxProperties": 0
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "requires": {
+            "properties": {
+              "plugin_protocol": {
+                "const": 0
+              },
+              "backend_api": {
+                "const": 0
+              },
+              "host_service_api": {
+                "const": 0
+              }
+            }
+          },
+          "capabilities": {
+            "maxItems": 0
+          },
+          "backend": {
+            "properties": {
+              "methods": {
+                "maxItems": 0
+              }
+            }
+          },
+          "ui": {
+            "anyOf": [
+              {
+                "required": [
+                  "entrypoint"
+                ]
+              },
+              {
+                "required": [
+                  "entries"
+                ],
+                "properties": {
+                  "entries": {
+                    "minItems": 1
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "ui"
+        ]
+      },
+      "else": {
+        "properties": {
+          "requires": {
+            "properties": {
+              "plugin_protocol": {
+                "const": 1
+              },
+              "backend_api": {
+                "const": 1
+              },
+              "host_service_api": {
+                "const": 3
+              }
+            }
+          },
+          "capabilities": {
+            "minItems": 1,
+            "contains": {
+              "properties": {
+                "id": {
+                  "enum": [
+                    "backend.invoke.v1",
+                    "backend.background.v1"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "ui": {
+            "anyOf": [
+              {
+                "required": [
+                  "entrypoint"
+                ]
+              },
+              {
+                "required": [
+                  "entries"
+                ],
+                "properties": {
+                  "entries": {
+                    "minItems": 1
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "ui"
+        ]
+      },
+      "then": {
+        "properties": {
+          "requires": {
+            "properties": {
+              "ui_bridge": {
+                "const": 2
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "requires": {
+            "properties": {
+              "ui_bridge": {
+                "const": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "const": "storage.write.v1"
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "const": "storage.read.v1"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "const": "users.email.read.v1"
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "const": "users.created.read.v1"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "backend"
+        ],
+        "properties": {
+          "backend": {
+            "required": [
+              "methods"
+            ],
+            "properties": {
+              "methods": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "contains": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "const": "backend.invoke.v1"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

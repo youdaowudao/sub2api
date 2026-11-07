@@ -25,28 +25,56 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+type pluginLifecycleClient interface {
+	GetInfo(context.Context, *pluginv1.GetInfoRequest, ...grpc.CallOption) (*pluginv1.GetInfoResponse, error)
+	Health(context.Context, *pluginv1.HealthRequest, ...grpc.CallOption) (*pluginv1.HealthResponse, error)
+	ValidateConfig(context.Context, *pluginv1.ValidateConfigRequest, ...grpc.CallOption) (*pluginv1.ValidateConfigResponse, error)
+	ApplyConfig(context.Context, *pluginv1.ApplyConfigRequest, ...grpc.CallOption) (*pluginv1.ApplyConfigResponse, error)
+	TestConfig(context.Context, *pluginv1.TestConfigRequest, ...grpc.CallOption) (*pluginv1.TestConfigResponse, error)
+	InitHostServices(context.Context, *pluginv1.InitHostServicesRequest, ...grpc.CallOption) (*pluginv1.InitHostServicesResponse, error)
+}
+
 type pluginRuntime struct {
-	installation *PluginInstallation
-	client       *hcplugin.Client
-	api          pluginv1.TransportPluginClient
-	inFlight     atomic.Int64
-	draining     atomic.Bool
-	done         chan struct{}
-	doneOnce     sync.Once
+	installation      *PluginInstallation
+	client            *hcplugin.Client
+	api               pluginv1.TransportPluginClient
+	backend           pluginv1.BackendPluginClient
+	access            *pluginRuntimeAccess
+	backgroundRunning atomic.Bool
+	inFlight          atomic.Int64
+	draining          atomic.Bool
+	done              chan struct{}
+	doneOnce          sync.Once
 }
 
 func startPluginRuntime(ctx context.Context, installation *PluginInstallation, startTimeout time.Duration, socketDir string, hostServices pluginv1.HostServiceServer) (*pluginRuntime, error) {
 	if installation == nil {
 		return nil, errors.New("插件安装记录为空")
 	}
-	checksum, err := hex.DecodeString(installation.BinarySHA256)
+	binaryHash := installation.BinarySHA256
+	if installation.Manifest.IsGeneric() {
+		entry, ok := installation.Manifest.Runtimes[installation.Manifest.RuntimeKey()]
+		if !ok || entry.Path == "" {
+			return nil, errors.New("纯前端插件没有后台运行时")
+		}
+		binaryHash = installation.Manifest.Files[entry.Path]
+	}
+	checksum, err := hex.DecodeString(binaryHash)
 	if err != nil || len(checksum) != sha256.Size {
 		return nil, errors.New("插件二进制哈希无效")
 	}
-	cmd := exec.CommandContext(context.WithoutCancel(ctx), installation.BinaryPath)
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), installation.BinaryPath) //nolint:gosec // G702: 路径来自已验证清单的安装记录，SecureConfig 在启动前核对 SHA256；不经 shell、不拼接请求参数。
+	pluginMap := pluginv1.ClientPluginMap()
+	var dialOptions []grpc.DialOption
+	if installation.Manifest.IsGeneric() {
+		configureGenericPluginProcess(cmd)
+		pluginMap = pluginv1.BackendClientPluginMap()
+		dialOptions = []grpc.DialOption{grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(pluginv1.GenericMaxMessageBytes), grpc.MaxCallSendMsgSize(pluginv1.GenericMaxMessageBytes))}
+	}
 	client := hcplugin.NewClient(&hcplugin.ClientConfig{
 		HandshakeConfig:  pluginv1.HandshakeConfig,
-		Plugins:          pluginv1.ClientPluginMap(),
+		Plugins:          pluginMap,
+		GRPCDialOptions:  dialOptions,
 		Cmd:              cmd,
 		AllowedProtocols: []hcplugin.Protocol{hcplugin.ProtocolGRPC},
 		StartTimeout:     startTimeout,
@@ -65,23 +93,36 @@ func startPluginRuntime(ctx context.Context, installation *PluginInstallation, s
 		client.Kill()
 		return nil, fmt.Errorf("启动插件进程: %w", err)
 	}
-	dispensed, err := rpcClient.Dispense(pluginv1.TransportPluginName)
+	name := pluginv1.TransportPluginName
+	if installation.Manifest.IsGeneric() {
+		name = pluginv1.BackendPluginName
+	}
+	dispensed, err := rpcClient.Dispense(name)
 	if err != nil {
 		client.Kill()
-		return nil, fmt.Errorf("获取插件传输能力: %w", err)
+		return nil, fmt.Errorf("获取插件能力 %s: %w", name, err)
 	}
-	transportClient, ok := dispensed.(*pluginv1.TransportClient)
-	if !ok || transportClient.TransportPluginClient == nil {
-		client.Kill()
-		return nil, errors.New("插件未实现传输 gRPC 客户端")
+	runtime := &pluginRuntime{installation: installation, client: client, done: make(chan struct{})}
+	if server, ok := hostServices.(*pluginHostServiceServer); ok {
+		runtime.access = server.access
 	}
-	api := transportClient.TransportPluginClient
-	runtime := &pluginRuntime{
-		installation: installation,
-		client:       client,
-		api:          api,
-		done:         make(chan struct{}),
+	var broker *hcplugin.GRPCBroker
+	if installation.Manifest.IsGeneric() {
+		backend, ok := dispensed.(*pluginv1.BackendClient)
+		if !ok || backend.BackendPluginClient == nil {
+			runtime.kill()
+			return nil, errors.New("插件未实现 Backend gRPC 客户端")
+		}
+		runtime.backend, broker = backend.BackendPluginClient, backend.Broker
+	} else {
+		transport, ok := dispensed.(*pluginv1.TransportClient)
+		if !ok || transport.TransportPluginClient == nil {
+			runtime.kill()
+			return nil, errors.New("插件未实现传输 gRPC 客户端")
+		}
+		runtime.api, broker = transport.TransportPluginClient, transport.Broker
 	}
+	api := runtime.lifecycle()
 	infoCtx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 	info, err := api.GetInfo(infoCtx, &pluginv1.GetInfoRequest{})
@@ -89,22 +130,40 @@ func startPluginRuntime(ctx context.Context, installation *PluginInstallation, s
 		runtime.kill()
 		return nil, fmt.Errorf("读取插件信息: %w", err)
 	}
-	if info.PluginId != installation.PluginKey || info.PluginVersion != installation.Version ||
-		info.ProtocolVersion != pluginv1.ProtocolVersion || info.TransportApiVersion != pluginv1.TransportAPIVersion {
+	if info == nil || info.PluginId != installation.PluginKey || info.PluginVersion != installation.Version || info.ProtocolVersion != pluginv1.ProtocolVersion {
+		runtime.kill()
+		return nil, errors.New("插件运行时信息与已校验清单不一致")
+	}
+	if installation.Manifest.IsGeneric() {
+		if info.TransportApiVersion != 0 || info.BackendApiVersion != pluginv1.BackendAPIVersion || info.HostServiceApiVersion != pluginv1.GenericHostServiceAPIVersion || !pluginRuntimeCapabilitiesMatch(info.Capabilities, installation.Manifest) {
+			runtime.kill()
+			return nil, errors.New("插件后台协议或能力与已校验清单不一致")
+		}
+	} else if info.TransportApiVersion != pluginv1.TransportAPIVersion {
 		runtime.kill()
 		return nil, errors.New("插件运行时信息与已校验清单不一致")
 	}
 	health, err := api.Health(infoCtx, &pluginv1.HealthRequest{})
-	if err != nil || !health.Healthy {
+	if err != nil || health == nil || !health.Healthy {
 		runtime.kill()
 		if err != nil {
 			return nil, fmt.Errorf("插件健康检查失败: %w", err)
+		}
+		if health == nil {
+			return nil, errors.New("插件未返回健康结果")
 		}
 		return nil, fmt.Errorf("插件不健康: %s", health.Message)
 	}
 	// 可选地把宿主服务（HostService）反向暴露给插件。这是叠加在传输契约之上的能力：
 	// 老插件不实现 InitHostServices（返回 Unimplemented），此处静默跳过，绝不阻断启动。
-	offerPluginHostServices(ctx, installation, api, transportClient.Broker, hostServices, startTimeout)
+	if installation.Manifest.IsGeneric() {
+		if err := offerBackendHostServices(ctx, runtime.backend, broker, hostServices, startTimeout); err != nil {
+			runtime.kill()
+			return nil, err
+		}
+	} else {
+		offerPluginHostServices(ctx, installation, runtime.api, broker, hostServices, startTimeout)
+	}
 	return runtime, nil
 }
 
@@ -157,10 +216,18 @@ func (r *pluginRuntime) validateAndApplyConfig(ctx context.Context, configJSON [
 	return err
 }
 
-func (r *pluginRuntime) validateAndApplyNormalizedConfig(ctx context.Context, configJSON []byte) ([]byte, error) {
-	validation, err := r.api.ValidateConfig(ctx, &pluginv1.ValidateConfigRequest{ConfigJson: configJSON})
+func (r *pluginRuntime) validateAndApplyNormalizedConfig(ctx context.Context, configJSON []byte) (result []byte, resultErr error) {
+	defer func() {
+		if resultErr != nil && r.installation != nil && r.installation.Manifest.IsGeneric() {
+			resultErr = errors.New(pluginSafeErrorText(resultErr.Error(), 500, ""))
+		}
+	}()
+	validation, err := r.lifecycle().ValidateConfig(ctx, &pluginv1.ValidateConfigRequest{ConfigJson: configJSON})
 	if err != nil {
 		return nil, fmt.Errorf("插件配置校验失败: %w", err)
+	}
+	if validation == nil {
+		return nil, errors.New("插件配置校验没有返回结果")
 	}
 	if !validation.Valid {
 		return nil, fmt.Errorf("插件配置无效: %s", validation.Message)
@@ -185,9 +252,12 @@ func (r *pluginRuntime) validateAndApplyNormalizedConfig(ctx context.Context, co
 	if err != nil {
 		return nil, fmt.Errorf("序列化插件规范化配置: %w", err)
 	}
-	applied, err := r.api.ApplyConfig(ctx, &pluginv1.ApplyConfigRequest{ConfigJson: configJSON})
+	applied, err := r.lifecycle().ApplyConfig(ctx, &pluginv1.ApplyConfigRequest{ConfigJson: configJSON})
 	if err != nil {
 		return nil, fmt.Errorf("应用插件配置失败: %w", err)
+	}
+	if applied == nil {
+		return nil, errors.New("应用插件配置没有返回结果")
 	}
 	if !applied.Applied {
 		return nil, fmt.Errorf("插件拒绝应用配置: %s", applied.Message)
@@ -196,10 +266,10 @@ func (r *pluginRuntime) validateAndApplyNormalizedConfig(ctx context.Context, co
 }
 
 func (r *pluginRuntime) checkHealth(ctx context.Context) error {
-	if r == nil || r.api == nil || r.client == nil || r.client.Exited() {
+	if r == nil || r.lifecycle() == nil || r.client == nil || r.client.Exited() {
 		return errors.New("插件进程已退出")
 	}
-	health, err := r.api.Health(ctx, &pluginv1.HealthRequest{})
+	health, err := r.lifecycle().Health(ctx, &pluginv1.HealthRequest{})
 	if err != nil {
 		return fmt.Errorf("插件健康检查失败: %w", err)
 	}
@@ -217,10 +287,10 @@ func (r *pluginRuntime) checkHealth(ctx context.Context) error {
 // blob it exposes for the config UI. It performs no config apply and no upstream
 // call, so it is safe to serve from a lightweight, ungated status endpoint.
 func (r *pluginRuntime) status(ctx context.Context) (*pluginv1.HealthResponse, error) {
-	if r == nil || r.api == nil || r.client == nil || r.client.Exited() {
+	if r == nil || r.lifecycle() == nil || r.client == nil || r.client.Exited() {
 		return nil, errors.New("插件进程已退出")
 	}
-	health, err := r.api.Health(ctx, &pluginv1.HealthRequest{})
+	health, err := r.lifecycle().Health(ctx, &pluginv1.HealthRequest{})
 	if err != nil {
 		return nil, fmt.Errorf("插件状态查询失败: %w", err)
 	}
@@ -252,6 +322,10 @@ func (r *pluginRuntime) drain(timeout time.Duration) {
 	if r == nil {
 		return
 	}
+	if r.access != nil {
+		r.kill()
+		return
+	}
 	r.draining.Store(true)
 	if r.inFlight.Load() == 0 {
 		r.doneOnce.Do(func() { close(r.done) })
@@ -266,9 +340,20 @@ func (r *pluginRuntime) drain(timeout time.Duration) {
 }
 
 func (r *pluginRuntime) kill() {
-	if r != nil && r.client != nil {
+	if r == nil {
+		return
+	}
+	r.draining.Store(true)
+	if r.access != nil {
+		r.access.close()
+	}
+	if r.client != nil {
 		r.client.Kill()
 	}
+}
+
+func (r *pluginRuntime) alive() bool {
+	return r != nil && r.client != nil && !r.client.Exited() && !r.draining.Load()
 }
 
 func (r *pluginRuntime) roundTrip(ctx context.Context, request *http.Request, proxyURL string, account *Account) (*http.Response, error) {
@@ -484,4 +569,51 @@ func headersFromPlugin(headers map[string]*pluginv1.HeaderValues) http.Header {
 		}
 	}
 	return out
+}
+
+func (r *pluginRuntime) lifecycle() pluginLifecycleClient {
+	if r == nil {
+		return nil
+	}
+	if r.backend != nil {
+		return r.backend
+	}
+	return r.api
+}
+
+func pluginRuntimeCapabilitiesMatch(actual []string, manifest PluginManifest) bool {
+	if len(actual) != len(manifest.Capabilities) {
+		return false
+	}
+	seen := make(map[string]bool, len(actual))
+	for _, id := range actual {
+		if seen[id] || !manifest.HasCapability(id) {
+			return false
+		}
+		seen[id] = true
+	}
+	return true
+}
+
+func offerBackendHostServices(ctx context.Context, api pluginv1.BackendPluginClient, broker *hcplugin.GRPCBroker, services pluginv1.HostServiceServer, timeout time.Duration) error {
+	if api == nil || broker == nil || services == nil {
+		return errors.New("通用后台宿主服务未配置，无法启动插件")
+	}
+	id := broker.NextId()
+	go broker.AcceptAndServe(id, func(opts []grpc.ServerOption) *grpc.Server {
+		opts = append(opts, grpc.MaxRecvMsgSize(pluginv1.GenericMaxMessageBytes), grpc.MaxSendMsgSize(pluginv1.GenericMaxMessageBytes))
+		server := grpc.NewServer(opts...)
+		pluginv1.RegisterHostServiceServer(server, services)
+		return server
+	})
+	initCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	response, err := api.InitHostServices(initCtx, &pluginv1.InitHostServicesRequest{HostServiceId: id, HostServiceApiVersion: pluginv1.GenericHostServiceAPIVersion})
+	if err != nil {
+		return fmt.Errorf("连接后台插件宿主服务失败: %w", err)
+	}
+	if response == nil || !response.Ready {
+		return errors.New("后台插件未确认宿主服务已就绪")
+	}
+	return nil
 }

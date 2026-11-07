@@ -33,6 +33,42 @@ func TestDeriveAuditAction(t *testing.T) {
 	}
 }
 
+func TestPluginArbitraryPayloadRemainsAvailableButIsOmittedFromAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct{ method, pattern, path string }{
+		{http.MethodPost, "/api/v1/plugins/:id/calls/:method", "/api/v1/plugins/7/calls/echo"},
+		{http.MethodPost, "/api/v1/plugins/:id/actions/:method", "/api/v1/plugins/7/actions/save"},
+		{http.MethodPut, "/api/v1/admin/plugins/:id/config", "/api/v1/admin/plugins/7/config"},
+	} {
+		t.Run(tc.method+" "+tc.pattern, func(t *testing.T) {
+			repository := &auditCaptureRepository{}
+			auditService := service.NewAuditLogService(repository, nil)
+			auditService.Start()
+			router := gin.New()
+			router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+			router.Handle(tc.method, tc.pattern, func(c *gin.Context) {
+				var payload map[string]any
+				require.NoError(t, c.ShouldBindJSON(&payload))
+				require.Equal(t, "private-plugin-canary", payload["value"], "omitting audit body must not consume the actual request")
+				c.Status(http.StatusOK)
+			})
+			request := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(`{"value":"private-plugin-canary"}`))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			auditService.Stop()
+			require.Equal(t, http.StatusOK, recorder.Code)
+			repository.mu.Lock()
+			defer repository.mu.Unlock()
+			require.Len(t, repository.logs, 1)
+			entry := repository.logs[0]
+			require.Equal(t, "<credential-bearing body omitted>", entry.RequestBody)
+			require.Equal(t, tc.pattern, entry.Path)
+			require.NotContains(t, entry.RequestBody, "private-plugin-canary")
+		})
+	}
+}
+
 type auditCaptureRepository struct {
 	mu   sync.Mutex
 	logs []*service.AuditLog
@@ -187,4 +223,40 @@ func TestOllamaCloudUsageSessionRouteOmitsAuditBody(t *testing.T) {
 	require.Len(t, logs, 1)
 	require.Equal(t, "<credential-bearing body omitted>", logs[0].RequestBody)
 	require.NotContains(t, logs[0].RequestBody, "audit-canary")
+}
+
+// MCP OAuth 是机器凭证：只读工具同样可以批量读取邮箱等数据，必须全部入审计并带上 grant。
+func TestAuditRecordsEveryMCPOAuthReadWithGrant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+
+	for _, authMethod := range []string{service.AuditAuthMethodMCPOAuth, ""} {
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
+			c.Set(string(ContextKeyUserRole), service.RoleAdmin)
+			if authMethod != "" {
+				c.Set("auth_method", authMethod)
+				SetAuditExtra(c, map[string]any{"mcp_grant_id": "grant-1", "mcp_tool": "admin_list_users"})
+			}
+			c.Next()
+		})
+		router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+		router.GET("/api/v1/admin/users", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"items": []any{}}) })
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/admin/users?search=a", nil))
+		require.Equal(t, http.StatusOK, recorder.Code)
+	}
+	auditService.Stop()
+
+	repository.mu.Lock()
+	logs := append([]*service.AuditLog(nil), repository.logs...)
+	repository.mu.Unlock()
+	require.Len(t, logs, 1, "browser reads stay outside the audit log")
+	require.Equal(t, service.AuditAuthMethodMCPOAuth, logs[0].AuthMethod)
+	require.Equal(t, "admin.users.read", logs[0].Action)
+	require.Equal(t, "grant-1", logs[0].Extra["mcp_grant_id"])
+	require.Equal(t, "admin_list_users", logs[0].Extra["mcp_tool"])
 }

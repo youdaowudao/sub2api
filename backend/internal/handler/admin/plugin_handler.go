@@ -204,6 +204,15 @@ func (h *PluginHandler) CreateUISession(c *gin.Context) {
 	if !ok {
 		return
 	}
+	installation, err := h.manager.Get(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if installation.Manifest.UI.Entrypoint == "" {
+		response.BadRequest(c, "此插件没有配置页面，请使用 JSON 配置编辑器")
+		return
+	}
 	assetToken, expires, err := h.manager.CreateUIAssetToken(c.Request.Context(), id, pluginUISessionTTL)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -217,7 +226,7 @@ func (h *PluginHandler) CreateUISession(c *gin.Context) {
 	response.Success(c, gin.H{
 		"url":               fmt.Sprintf("/api/v1/plugin-ui/%s/index.html#bridge_token=%s", assetToken, bridgeToken),
 		"bridge_token":      bridgeToken,
-		"ui_bridge_version": 1,
+		"ui_bridge_version": installation.Manifest.Requires.UIBridge,
 		"expires_at":        expires,
 	})
 }
@@ -240,6 +249,10 @@ func (h *PluginHandler) ServeUIAsset(c *gin.Context) {
 		c.Status(http.StatusNotFound)
 		return
 	}
+	servePluginUIAsset(c, data, logicalPath)
+}
+
+func servePluginUIAsset(c *gin.Context, data []byte, logicalPath string) {
 	contentType := mime.TypeByExtension(filepath.Ext(logicalPath))
 	if contentType == "" {
 		contentType = "application/octet-stream"

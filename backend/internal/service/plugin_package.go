@@ -68,7 +68,7 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	packagesDir := filepath.Join(i.rootDir, "packages")
 	installedDir := filepath.Join(i.rootDir, "installed")
 	for _, dir := range []string{stagingDir, packagesDir, installedDir} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:gosec // G703: 根目录来自运维配置，子目录固定；不使用上传包中的路径。
 			return nil, fmt.Errorf("创建插件目录: %w", err)
 		}
 	}
@@ -82,7 +82,7 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	defer func() {
 		_ = tempFile.Close()
 		if !committed {
-			_ = os.Remove(tempPath)
+			_ = os.Remove(tempPath) //nolint:gosec // G703: 仅清理 CreateTemp 在受控 staging 根中生成的本次上传文件。
 		}
 	}()
 
@@ -126,7 +126,7 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	}
 
 	installParent := filepath.Join(installedDir, manifest.ID)
-	if err := os.MkdirAll(installParent, 0o700); err != nil {
+	if err := os.MkdirAll(installParent, 0o700); err != nil { //nolint:gosec // G703: inspectArchive 已按命名空间正则验证 manifest.ID，不允许路径分隔符；父目录为受控 installed 根。
 		return nil, fmt.Errorf("创建插件安装父目录: %w", err)
 	}
 	extractPath, err := os.MkdirTemp(installParent, ".install-*")
@@ -138,7 +138,7 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	extracted := false
 	defer func() {
 		if !extracted {
-			_ = os.RemoveAll(extractPath)
+			_ = os.RemoveAll(extractPath) //nolint:gosec // G703: 仅清理 MkdirTemp 在已校验 ID 对应安装目录中生成的本次临时目录。
 		}
 	}()
 	if err := i.extractArchive(ctx, &archive.Reader, manifest, extractPath); err != nil {
@@ -146,24 +146,31 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 	}
 	// Windows 不允许重命名仍被打开的文件，提交前先释放 ZIP 读取器。
 	closeArchive()
-	if err := os.Rename(extractPath, installPath); err != nil {
+	if err := os.Rename(extractPath, installPath); err != nil { //nolint:gosec // G703: ID/Version 已校验，后缀仅 SHA256 与 MkdirTemp 随机名；ZIP 成员名不参与目标目录。
 		return nil, fmt.Errorf("提交插件安装目录: %w", err)
 	}
 	extracted = true
 
 	artifactPath := filepath.Join(packagesDir, manifest.ID+"-"+manifest.Version+"-"+artifactSHA[:12]+"-"+installNonce+".s2plugin")
-	if err := os.Rename(tempPath, artifactPath); err != nil {
-		_ = os.RemoveAll(installPath)
+	if err := os.Rename(tempPath, artifactPath); err != nil { //nolint:gosec // G703: 源路径由 CreateTemp 生成；目标仅受控 packages 根、已校验 ID/Version、SHA256 与随机名。
+		_ = os.RemoveAll(installPath) //nolint:gosec // G703: 仅清理本次已提交目录，路径由已校验 ID/Version、SHA256 与 MkdirTemp 随机名组成。
 		return nil, fmt.Errorf("保存插件包: %w", err)
 	}
 	committed = true
-	artifactData, err := os.ReadFile(artifactPath)
+	artifactData, err := os.ReadFile(artifactPath) //nolint:gosec // G703: 读取刚提交的包，路径仅由受控 packages 根、已校验 ID/Version、SHA256 与随机名组成。
 	if err != nil {
-		_ = os.Remove(artifactPath)
-		_ = os.RemoveAll(installPath)
+		_ = os.Remove(artifactPath)   //nolint:gosec // G703: 仅清理上述受控路径上的本次插件包。
+		_ = os.RemoveAll(installPath) //nolint:gosec // G703: 仅清理本次安装目录；ID/Version 已校验，后缀为 SHA256 与 MkdirTemp 随机名。
 		return nil, fmt.Errorf("读取已保存插件包: %w", err)
 	}
 	runtimeEntry := manifest.Runtimes[manifest.RuntimeKey()]
+	binaryPath, revision := "", manifest.Files[runtimeEntry.Path]
+	if runtimeEntry.Path != "" {
+		binaryPath = filepath.Join(installPath, filepath.FromSlash(runtimeEntry.Path))
+	}
+	if manifest.IsGeneric() {
+		revision = artifactSHA
+	}
 	return &PluginInstallation{
 		PluginKey:       manifest.ID,
 		Name:            manifest.Name,
@@ -174,8 +181,8 @@ func (i *PluginPackageInstaller) Install(ctx context.Context, reader io.Reader, 
 		ArtifactData:    artifactData,
 		ArtifactPath:    artifactPath,
 		InstallPath:     installPath,
-		BinaryPath:      filepath.Join(installPath, filepath.FromSlash(runtimeEntry.Path)),
-		BinarySHA256:    manifest.Files[runtimeEntry.Path],
+		BinaryPath:      binaryPath,
+		BinarySHA256:    revision,
 		SignatureStatus: signatureStatus,
 		State:           initialState,
 		InstalledBy:     installedBy,
@@ -229,6 +236,24 @@ func (i *PluginPackageInstaller) inspectArchive(archive *zip.Reader) (PluginMani
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return PluginManifest{}, nil, "", errors.New("插件清单只能包含一个 JSON 对象")
 	}
+	if manifest.SchemaVersion == 1 {
+		var shape map[string]json.RawMessage
+		_ = json.Unmarshal(manifestRaw, &shape)
+		var req, ui map[string]json.RawMessage
+		_ = json.Unmarshal(shape["requires"], &req)
+		_ = json.Unmarshal(shape["ui"], &ui)
+		_, backend := shape["backend"]
+		_, backendAPI := req["backend_api"]
+		_, hostAPI := req["host_service_api"]
+		_, entries := ui["entries"]
+		if backend || backendAPI || hostAPI || entries {
+			return PluginManifest{}, nil, "", errors.New("旧版插件清单不接受通用后台或业务入口字段")
+		}
+	} else if manifest.IsGeneric() {
+		if err := validateGenericPluginManifestShape(manifestRaw); err != nil {
+			return PluginManifest{}, nil, "", err
+		}
+	}
 	if err := manifest.Validate(); err != nil {
 		return PluginManifest{}, nil, "", err
 	}
@@ -250,6 +275,42 @@ func (i *PluginPackageInstaller) inspectArchive(archive *zip.Reader) (PluginMani
 		return PluginManifest{}, nil, "", err
 	}
 	return manifest, manifestRaw, signatureStatus, nil
+}
+
+// Typed decoding checks field types but collapses missing or null values into
+// Go zero values. Schema 2 requires explicit negotiation versions, an explicit
+// capabilities array (which may be empty), and no null values at any depth.
+func validateGenericPluginManifestShape(raw []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("解析通用插件清单字段: %w", err)
+		}
+		if token == nil {
+			return errors.New("通用插件清单字段不允许为 null")
+		}
+	}
+	var shape map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &shape); err != nil {
+		return fmt.Errorf("解析通用插件清单字段: %w", err)
+	}
+	var requires map[string]json.RawMessage
+	if err := json.Unmarshal(shape["requires"], &requires); err != nil {
+		return fmt.Errorf("解析通用插件清单 requires 字段: %w", err)
+	}
+	for _, field := range []string{"plugin_protocol", "transport_api", "ui_bridge", "backend_api", "host_service_api"} {
+		if _, exists := requires[field]; !exists {
+			return fmt.Errorf("通用插件清单必须显式声明 requires.%s", field)
+		}
+	}
+	if _, exists := shape["capabilities"]; !exists {
+		return errors.New("通用插件清单必须显式声明 capabilities 数组")
+	}
+	return nil
 }
 
 func (i *PluginPackageInstaller) verifySignature(file *zip.File, manifestRaw []byte, pluginID string) (string, error) {

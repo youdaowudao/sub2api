@@ -1,0 +1,11 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>独立前端示例</title>
+<style>body{font:16px system-ui;margin:24px;color:#334155}button{padding:8px 12px;margin:4px;border:1px solid #94a3b8;border-radius:6px;background:white}pre{white-space:pre-wrap;background:#f1f5f9;padding:12px}</style>
+<h1>独立前端插件</h1><p>此页面随插件安装，不启动后台进程。</p><pre id="context">正在读取当前页面信息…</pre>
+<button id="notify">显示提示</button><button id="anchor">标出内容区域</button><button id="navigate">打开首页</button><button id="close">关闭辅助面板</button>
+<p id="result" role="status"></p><script src="bridge.js" data-bridge-version="2"></script><script>
+const output=document.getElementById('result');
+function showContext(context){document.getElementById('context').textContent=JSON.stringify(context,null,2)}
+window.addEventListener('plugin-context',event=>showContext(event.detail));
+window.addEventListener('load',()=>bridge.request('context.get').then(message=>showContext(message.context)).catch(error=>output.textContent=error.message));
+for(const [id,type,values] of [['notify','ui.notify',{level:'info',message:'这条提示来自独立插件'}],['anchor','ui.anchor',{target:'content'}],['navigate','ui.navigate',{target:'dashboard'}],['close','ui.close',{}]])document.getElementById(id).onclick=()=>bridge.request(type,values).then(()=>output.textContent='操作完成').catch(error=>output.textContent=error.message);
+</script></html>

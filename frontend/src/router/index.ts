@@ -188,6 +188,18 @@ const routes: RouteRecordRaw[] = [
 
   // ==================== User Routes ====================
   {
+    path: '/extensions/:pluginID/:entryID',
+    name: 'PluginExtension',
+    component: () => import('@/views/plugins/PluginView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: false, title: 'Plugin', titleKey: 'admin.plugins.businessTitle' }
+  },
+  {
+    path: '/admin/extensions/:pluginID/:entryID',
+    name: 'AdminPluginExtension',
+    component: () => import('@/views/plugins/PluginView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Plugin', titleKey: 'admin.plugins.businessTitle' }
+  },
+  {
     path: '/',
     redirect: '/home'
   },
@@ -274,6 +286,29 @@ const routes: RouteRecordRaw[] = [
       title: 'Available Channels',
       titleKey: 'availableChannels.title',
       descriptionKey: 'availableChannels.description'
+    }
+  },
+  {
+    path: '/settings/mcp',
+    name: 'MCP',
+    component: () => import('@/views/user/MCPView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'MCP Connection',
+      titleKey: 'mcp.title',
+      descriptionKey: 'mcp.description'
+    }
+  },
+  {
+    path: '/oauth/mcp/authorize',
+    name: 'MCPOAuthAuthorize',
+    component: () => import('@/views/auth/MCPOAuthAuthorizeView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Authorize MCP Application',
+      titleKey: 'mcp.consentTitle'
     }
   },
   {

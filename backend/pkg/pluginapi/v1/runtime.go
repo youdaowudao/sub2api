@@ -23,7 +23,13 @@ const (
 	// 插件忽略新字段即可继续工作。
 	HostServiceAPIVersion = 2
 	// TransportPluginName 是 go-plugin 中注册的唯一能力名称。
-	TransportPluginName = "oauth_transport"
+	TransportPluginName          = "oauth_transport"
+	BackendAPIVersion            = 1
+	GenericHostServiceAPIVersion = 3
+	ApplicationUIBridgeVersion   = 2
+	BackendPluginName            = "backend"
+	GenericMaxMessageBytes       = 512 * 1024
+	GenericMaxPayloadBytes       = 256 * 1024
 )
 
 // HandshakeConfig 防止普通可执行文件被误当成 Sub2API 插件启动。
@@ -83,4 +89,50 @@ func Serve(impl TransportPluginServer) {
 		},
 		GRPCServer: hcplugin.DefaultGRPCServer,
 	})
+}
+
+// BackendClient carries the broker used by the mandatory API3 initialization.
+type BackendClient struct {
+	BackendPluginClient
+	Broker *hcplugin.GRPCBroker
+}
+
+type BackendGRPCPlugin struct {
+	hcplugin.NetRPCUnsupportedPlugin
+	Impl BackendPluginServer
+}
+
+func (p *BackendGRPCPlugin) GRPCServer(broker *hcplugin.GRPCBroker, server *grpc.Server) error {
+	RegisterBackendPluginServer(server, p.Impl)
+	if receiver, ok := p.Impl.(HostBrokerReceiver); ok {
+		receiver.SetHostBroker(broker)
+	}
+	return nil
+}
+func (p *BackendGRPCPlugin) GRPCClient(_ context.Context, broker *hcplugin.GRPCBroker, conn *grpc.ClientConn) (any, error) {
+	return &BackendClient{BackendPluginClient: NewBackendPluginClient(conn), Broker: broker}, nil
+}
+func BackendClientPluginMap() map[string]hcplugin.Plugin {
+	return map[string]hcplugin.Plugin{BackendPluginName: &BackendGRPCPlugin{}}
+}
+
+// ServeBackend serves the generic contract with bounded gRPC messages.
+func ServeBackend(impl BackendPluginServer) {
+	hcplugin.Serve(&hcplugin.ServeConfig{
+		HandshakeConfig: HandshakeConfig,
+		Plugins:         map[string]hcplugin.Plugin{BackendPluginName: &BackendGRPCPlugin{Impl: impl}},
+		GRPCServer: func(opts []grpc.ServerOption) *grpc.Server {
+			opts = append(opts, grpc.MaxRecvMsgSize(GenericMaxMessageBytes), grpc.MaxSendMsgSize(GenericMaxMessageBytes))
+			return grpc.NewServer(opts...)
+		},
+	})
+}
+
+// DialGenericHostServices bounds reverse RPCs for Backend API1 clients. Keep the
+// returned connection open for the runtime lifetime and close it on shutdown.
+func DialGenericHostServices(broker *hcplugin.GRPCBroker, id uint32) (*grpc.ClientConn, error) {
+	return broker.DialWithOptions(id, grpc.WithDefaultCallOptions(
+		grpc.MaxCallRecvMsgSize(GenericMaxMessageBytes),
+		grpc.MaxCallSendMsgSize(GenericMaxMessageBytes),
+	))
 }

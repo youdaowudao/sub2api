@@ -1611,13 +1611,18 @@ func (h *AuthHandler) transitionPendingOAuthAccountToChoiceState(
 	return session, nil
 }
 
-func writeOAuthTokenPairResponse(c *gin.Context, tokenPair *service.TokenPair) {
-	c.JSON(http.StatusOK, gin.H{
+func writeOAuthTokenPairResponse(c *gin.Context, tokenPair *service.TokenPair, userID int64) {
+	payload := gin.H{
 		"access_token":  tokenPair.AccessToken,
 		"refresh_token": tokenPair.RefreshToken,
 		"expires_in":    tokenPair.ExpiresIn,
 		"token_type":    "Bearer",
-	})
+	}
+	if err := service.CompleteUserCreation(c.Request.Context(), userID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, payload)
 }
 
 func (h *AuthHandler) bindPendingOAuthLogin(c *gin.Context, provider string) {
@@ -1695,7 +1700,7 @@ func (h *AuthHandler) bindPendingOAuthLogin(c *gin.Context, provider string) {
 	}
 
 	clearCookies()
-	writeOAuthTokenPairResponse(c, tokenPair)
+	writeOAuthTokenPairResponse(c, tokenPair, user.ID)
 }
 
 func respondPendingOAuthBindingApplyError(c *gin.Context, err error) {
@@ -1890,7 +1895,7 @@ func (h *AuthHandler) createPendingOAuthAccount(c *gin.Context, provider string)
 	// createPendingOAuthAccount = 注册新账户，需要把钉钉昵称同步到 users.username 作为初始值
 	h.maybeSyncDingTalkAfterRegistration(c.Request.Context(), session, user.ID)
 	clearCookies()
-	writeOAuthTokenPairResponse(c, tokenPair)
+	writeOAuthTokenPairResponse(c, tokenPair, user.ID)
 }
 
 // ExchangePendingOAuthCompletion redeems a pending OAuth browser session into a frontend-safe payload.
