@@ -689,7 +689,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					zap.Int64("account_id", account.ID),
 					zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 				)
-				googleError(c, http.StatusTooManyRequests, "Too many pending requests, please retry later")
+				googleError(c, http.StatusTooManyRequests, "Too many pending requests, please retry later（排队请求过多，请稍后重试）")
 				return
 			}
 			if err == nil && canWait {

@@ -58,6 +58,7 @@ func TestClassifyNoAccountError_NilDiagnoser_Falls503(t *testing.T) {
 
 	require.Equal(t, http.StatusServiceUnavailable, cls.Status)
 	require.Equal(t, "api_error", cls.ErrType)
+	require.Equal(t, "Service temporarily unavailable（服务暂时不可用，请稍后重试）", cls.Message)
 	require.False(t, cls.ModelNotFound)
 }
 

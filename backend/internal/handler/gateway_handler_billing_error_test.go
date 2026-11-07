@@ -6,9 +6,84 @@ import (
 	"testing"
 	"time"
 
+	pkgerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBillingErrorDetails_ChineseHints(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		status     int
+		code       string
+		message    string
+		retryAfter bool
+	}{
+		{"balance", service.ErrInsufficientBalance, http.StatusForbidden, "billing_error", "insufficient balance（账户余额不足，请及时充值）", false},
+		{"billing service", service.ErrBillingServiceUnavailable, http.StatusServiceUnavailable, "billing_service_error", "Billing service temporarily unavailable. Please retry later.（计费服务暂时不可用，请稍后重试）", false},
+		{"billing fallback", pkgerrors.ServiceUnavailable("BILLING_SERVICE_ERROR", ""), http.StatusServiceUnavailable, "billing_service_error", "Billing service temporarily unavailable. Please retry later.（计费服务暂时不可用，请稍后重试）", false},
+		{"group RPM", service.ErrGroupRPMExceeded, http.StatusTooManyRequests, "rate_limit_exceeded", "group requests-per-minute limit exceeded（请求过于频繁，请稍后再试）", true},
+		{"user RPM", service.ErrUserRPMExceeded, http.StatusTooManyRequests, "rate_limit_exceeded", "user requests-per-minute limit exceeded（请求过于频繁，请稍后再试）", true},
+		{"platform daily", service.ErrUserPlatformDailyQuotaExhausted, http.StatusTooManyRequests, "rate_limit_exceeded", "Daily usage quota exhausted for this platform.（该平台日额度已用完，请等待重置）", true},
+		{"platform weekly", service.ErrUserPlatformWeeklyQuotaExhausted, http.StatusTooManyRequests, "rate_limit_exceeded", "Weekly usage quota exhausted for this platform.（该平台周额度已用完，请等待重置）", true},
+		{"platform monthly", service.ErrUserPlatformMonthlyQuotaExhausted, http.StatusTooManyRequests, "rate_limit_exceeded", "Monthly usage quota exhausted for this platform.（该平台月额度已用完，请等待重置）", true},
+		{"subscription invalid", service.ErrSubscriptionInvalid, http.StatusForbidden, "billing_error", "subscription is invalid or expired（订阅无效或已过期）", false},
+		{"subscription daily", service.ErrDailyLimitExceeded, http.StatusForbidden, "billing_error", "daily usage limit exceeded（订阅日用量已达上限，请等待重置）", false},
+		{"subscription weekly", service.ErrWeeklyLimitExceeded, http.StatusForbidden, "billing_error", "weekly usage limit exceeded（订阅周用量已达上限，请等待重置）", false},
+		{"subscription monthly", service.ErrMonthlyLimitExceeded, http.StatusForbidden, "billing_error", "monthly usage limit exceeded（订阅月用量已达上限，请等待重置）", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, code, message, retryAfter := billingErrorDetails(tt.err)
+			require.Equal(t, tt.status, status)
+			require.Equal(t, tt.code, code)
+			require.Equal(t, tt.message, message)
+			if tt.retryAfter {
+				require.Greater(t, retryAfter, 0)
+				require.LessOrEqual(t, retryAfter, 60)
+			} else {
+				require.Zero(t, retryAfter)
+			}
+		})
+	}
+}
+
+func TestMapUpstreamError_PreservesEnglish(t *testing.T) {
+	tests := []struct {
+		name           string
+		upstreamStatus int
+		status         int
+		gatewayType    string
+		openaiType     string
+		message        string
+	}{
+		{"401", 401, http.StatusBadGateway, "upstream_error", "upstream_error", "Upstream authentication failed, please contact administrator"},
+		{"403", 403, http.StatusBadGateway, "upstream_error", "upstream_error", "Upstream access forbidden, please contact administrator"},
+		{"429", 429, http.StatusTooManyRequests, "rate_limit_error", "rate_limit_error", "Upstream rate limit exceeded, please retry later"},
+		{"529", 529, http.StatusServiceUnavailable, "overloaded_error", "upstream_error", "Upstream service overloaded, please retry later"},
+		{"500", 500, http.StatusBadGateway, "upstream_error", "upstream_error", "Upstream service temporarily unavailable"},
+		{"502", 502, http.StatusBadGateway, "upstream_error", "upstream_error", "Upstream service temporarily unavailable"},
+		{"503", 503, http.StatusBadGateway, "upstream_error", "upstream_error", "Upstream service temporarily unavailable"},
+		{"504", 504, http.StatusBadGateway, "upstream_error", "upstream_error", "Upstream service temporarily unavailable"},
+		{"default", 418, http.StatusBadGateway, "upstream_error", "upstream_error", "Upstream request failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, errType, message := (&GatewayHandler{}).mapUpstreamError(tt.upstreamStatus)
+			require.Equal(t, tt.status, status)
+			require.Equal(t, tt.gatewayType, errType)
+			require.Equal(t, tt.message, message)
+			require.NotContains(t, message, "（")
+
+			status, errType, message = (&OpenAIGatewayHandler{}).mapUpstreamError(tt.upstreamStatus)
+			require.Equal(t, tt.status, status)
+			require.Equal(t, tt.openaiType, errType)
+			require.Equal(t, tt.message, message)
+			require.NotContains(t, message, "（")
+		})
+	}
+}
 
 func TestBillingErrorDetails_MapsGroupRPMExceededToTooManyRequests(t *testing.T) {
 	status, code, msg, retryAfter := billingErrorDetails(service.ErrGroupRPMExceeded)

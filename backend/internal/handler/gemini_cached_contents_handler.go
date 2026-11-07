@@ -635,7 +635,7 @@ func (h *GatewayHandler) acquireGeminiCachedContentAccountSlot(c *gin.Context, r
 	if err != nil {
 		reqLog.Warn("gemini.cached_content.account_wait_counter_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	} else if !canWait {
-		googleError(c, http.StatusTooManyRequests, "Too many pending requests, please retry later")
+		googleError(c, http.StatusTooManyRequests, "Too many pending requests, please retry later（排队请求过多，请稍后重试）")
 		return nil, false
 	}
 	streamStarted := false

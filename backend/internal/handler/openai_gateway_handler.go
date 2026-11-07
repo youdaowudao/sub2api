@@ -2355,7 +2355,7 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 			zap.Int64("account_id", account.ID),
 			zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 		)
-		writeError(http.StatusTooManyRequests, "rate_limit_error", gatewayQueueFullCode, "Too many pending requests, please retry later")
+		writeError(http.StatusTooManyRequests, "rate_limit_error", gatewayQueueFullCode, "Too many pending requests, please retry later（排队请求过多，请稍后重试）")
 		return nil, openAISlotAcquireFailed
 	}
 
@@ -3387,7 +3387,7 @@ func (h *OpenAIGatewayHandler) ensureResponsesDependencies(c *gin.Context, reqLo
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": gin.H{
 				"type":    "api_error",
-				"message": "Service temporarily unavailable",
+				"message": "Service temporarily unavailable（服务暂时不可用，请稍后重试）",
 			},
 		})
 	}
