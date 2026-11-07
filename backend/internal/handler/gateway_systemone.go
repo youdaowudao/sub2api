@@ -60,7 +60,7 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", buildBodyReadFailureMessage(err))
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
 	}
 	model, err := typesafe.ValidateSystemOneRequest(body)

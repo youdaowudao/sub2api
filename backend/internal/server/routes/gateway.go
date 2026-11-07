@@ -564,7 +564,7 @@ func compositeTargetPlatformMiddleware(resolver *service.CompositeRouteResolver)
 		body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 		if err != nil {
 			status := http.StatusBadRequest
-			message := pkghttputil.RequestBodyReadFailureMessage(err)
+			message := "Failed to read request body"
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
 				status = http.StatusRequestEntityTooLarge
