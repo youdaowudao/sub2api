@@ -99,13 +99,15 @@ type UserUpdateFields struct {
 	Username     bool
 	Notes        bool
 	PasswordHash bool
-	Role         bool
-	Status       bool
-	Concurrency  bool
-	RPMLimit     bool
-	SignupSource bool
-	LastLoginAt  bool
-	LastActiveAt bool
+	// IncrementTokenVersion 仅原子递增撤销计数，不写调用方快照中的版本值。
+	IncrementTokenVersion bool
+	Role                  bool
+	Status                bool
+	Concurrency           bool
+	RPMLimit              bool
+	SignupSource          bool
+	LastLoginAt           bool
+	LastActiveAt          bool
 	// BalanceNotifySettings 覆盖 balance_notify_enabled / _threshold_type / _threshold。
 	BalanceNotifySettings bool
 	// BalanceNotifyExtraEmails 与上一项分开，避免"改通知阈值"覆盖并发的"加通知邮箱"。
@@ -1017,7 +1019,7 @@ func maskOpaqueIdentity(value string) string {
 }
 
 // ChangePassword 修改密码
-// Security: Increments TokenVersion to invalidate all existing JWT tokens
+// Password changes invalidate existing tokens through the password fingerprint.
 func (s *UserService) ChangePassword(ctx context.Context, userID int64, req ChangePasswordRequest) error {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
@@ -1033,12 +1035,7 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, req Chan
 		return fmt.Errorf("set password: %w", err)
 	}
 
-	// Increment TokenVersion to invalidate all existing tokens
-	// This ensures that any tokens issued before the password change become invalid
-	user.TokenVersion++
-
-	// TokenVersion 没有对应的数据库列（见 resolvedTokenVersion：它由 email+password_hash
-	// 指纹推导），改密写回 password_hash 即可让旧 token 失效。
+	// 保留持久撤销计数；password_hash 的变化已使旧令牌指纹失效。
 	if err := s.userRepo.Update(ctx, user, UserUpdateFields{PasswordHash: true}); err != nil {
 		return fmt.Errorf("update user: %w", err)
 	}

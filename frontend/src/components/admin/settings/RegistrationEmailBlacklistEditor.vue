@@ -23,7 +23,7 @@
         <button
           type="button"
           class="btn btn-secondary btn-sm"
-          :disabled="loading || loadError || savedEmails.length === 0 || checking"
+          :disabled="loading || loadError || savedEmails.length === 0 || checking || saving"
           data-testid="email-blacklist-check"
           @click="checkRegisteredUsers(savedEmails)"
         >
@@ -33,7 +33,7 @@
         <button
           type="button"
           class="btn btn-primary btn-sm"
-          :disabled="loading || loadError || checking"
+          :disabled="loading || loadError || checking || saving"
           data-testid="email-blacklist-edit"
           @click="openEditor"
         >
@@ -58,6 +58,7 @@
             id="email-blacklist-bulk"
             v-model="bulkInput"
             rows="5"
+            :disabled="saving"
             class="input mt-2 w-full font-mono text-sm"
             :placeholder="t('admin.settings.registration.emailBlacklist.bulkPlaceholder')"
             data-testid="email-blacklist-bulk-input"
@@ -66,7 +67,7 @@
             <button
               type="button"
               class="btn btn-secondary btn-sm"
-              :disabled="!bulkInput.trim()"
+              :disabled="saving || !bulkInput.trim()"
               data-testid="email-blacklist-bulk-add"
               @click="addBulk"
             >
@@ -124,7 +125,7 @@
               <button
                 type="button"
                 class="btn btn-secondary btn-sm shrink-0"
-                :disabled="draft.length === 0"
+                :disabled="saving || draft.length === 0"
                 data-testid="email-blacklist-clear"
                 @click="clearDraft"
               >
@@ -161,6 +162,7 @@
                   class="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-dark-700 dark:hover:text-red-400"
                   :title="t('admin.settings.registration.emailBlacklist.remove')"
                   :aria-label="t('admin.settings.registration.emailBlacklist.remove')"
+                  :disabled="saving"
                   @click="removeEmail(email)"
                 >
                   <Icon name="x" size="sm" />
@@ -333,6 +335,7 @@ async function load() {
 }
 
 function openEditor() {
+  if (saving.value) return
   draft.value = [...savedEmails.value]
   bulkInput.value = ''
   search.value = ''
@@ -352,11 +355,13 @@ function closeEditor() {
 }
 
 function discardDraft() {
+  if (saving.value) return
   discardConfirmOpen.value = false
   editorOpen.value = false
 }
 
 function addBulk() {
+  if (saving.value) return
   const parsed = parseBlacklistInput(bulkInput.value)
   const merged = mergeIntoBlacklist(draft.value, parsed.valid)
   draft.value = merged.list
@@ -370,15 +375,18 @@ function addBulk() {
 }
 
 function removeEmail(email: string) {
+  if (saving.value) return
   draft.value = draft.value.filter((item) => item !== email)
 }
 
 function clearDraft() {
+  if (saving.value) return
   draft.value = []
   search.value = ''
 }
 
 async function save() {
+  if (saving.value) return
   saving.value = true
   let added: string[] = []
   try {

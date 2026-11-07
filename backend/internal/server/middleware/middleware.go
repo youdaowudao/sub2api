@@ -18,6 +18,8 @@ const (
 	ContextKeyUser ContextKey = "user"
 	// ContextKeyUserRole 当前用户角色（string）
 	ContextKeyUserRole ContextKey = "user_role"
+	// ContextKeyAccessTokenVersion 仅由 JWT 认证写入的本次令牌版本。
+	ContextKeyAccessTokenVersion ContextKey = "access_token_version"
 	// ContextKeyAPIKey API密钥上下文键
 	ContextKeyAPIKey ContextKey = "api_key"
 	// ContextKeySubscription 订阅上下文键

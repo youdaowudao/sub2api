@@ -1675,12 +1675,9 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, token, newPasswo
 		return fmt.Errorf("hash password: %w", err)
 	}
 
-	// Update password and increment TokenVersion
+	// Password changes invalidate the fingerprint without changing the
+	// persisted explicit-revocation counter.
 	user.PasswordHash = hashedPassword
-	user.TokenVersion++ // Invalidate all existing tokens
-
-	// TokenVersion 无对应数据库列（见 resolvedTokenVersion：由 email+password_hash 指纹推导），
-	// 写回 password_hash 本身即可让旧 token 失效。
 	if err := s.userRepo.Update(ctx, user, UserUpdateFields{PasswordHash: true}); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error updating password for user %d: %v", user.ID, err)
 		return ErrServiceUnavailable
@@ -1921,25 +1918,24 @@ func (s *AuthService) RevokeAllUserSessions(ctx context.Context, userID int64) e
 
 // RevokeAllUserTokens invalidates both stateless access tokens and refresh sessions.
 //
-// 注意：users 表没有 token_version 列（resolvedTokenVersion 由 email+password_hash
-// 指纹推导），因此对 user.TokenVersion 自增只影响内存副本。之前紧跟其后的整行
-// Update 不写任何有效数据，却会用旧快照覆盖并发写入的列，故已移除。
-// 会话撤销由下面的 refresh session 清理承担；改密路径通过 password_hash 变化
-// 改变指纹，从而使旧 token 失效。
+// 先原子推进持久计数，使旧 access/refresh/MCP 版本立即失效；再清理会话记录。
+// Update 的专用掩码只递增计数，不写回调用方快照或其他用户字段。
 func (s *AuthService) RevokeAllUserTokens(ctx context.Context, userID int64) error {
-	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
-		return fmt.Errorf("get user: %w", err)
+	if err := s.userRepo.Update(ctx, &User{ID: userID}, UserUpdateFields{IncrementTokenVersion: true}); err != nil {
+		return infraerrors.ServiceUnavailable("SESSION_REVOCATION_UNCONFIRMED", "会话撤销结果未能确认。请重新登录核对后重试。").WithCause(err)
 	}
 
+	var cleanupErr error
 	if err := s.RevokeAllUserSessions(ctx, userID); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to revoke refresh sessions after token invalidation for user %d: %v", userID, err)
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("clear refresh sessions: %w", err))
 	}
-	// A browser JWT can mint a long-lived MCP grant, so revoking every session
-	// must also revoke those grants. Fail loudly: the caller can retry.
 	if s.mcpGrantRevoker != nil {
 		if err := s.mcpGrantRevoker.RevokeAllGrants(ctx, userID); err != nil {
-			return fmt.Errorf("revoke MCP grants: %w", err)
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("revoke MCP grants: %w", err))
 		}
+	}
+	if cleanupErr != nil {
+		return infraerrors.ServiceUnavailable("SESSION_CLEANUP_INCOMPLETE", "旧登录凭据已失效，但部分会话清理未完成。请重新登录后重试。").WithCause(cleanupErr)
 	}
 	return nil
 }

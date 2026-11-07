@@ -187,6 +187,13 @@ func (r *mcpOAuthUserRepo) GetByID(_ context.Context, id int64) (*User, error) {
 	return &copy, nil
 }
 
+func (r *mcpOAuthUserRepo) Update(_ context.Context, _ *User, fields UserUpdateFields) error {
+	if fields.IncrementTokenVersion {
+		r.user.TokenVersion++
+	}
+	return nil
+}
+
 const mcpTestResource = "https://platform.example/api/v1/mcp"
 
 type mcpOAuthFixture struct {
@@ -213,7 +220,7 @@ func newMCPOAuthFixture(t *testing.T) *mcpOAuthFixture {
 
 func (f *mcpOAuthFixture) code(t *testing.T, scope string, readOnly *bool) MCPOAuthTokenInput {
 	t.Helper()
-	redirect, err := f.s.Decide(context.Background(), 7, MCPOAuthConsentInput{Authorization: f.authorize, Approved: true, Scope: scope, ReadOnly: readOnly}, mcpTestResource)
+	redirect, err := f.s.Decide(context.Background(), 7, resolvedTokenVersion(f.u.user), MCPOAuthConsentInput{Authorization: f.authorize, Approved: true, Scope: scope, ReadOnly: readOnly}, mcpTestResource)
 	require.NoError(t, err)
 	u, err := url.Parse(redirect)
 	require.NoError(t, err)
@@ -277,7 +284,7 @@ func TestMCPOAuthAuthorizationRequiresPKCEResourceAndRegisteredRedirect(t *testi
 			requireMCPOAuthError(t, err, tc.code)
 		})
 	}
-	redirect, err := f.s.Decide(context.Background(), 7, MCPOAuthConsentInput{Authorization: f.authorize}, mcpTestResource)
+	redirect, err := f.s.Decide(context.Background(), 7, resolvedTokenVersion(f.u.user), MCPOAuthConsentInput{Authorization: f.authorize}, mcpTestResource)
 	require.NoError(t, err)
 	u, err := url.Parse(redirect)
 	require.NoError(t, err)
@@ -459,7 +466,7 @@ func TestMCPOAuthExpiryAndCredentialTypeBoundaries(t *testing.T) {
 
 func TestMCPOAuthConsentPermissionsRevocationAndNoSecretPersistence(t *testing.T) {
 	f := newMCPOAuthFixture(t)
-	_, err := f.s.Decide(context.Background(), 7, MCPOAuthConsentInput{Authorization: f.authorize, Approved: true, Scope: MCPScopeAdmin}, mcpTestResource)
+	_, err := f.s.Decide(context.Background(), 7, resolvedTokenVersion(f.u.user), MCPOAuthConsentInput{Authorization: f.authorize, Approved: true, Scope: MCPScopeAdmin}, mcpTestResource)
 	requireMCPOAuthError(t, err, "access_denied")
 	f.u.user.Role = RoleAdmin
 	readOnly := false
@@ -497,7 +504,7 @@ func TestMCPOAuthListReportsInvalidatedAndGrantLimit(t *testing.T) {
 	for i := 0; i < MCPOAuthGrantLimit; i++ {
 		f.code(t, "", nil)
 	}
-	_, err := f.s.Decide(context.Background(), 7, MCPOAuthConsentInput{Authorization: f.authorize, Approved: true}, mcpTestResource)
+	_, err := f.s.Decide(context.Background(), 7, resolvedTokenVersion(f.u.user), MCPOAuthConsentInput{Authorization: f.authorize, Approved: true}, mcpTestResource)
 	require.ErrorIs(t, err, ErrMCPOAuthGrantLimit)
 	f.u.user.PasswordHash = "changed"
 	grants, err := f.s.ListGrants(context.Background(), 7)

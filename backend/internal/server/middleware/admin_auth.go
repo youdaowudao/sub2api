@@ -201,9 +201,9 @@ func validateJWTForAdmin(
 		return false
 	}
 
-	// 校验 TokenVersion，确保管理员改密后旧 token 失效
+	// 显式撤销或凭据变更后，旧版本令牌均不可继续使用。
 	if claims.TokenVersion != user.TokenVersion {
-		AbortWithError(c, 401, "TOKEN_REVOKED", "Token has been revoked (password changed)")
+		AbortWithError(c, 401, "TOKEN_REVOKED", "Token has been revoked")
 		return false
 	}
 
@@ -225,6 +225,7 @@ func validateJWTForAdmin(
 	c.Set(string(ContextKeyUserRole), user.Role)
 	c.Set(ContextKeyAuthEmail, user.Email)
 	c.Set(ContextKeySessionID, claims.SessionID)
+	c.Set(string(ContextKeyAccessTokenVersion), claims.TokenVersion)
 	c.Set("auth_method", "jwt")
 
 	return true

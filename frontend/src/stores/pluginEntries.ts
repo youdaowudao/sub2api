@@ -99,10 +99,12 @@ export const usePluginEntriesStore = defineStore('plugin-entries', () => {
   // The token is used only as a private watch key and never sent to a frame.
   watch(() => `${auth.token || ''}:${auth.user?.id || ''}:${auth.user?.role || ''}:${auth.user?.status || ''}`, () => {
     cancelRefresh()
+    // Clear selection before the list so synchronous shell watchers do not
+    // interpret this authenticated-context reset as a disabled plugin.
+    selectedShellKey.value = null
     entries.value = []
     ready.value = false
     error.value = null
-    selectedShellKey.value = null
     shellInitialized = false
     // Synchronous page watchers must join the new identity's request, never the
     // cancelled promise or entries that belonged to the previous identity.

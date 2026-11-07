@@ -29,12 +29,12 @@ func newMCPRateLimitEndpoint(t *testing.T, role string, rpm int) (*gin.Engine, s
 	settings := service.NewSettingService(&mcpRouteSettingsRepo{values: map[string]string{
 		service.SettingKeyPanelRateLimitSettings: string(settingsJSON),
 	}}, cfg)
-	oauth, _, _ := newMCPRouteOAuthService(role)
+	oauth, _, users := newMCPRouteOAuthService(role)
 	scope := service.MCPScopeUser
 	if role == service.RoleAdmin {
 		scope = service.MCPScopeAdmin
 	}
-	token := issueMCPRouteOAuthToken(t, oauth, cfg.MCP.PublicURL, scope, true)
+	token := issueMCPRouteOAuthToken(t, oauth, users, cfg.MCP.PublicURL, scope, true)
 	h := mcpRouteHandlers()
 	h.MCPOAuth = handler.NewMCPOAuthHandler(oauth, nil, nil, settings, cfg)
 	h.APIKey = handler.NewAPIKeyHandler(service.NewAPIKeyService(&mcpRouteAPIKeyRepo{}, nil, nil, nil, nil, nil, nil))

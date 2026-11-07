@@ -100,7 +100,13 @@ func handlerMCPContext(t *testing.T, method, target, body, contentType string) (
 	}
 	return c, rec
 }
-func handlerMCPSubject(c *gin.Context, role string) {
+func handlerMCPSubject(t *testing.T, c *gin.Context, role string) {
+	t.Helper()
+	// These handler fixtures use empty email/password fields; derive their
+	// authenticated version through the same user normalization as JWT auth.
+	user, err := service.NewUserService(&handlerMCPUsers{user: &service.User{ID: 7}}, nil, nil, nil).GetByID(context.Background(), 7)
+	require.NoError(t, err)
+	c.Set(string(middleware.ContextKeyAccessTokenVersion), user.TokenVersion)
 	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 7})
 	c.Set(string(middleware.ContextKeyUserRole), role)
 	c.Set(middleware.ContextKeySessionID, "browser-session-7")
@@ -204,7 +210,7 @@ func TestMCPOAuthHandlerConnectionConfigUsesCanonicalResource(t *testing.T) {
 	h, repo, _, _ := newHandlerMCPFixture(t)
 	c, rec := handlerMCPContext(t, http.MethodGet, "https://attacker.example/user/mcp/config", "", "")
 	c.Request.Header.Set("X-Forwarded-Host", "forwarded-attacker.example")
-	handlerMCPSubject(c, service.RoleUser)
+	handlerMCPSubject(t, c, service.RoleUser)
 	h.ConnectionConfig(c)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
@@ -215,7 +221,7 @@ func TestMCPOAuthHandlerConnectionConfigUsesCanonicalResource(t *testing.T) {
 
 	h = NewMCPOAuthHandler(nil, nil, nil, nil, &config.Config{})
 	c, rec = handlerMCPContext(t, http.MethodGet, "/user/mcp/config", "", "")
-	handlerMCPSubject(c, service.RoleUser)
+	handlerMCPSubject(t, c, service.RoleUser)
 	h.ConnectionConfig(c)
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
@@ -345,7 +351,7 @@ func TestMCPOAuthHandlerPreviewFrontendContract(t *testing.T) {
 	input := handlerMCPAuthorization(repo.clientID)
 	query := url.Values{"response_type": {input.ResponseType}, "client_id": {input.ClientID}, "redirect_uri": {input.RedirectURI}, "scope": {input.Scope}, "state": {input.State}, "code_challenge": {input.CodeChallenge}, "code_challenge_method": {input.CodeChallengeMethod}, "resource": {input.Resource}, "timezone": {"Asia/Shanghai"}}
 	c, rec := handlerMCPContext(t, http.MethodGet, "/user/mcp/authorize?"+query.Encode(), "", "")
-	handlerMCPSubject(c, service.RoleUser)
+	handlerMCPSubject(t, c, service.RoleUser)
 	h.Preview(c)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
@@ -355,7 +361,7 @@ func TestMCPOAuthHandlerPreviewFrontendContract(t *testing.T) {
 	require.Zero(t, repo.writes)
 	query.Add("redirect_uri", "https://attacker.example/callback")
 	c, rec = handlerMCPContext(t, http.MethodGet, "/user/mcp/authorize?"+query.Encode(), "", "")
-	handlerMCPSubject(c, service.RoleUser)
+	handlerMCPSubject(t, c, service.RoleUser)
 	h.Preview(c)
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 	require.Equal(t, 1, repo.reads, "reject duplicate parameters before service access")
@@ -382,7 +388,7 @@ func TestMCPOAuthHandlerAdminDecisionGatesBeforePersistence(t *testing.T) {
 			cache.granted, cache.err = tt.granted, tt.cacheErr
 			input := service.MCPOAuthConsentInput{Authorization: handlerMCPAuthorization(repo.clientID), Approved: true, Scope: service.MCPScopeAdmin}
 			c, rec := handlerMCPContext(t, http.MethodPost, "/user/mcp/authorize", handlerMCPBody(t, input), "application/json")
-			handlerMCPSubject(c, tt.role)
+			handlerMCPSubject(t, c, tt.role)
 			c.Set("auth_method", tt.authMethod)
 			h.Decide(c)
 			require.Equal(t, tt.status, rec.Code)
@@ -416,7 +422,7 @@ func TestMCPOAuthHandlerAdminWriteAlwaysRequiresStepUp(t *testing.T) {
 			cache.granted = tt.granted
 			input := service.MCPOAuthConsentInput{Authorization: handlerMCPAuthorization(repo.clientID), Approved: true, Scope: service.MCPScopeAdmin, ReadOnly: tt.readOnly}
 			c, rec := handlerMCPContext(t, http.MethodPost, "/user/mcp/authorize", handlerMCPBody(t, input), "application/json")
-			handlerMCPSubject(c, service.RoleAdmin)
+			handlerMCPSubject(t, c, service.RoleAdmin)
 			h.Decide(c)
 			require.Equal(t, tt.status, rec.Code, rec.Body.String())
 			require.Contains(t, rec.Body.String(), tt.marker)
@@ -444,7 +450,7 @@ func TestMCPOAuthHandlerAdminApprovalUsesBrowserSession(t *testing.T) {
 	readOnly := false
 	input := service.MCPOAuthConsentInput{Authorization: handlerMCPAuthorization(repo.clientID), Approved: true, Scope: service.MCPScopeAdmin, ReadOnly: &readOnly}
 	c, rec := handlerMCPContext(t, http.MethodPost, "/user/mcp/authorize", handlerMCPBody(t, input), "application/json")
-	handlerMCPSubject(c, service.RoleAdmin)
+	handlerMCPSubject(t, c, service.RoleAdmin)
 	h.Decide(c)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, int64(7), cache.userID)
@@ -467,7 +473,7 @@ func TestMCPOAuthHandlerDenialSkipsStepUpAndPersistence(t *testing.T) {
 	cache.err = errors.New("must not be called")
 	input := service.MCPOAuthConsentInput{Authorization: handlerMCPAuthorization(repo.clientID), Approved: false, Scope: service.MCPScopeAdmin}
 	c, rec := handlerMCPContext(t, http.MethodPost, "/user/mcp/authorize", handlerMCPBody(t, input), "application/json")
-	handlerMCPSubject(c, service.RoleUser)
+	handlerMCPSubject(t, c, service.RoleUser)
 	h.Decide(c)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Zero(t, cache.calls)

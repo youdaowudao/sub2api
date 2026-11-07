@@ -64,6 +64,59 @@ beforeEach(() => {
 })
 
 describe('RegistrationEmailBlacklistEditor', () => {
+  it('保存失败后恢复编辑并保留原名单，不在保存等待期间重复提交', async () => {
+    let rejectSave!: (error: unknown) => void
+    mocks.updateBlacklist.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectSave = reject }))
+    const wrapper = mountEditor()
+    await flushPromises()
+    await wrapper.get('[data-testid="email-blacklist-edit"]').trigger('click')
+    await wrapper.get('[data-testid="email-blacklist-bulk-input"]').setValue('keep@example.test')
+    await wrapper.get('[data-testid="email-blacklist-bulk-add"]').trigger('click')
+    await wrapper.get('[data-testid="email-blacklist-save"]').trigger('click')
+    await wrapper.get('[data-testid="email-blacklist-save"]').trigger('click')
+    expect(mocks.updateBlacklist).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="email-blacklist-bulk-input"]').attributes('disabled')).toBeDefined()
+    rejectSave({ message: '保存未完成，请重试' })
+    await flushPromises()
+    expect(mocks.showError).toHaveBeenCalledWith('保存未完成，请重试')
+    expect(wrapper.get('[data-testid="email-blacklist-bulk-input"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="email-blacklist-clear"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="email-blacklist-row"] button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.findAll('[data-testid="email-blacklist-row"]')).toHaveLength(2)
+    await wrapper.get('[data-testid="email-blacklist-row"] button').trigger('click')
+    expect(wrapper.findAll('[data-testid="email-blacklist-row"]')).toHaveLength(1)
+    expect(mocks.findUsers).not.toHaveBeenCalled()
+  })
+
+  it.each(['add', 'remove', 'clear'])('保存等待期间不能通过 %s 修改正在保存的名单', async action => {
+    let finish!: (result: { emails: string[]; added: string[]; max: number }) => void
+    mocks.updateBlacklist.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const wrapper = mountEditor()
+    await flushPromises()
+    await wrapper.get('[data-testid="email-blacklist-edit"]').trigger('click')
+    await wrapper.get('[data-testid="email-blacklist-bulk-input"]').setValue('first@example.test')
+    await wrapper.get('[data-testid="email-blacklist-bulk-add"]').trigger('click')
+    const saved = wrapper.findAll('[data-testid="email-blacklist-row"]').map(row => row.text())
+    await wrapper.get('[data-testid="email-blacklist-save"]').trigger('click')
+    if (action === 'add') {
+      await wrapper.get('[data-testid="email-blacklist-bulk-input"]').setValue('late@example.test')
+      await wrapper.get('[data-testid="email-blacklist-bulk-add"]').trigger('click')
+    } else if (action === 'remove') {
+      await wrapper.get('[data-testid="email-blacklist-row"] button').trigger('click')
+    } else {
+      await wrapper.get('[data-testid="email-blacklist-clear"]').trigger('click')
+    }
+    expect(wrapper.findAll('[data-testid="email-blacklist-row"]').map(row => row.text())).toEqual(saved)
+    expect(wrapper.get('[data-testid="email-blacklist-bulk-input"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="email-blacklist-clear"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="email-blacklist-row"] button').attributes('disabled')).toBeDefined()
+    expect(mocks.updateBlacklist).toHaveBeenCalledTimes(1)
+    expect(mocks.updateBlacklist).toHaveBeenCalledWith(['first@example.test', 'old@gmail.com'])
+    finish({ emails: ['first@example.test', 'old@gmail.com'], added: [], max: 20000 })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="email-blacklist-bulk-input"]').exists()).toBe(false)
+  })
+
   it('批量添加后保存整份名单，并对新增项命中的用户弹窗确认禁用', async () => {
     mocks.updateBlacklist.mockResolvedValue({
       emails: ['new.one@gmail.com', 'new2@googlemail.com', 'old@gmail.com'],
