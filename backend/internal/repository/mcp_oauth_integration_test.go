@@ -33,7 +33,8 @@ func newMCPOAuthIntegrationFixture(t *testing.T, ctx context.Context) mcpOAuthIn
 	t.Helper()
 	user := mustCreateUser(t, testEntClient(t), &service.User{})
 	repo := NewMCPOAuthRepository(integrationEntClient, integrationDB)
-	oauth := service.NewMCPOAuthService(repo, NewUserRepository(integrationEntClient, integrationDB))
+	users := NewUserRepository(integrationEntClient, integrationDB)
+	oauth := service.NewMCPOAuthService(repo, users)
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -60,7 +61,9 @@ func newMCPOAuthIntegrationFixture(t *testing.T, ctx context.Context) mcpOAuthIn
 	require.NoError(t, err)
 	require.Equal(t, client.ClientName, preview.ClientName)
 	require.Equal(t, redirectURI, preview.RedirectURI)
-	redirect, err := oauth.Decide(ctx, user.ID, service.MCPOAuthConsentInput{
+	authenticatedUser, err := service.NewUserService(users, nil, nil, nil).GetByID(ctx, user.ID)
+	require.NoError(t, err)
+	redirect, err := oauth.Decide(ctx, user.ID, authenticatedUser.TokenVersion, service.MCPOAuthConsentInput{
 		Authorization: authorization, Approved: true,
 	}, mcpIntegrationResource)
 	require.NoError(t, err)

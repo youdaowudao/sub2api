@@ -207,6 +207,11 @@ func (h *MCPOAuthHandler) Decide(c *gin.Context) {
 		response.Unauthorized(c, "User not authenticated")
 		return
 	}
+	tokenVersion, ok := middleware.GetAccessTokenVersionFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "A browser login token is required to authorize MCP")
+		return
+	}
 	resource, ok := h.resource(c, false)
 	if !ok {
 		return
@@ -233,7 +238,7 @@ func (h *MCPOAuthHandler) Decide(c *gin.Context) {
 			return
 		}
 	}
-	redirect, err := h.oauth.Decide(c.Request.Context(), subject.UserID, input, resource)
+	redirect, err := h.oauth.Decide(c.Request.Context(), subject.UserID, tokenVersion, input, resource)
 	if mcpOAuthHandleError(c, err, false) {
 		return
 	}

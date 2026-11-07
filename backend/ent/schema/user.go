@@ -43,6 +43,9 @@ func (User) Fields() []ent.Field {
 		field.String("password_hash").
 			MaxLen(255).
 			NotEmpty(),
+		// 与邮箱/密码指纹共同构成令牌版本；仅显式撤销时原子递增。
+		field.Int64("token_version").
+			Default(0),
 		field.String("role").
 			MaxLen(20).
 			Default(domain.RoleUser),

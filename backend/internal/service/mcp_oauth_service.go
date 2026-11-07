@@ -414,10 +414,13 @@ func (s *MCPOAuthService) Preview(ctx context.Context, userID int64, input MCPOA
 	return &MCPOAuthConsent{ClientID: input.ClientID, ClientName: client.Name, RedirectURI: input.RedirectURI, Resource: resource, Scope: MCPOAuthScope}, nil
 }
 
-func (s *MCPOAuthService) Decide(ctx context.Context, userID int64, input MCPOAuthConsentInput, resource string) (string, error) {
+func (s *MCPOAuthService) Decide(ctx context.Context, userID, authenticatedTokenVersion int64, input MCPOAuthConsentInput, resource string) (string, error) {
 	client, user, err := s.validateAuthorization(ctx, userID, input.Authorization, resource)
 	if err != nil {
 		return "", err
+	}
+	if resolvedTokenVersion(user) != authenticatedTokenVersion {
+		return "", ErrTokenRevoked
 	}
 	redirect, _ := url.Parse(input.Authorization.RedirectURI)
 	query := redirect.Query()
@@ -453,7 +456,7 @@ func (s *MCPOAuthService) Decide(ctx context.Context, userID int64, input MCPOAu
 	}
 	now := time.Now().UTC()
 	grant := &MCPOAuthGrant{ID: id, ClientID: input.Authorization.ClientID, ClientName: client.Name,
-		UserID: user.ID, TokenVersion: resolvedTokenVersion(user), Resource: resource,
+		UserID: user.ID, TokenVersion: authenticatedTokenVersion, Resource: resource,
 		Scope: input.Scope, ReadOnly: true, CreatedAt: now, ExpiresAt: now.Add(MCPOAuthGrantLifetime)}
 	if input.ReadOnly != nil {
 		grant.ReadOnly = *input.ReadOnly

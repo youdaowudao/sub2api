@@ -306,6 +306,9 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	if fields.PasswordHash {
 		updateOp = updateOp.SetPasswordHash(userIn.PasswordHash)
 	}
+	if fields.IncrementTokenVersion {
+		updateOp = updateOp.AddTokenVersion(1)
+	}
 	if fields.Role {
 		updateOp = updateOp.SetRole(userIn.Role)
 	}
@@ -377,6 +380,10 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 
 	userIn.UpdatedAt = updated.UpdatedAt
+	if fields.IncrementTokenVersion {
+		userIn.TokenVersion = updated.TokenVersion
+		userIn.TokenVersionResolved = false
+	}
 	return nil
 }
 
@@ -1545,6 +1552,8 @@ func applyUserEntityToService(dst *service.User, src *dbent.User) {
 		return
 	}
 	dst.ID = src.ID
+	dst.TokenVersion = src.TokenVersion
+	dst.TokenVersionResolved = false
 	dst.SignupSource = src.SignupSource
 	dst.LastLoginAt = src.LastLoginAt
 	dst.LastActiveAt = src.LastActiveAt

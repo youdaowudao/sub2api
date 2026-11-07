@@ -26,3 +26,11 @@ func GetUserRoleFromContext(c *gin.Context) (string, bool) {
 	role, ok := value.(string)
 	return role, ok
 }
+
+// GetAccessTokenVersionFromContext never substitutes a fresh user version for
+// the version that actually authenticated this request. Zero is a valid value.
+func GetAccessTokenVersionFromContext(c *gin.Context) (int64, bool) {
+	value, exists := c.Get(string(ContextKeyAccessTokenVersion))
+	version, ok := value.(int64)
+	return version, exists && ok
+}

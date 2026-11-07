@@ -214,12 +214,14 @@ func mcpOAuthRouteAuthorization(clientID, resource string) service.MCPOAuthAutho
 	}
 }
 
-func issueMCPRouteOAuthToken(t *testing.T, oauth *service.MCPOAuthService, resource, scope string, readOnly bool) string {
+func issueMCPRouteOAuthToken(t *testing.T, oauth *service.MCPOAuthService, users *mcpOAuthRouteUsers, resource, scope string, readOnly bool) string {
 	t.Helper()
 	client, err := oauth.Register(context.Background(), service.MCPOAuthRegisterInput{RedirectURIs: []string{"http://127.0.0.1:37777/callback"}})
 	require.NoError(t, err)
 	authorization := mcpOAuthRouteAuthorization(client.ClientID, resource)
-	redirect, err := oauth.Decide(context.Background(), 7, service.MCPOAuthConsentInput{Authorization: authorization, Approved: true, Scope: scope, ReadOnly: &readOnly}, resource)
+	authenticatedUser, err := service.NewUserService(users, nil, nil, nil).GetByID(context.Background(), 7)
+	require.NoError(t, err)
+	redirect, err := oauth.Decide(context.Background(), 7, authenticatedUser.TokenVersion, service.MCPOAuthConsentInput{Authorization: authorization, Approved: true, Scope: scope, ReadOnly: &readOnly}, resource)
 	require.NoError(t, err)
 	u, err := url.Parse(redirect)
 	require.NoError(t, err)
@@ -261,7 +263,10 @@ func newMCPOAuthHTTPFixture(t *testing.T, role string) *mcpOAuthHTTPFixture {
 	users.user.TotpEnabled = true
 	totp := service.NewTotpService(users, nil, mcpOAuthRouteStepUpCache{}, settings, nil, nil)
 	h := mcpRouteHandlers()
-	h.MCPOAuth = handler.NewMCPOAuthHandler(oauth, totp, service.NewUserService(users, nil, nil, nil), settings, cfg)
+	userService := service.NewUserService(users, nil, nil, nil)
+	authenticatedUser, err := userService.GetByID(context.Background(), 7)
+	require.NoError(t, err)
+	h.MCPOAuth = handler.NewMCPOAuthHandler(oauth, totp, userService, settings, cfg)
 	h.APIKey = handler.NewAPIKeyHandler(service.NewAPIKeyService(&mcpRouteAPIKeyRepo{}, nil, nil, nil, nil, nil, nil))
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
@@ -274,6 +279,7 @@ func newMCPOAuthHTTPFixture(t *testing.T, role string) *mcpOAuthHTTPFixture {
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 7})
 		c.Set(string(middleware.ContextKeyUserRole), role)
 		c.Set(middleware.ContextKeySessionID, "browser-session")
+		c.Set(string(middleware.ContextKeyAccessTokenVersion), authenticatedUser.TokenVersion)
 		c.Next()
 	})
 	v1 := router.Group("/api/v1")
