@@ -29,6 +29,11 @@ func buildBodyTooLargeMessage(limit int64) string {
 	return fmt.Sprintf("Request body too large, limit is %s", formatBodyLimit(limit))
 }
 
+// buildBodyReadFailureMessage 返回读取请求体失败（非超限）时给客户端的提示。
+func buildBodyReadFailureMessage(err error) string {
+	return pkghttputil.RequestBodyReadFailureMessage(err)
+}
+
 func readLenientJSONRequestBodyWithPrealloc(req *http.Request, cfg *config.Config) ([]byte, error) {
 	return pkghttputil.ReadLenientJSONRequestBodyWithPrealloc(req, gatewayMaxBodySize(cfg))
 }

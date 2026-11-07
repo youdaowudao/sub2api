@@ -56,7 +56,7 @@ func (h *OpenAIGatewayHandler) AlphaSearch(c *gin.Context) {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
 			return
 		}
-		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", buildBodyReadFailureMessage(err))
 		return
 	}
 	if len(body) == 0 {
