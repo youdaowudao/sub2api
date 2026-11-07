@@ -73,6 +73,43 @@ describe('the actual App router owns one continuous plugin shell', () => {
   })
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
+  it('does not report disabled on logout, but keeps entry-read failure feedback', async () => {
+    const { wrapper } = await mountApp()
+    mocks.info.mockClear()
+    mocks.list.mockRejectedValueOnce(new Error('entry lookup failed'))
+    await usePluginEntriesStore().refresh()
+    await flushPromises()
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(mocks.info).toHaveBeenCalledWith('admin.plugins.pageLoadFailed')
+    mocks.list.mockResolvedValue([entry])
+    auth.token = 'restored-identity'
+    await flushPromises()
+    expect(wrapper.find('iframe').exists()).toBe(true)
+    mocks.info.mockClear()
+    auth.isAuthenticated = false
+    auth.token = ''
+    await flushPromises()
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(mocks.info).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('does not report a disabled plugin during normal token renewal', async () => {
+    const { wrapper } = await mountApp()
+    const old = wrapper.get('iframe').element
+    mocks.info.mockClear()
+    auth.token = 'renewed-without-disable'
+    await flushPromises()
+    expect(wrapper.get('iframe').element).not.toBe(old)
+    expect(mocks.session).toHaveBeenCalledTimes(2)
+    expect(mocks.info).not.toHaveBeenCalled()
+    mocks.list.mockResolvedValue([])
+    await usePluginEntriesStore().refresh()
+    await flushPromises()
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(mocks.info).toHaveBeenCalledWith('admin.plugins.pageDisabled')
+  })
+
   it('keeps the original frame, session and port across two different AppLayout pages and ui.navigate', async () => {
     const { wrapper, router } = await mountApp()
     const iframe = wrapper.get('iframe')
