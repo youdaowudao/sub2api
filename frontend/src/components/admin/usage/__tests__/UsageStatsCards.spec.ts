@@ -105,3 +105,23 @@ describe('optional cache rate', () => {
     expect(wrapper.text()).toContain('Cache: 34')
   })
 })
+
+describe('usage currencies', () => {
+  it('RMB actual excludes dollars', () => {
+    const wrapper = mount(UsageStatsCards, { props: { stats } })
+    const actual = wrapper.get('p.text-green-600').text()
+    expect.soft(actual).toBe('¥0.0010')
+    expect.soft(actual).not.toContain('$')
+    wrapper.unmount()
+  })
+  it('preserves standard and account dollars', () => {
+    const wrapper = mount(UsageStatsCards, { props: { stats, showAccountCost: true } })
+    const account = wrapper.get('span.text-orange-500')
+    expect(account.text()).toBe('Cost $0.0010')
+    expect.soft(account.text()).not.toContain('¥')
+    const standard = account.element.parentElement!.textContent!
+    expect(standard).toContain('Standard $0.0010')
+    expect.soft(standard).not.toContain('¥')
+    wrapper.unmount()
+  })
+})

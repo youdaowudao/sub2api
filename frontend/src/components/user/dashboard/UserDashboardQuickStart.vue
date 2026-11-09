@@ -76,7 +76,7 @@
           <StepHead :index="2" :done="hasBalance" :active="guideStep === 2" :title="t('dashboard.quickStart.step2')" />
           <div class="step-body">
             <p class="step-label">{{ t('dashboard.quickStart.step2Label') }}</p>
-            <p class="step-value tabular-nums" :class="hasBalance ? 'text-emerald-600 dark:text-emerald-400' : ''" data-testid="quick-start-balance">${{ balance.toFixed(2) }}</p>
+            <p class="step-value tabular-nums" :class="hasBalance ? 'text-emerald-600 dark:text-emerald-400' : ''" data-testid="quick-start-balance">¥{{ balance.toFixed(2) }}</p>
           </div>
           <!-- 指引第二步时卡片又窄、一行放不下：「进群领 2 元」排上面、「去充值」排下面，气泡在上方留出的空位里，不压住按钮 -->
           <div class="step-foot flex-wrap gap-x-3 gap-y-2" :class="{ '!pt-14 step2-foot-guided': guideStep === 2 }">

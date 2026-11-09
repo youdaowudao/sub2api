@@ -81,6 +81,7 @@ describe('GroupDistributionChart', () => {
       dataset: { data: [1200, 600] },
     })
     expect(label).toBe('group-a: 1.20K (66.7%)')
+    expect(label).not.toMatch(/[$¥]/)
   })
 
   it('uses actual_cost and reorders rows in actual cost mode', () => {
@@ -110,7 +111,8 @@ describe('GroupDistributionChart', () => {
       raw: 0.9,
       dataset: { data: [0.9, 0.1] },
     })
-    expect(label).toBe('group-b: $0.900 (90.0%)')
+    expect.soft(label).toBe('group-b: ¥0.900 (90.0%)')
+    expect(label).not.toContain('$')
   })
 
   it('can hide account cost for user usage stats without account_cost', () => {
@@ -130,6 +132,28 @@ describe('GroupDistributionChart', () => {
     expect(wrapper.findAll('thead th')).toHaveLength(5)
     expect(wrapper.findAll('tbody tr')[0].findAll('td')).toHaveLength(5)
   })
+  it('RMB actual table cells exclude dollars', () => {
+    const wrapper = mount(GroupDistributionChart, { props: { groupStats } })
+    for (const row of wrapper.findAll('tbody tr')) {
+      const actual = row.findAll('td')[3].text()
+      expect.soft(actual).toMatch(/^¥[0-9]/)
+      expect.soft(actual).not.toContain('$')
+    }
+    wrapper.unmount()
+  })
+
+  it('preserves dollar account and standard table cells', () => {
+    const wrapper = mount(GroupDistributionChart, { props: { groupStats } })
+    for (const row of wrapper.findAll('tbody tr')) {
+      for (const cell of row.findAll('td').slice(4, 6)) {
+        expect(cell.text()).toMatch(/^\$[0-9]/)
+        expect.soft(cell.text()).not.toContain('¥')
+      }
+    }
+    wrapper.unmount()
+  })
+
+
 })
 
 it('adds a cache rate column only when supplied and retains the old columns', async () => {
@@ -141,4 +165,5 @@ it('adds a cache rate column only when supplied and retains the old columns', as
   expect(wrapper.find('[data-testid="group-cache-hit-rate"]').text()).toBe('90.0%')
   await wrapper.setProps({ cacheHitRate: { loading: true, error: null, byId: {} } })
   expect(wrapper.findAll('tbody tr')[0].findAll('td')[2].text()).toBe('…')
+
 })

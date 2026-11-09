@@ -117,4 +117,16 @@ describe('TokenUsageTrend', () => {
     // Hit rate = 500 / (200 + 500 + 300) * 100 = 50%
     expect(hitRateDataset.data[0]).toBe(50)
   })
+
+  it('RMB trend tooltip changes only actual cost', () => {
+    const wrapper = mount(TokenUsageTrend, { props: { trendData: [{ date: '2026-11-09', requests: 1, input_tokens: 100, output_tokens: 50, cache_creation_tokens: 0, cache_read_tokens: 0, cost: 4.56, actual_cost: 1.23 }] } })
+    const options = (wrapper.vm as any).$?.setupState.lineOptions
+    const footer = options.plugins.tooltip.callbacks.footer([{ dataIndex: 0 }])
+    expect.soft(footer).toBe('Actual: ¥1.23 | Standard: $4.56')
+    expect.soft(footer.split(' | ')[0]).not.toContain('$')
+    expect.soft(footer.split(' | ')[1]).not.toContain('¥')
+    expect.soft(options.plugins.tooltip.callbacks.footer([])).toBe('')
+    wrapper.unmount()
+  })
+
 })

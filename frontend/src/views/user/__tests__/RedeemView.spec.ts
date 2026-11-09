@@ -238,4 +238,35 @@ describe('RedeemView refresh after redemption', () => {
     expect(showWarning).not.toHaveBeenCalled()
     wrapper.unmount()
   })
+
+  it('RMB current, credited, new and history balances exclude dollars', async () => {
+    redeem.mockResolvedValue({ type: 'balance', value: 20, new_balance: 30, message: 'Code applied' })
+    getHistory.mockResolvedValue({ total: 2, items: [
+      { id: 1, code: 'RMB-CREDIT', type: 'balance', value: 20, used_at: '2026-11-09T00:00:00Z' },
+      { id: 2, code: 'RMB-DEBIT', type: 'admin_balance', value: -5, used_at: '2026-11-09T00:00:00Z' },
+    ] })
+    const wrapper = await submitCode()
+    for (const value of ['¥10.00', '¥20.00', '¥30.00', '+¥20.00', '¥-5.00']) expect.soft(wrapper.text()).toContain(value)
+    const credited = wrapper.findAll('p').find(row => row.text().startsWith('redeem.added:'))!.text()
+    expect.soft(credited).toBe('redeem.added: ¥20.00')
+    expect.soft(credited).not.toContain('$')
+    const newBalance = wrapper.findAll('p').find(row => row.text().startsWith('redeem.newBalance:'))!.text()
+    expect.soft(newBalance).toBe('redeem.newBalance: ¥30.00')
+    expect.soft(newBalance).not.toContain('$')
+    expect.soft(wrapper.text()).not.toContain('$')
+    wrapper.unmount()
+  })
+
+  it.each(['concurrency', 'subscription'])('preserves %s result and history without currency', async (type) => {
+    redeem.mockResolvedValue({ type, value: 20, group_name: 'Fixture plan', validity_days: 30, message: 'Code applied' })
+    getHistory.mockResolvedValue({ total: 1, items: [{ id: 1, code: 'NON-MONEY', type, value: 20, validity_days: 30, used_at: '2026-11-09T00:00:00Z' }] })
+    const wrapper = await submitCode()
+    const result = wrapper.findAll('h3').find(el => el.text() === 'redeem.redeemSuccess')!.element.parentElement!.textContent!
+    expect(result).not.toMatch(/[$¥]/)
+    const history = wrapper.get('.text-right').text()
+    expect(history).not.toMatch(/[$¥]/)
+    expect(history).toContain(type === 'concurrency' ? '+20' : '30')
+    wrapper.unmount()
+  })
+
 })
