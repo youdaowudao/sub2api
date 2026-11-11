@@ -472,6 +472,7 @@ describe('PaymentView recharge currencies and rate preview', () => {
   it.each([
     ['zh', 1, '充值倍率 1:1'], ['zh', 0.5, '充值倍率 1:0.5'],
     ['en', 1, 'Recharge rate 1:1'], ['en', 0.5, 'Recharge rate 1:0.5'],
+    ['zh', 0.140845, '充值倍率 1:0.140845'], ['en', 0.140845, 'Recharge rate 1:0.140845'],
   ] as const)('RMB rate %s %s uses compact configured numbers', async (language, rate, text) => {
     const template = (language === 'zh' ? zh : en).payment.rechargeRatePreview
     translate.mockImplementation((key: string, params?: Record<string, unknown>) =>
