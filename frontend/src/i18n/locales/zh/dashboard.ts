@@ -199,6 +199,8 @@ export default {
     nameLabel: '名称',
     namePlaceholder: '测试',
     quickCreateHint: '名称和分组都帮你填好了，直接点「创建」就行',
+    advancedSettings: '高级设置（新手不用点开）',
+    createNextStepHint: '创建后，还需要按接入教程，将密钥配置到你使用的软件中。',
     groupLabel: '分组',
     providerLabel: '厂商',
     providers: {
