@@ -160,3 +160,33 @@ describe('UserDashboardStats 按平台拆分', () => {
     expect(w.html()).not.toContain('dashboard.platformBreakdown')
   })
 })
+
+describe('dashboard currencies', () => {
+  function currencyStats() {
+    return mountStats(makeStats({ today_actual_cost: 1.23, today_cost: 4.56, total_actual_cost: 2.34, total_cost: 5.67, by_platform: [usage('openai', 2.34)] }), [quota({ platform: 'openai', daily_limit_usd: 10, daily_usage_usd: 2.5 })])
+  }
+  it('RMB balance and all actual spending exclude dollars', async () => {
+    const wrapper = currencyStats()
+    await wrapper.setProps({ balance: 12.34 })
+    const balance = wrapper.get('p.text-emerald-600').text()
+    expect.soft(balance).toBe('¥12.34')
+    expect.soft(balance).not.toContain('$')
+    const actual = wrapper.findAll('[title="dashboard.actual"]')
+    expect.soft(actual.map(cell => cell.text())).toEqual(['¥1.2300', '¥2.3400', '¥2.3400'])
+    for (const cell of actual) expect.soft(cell.text()).not.toContain('$')
+    const today = wrapper.get('[data-testid="platform-card"] .mt-2 .font-mono').text()
+    expect.soft(today).toBe('¥2.3400')
+    expect.soft(today).not.toContain('$')
+    wrapper.unmount()
+  })
+  it('preserves standard costs and platform quota dollars', () => {
+    const wrapper = currencyStats()
+    const standard = wrapper.findAll('[title="dashboard.standard"]')
+    expect(standard.map(cell => cell.text())).toEqual(['/ $4.5600', '/ $5.6700'])
+    for (const cell of standard) expect.soft(cell.text()).not.toContain('¥')
+    const quotaText = wrapper.get('[data-testid="platform-card"] .mt-3').text()
+    expect(quotaText).toContain('$2.50 / $10.00')
+    expect.soft(quotaText).not.toContain('¥')
+    wrapper.unmount()
+  })
+})

@@ -100,6 +100,7 @@ describe('ModelDistributionChart', () => {
       dataset: { data: [1000, 500] },
     })
     expect(label).toBe('model-a: 1.00K (66.7%)')
+    expect(label).not.toMatch(/[$¥]/)
   })
 
   it('uses actual_cost and reorders rows in actual cost mode', () => {
@@ -129,7 +130,8 @@ describe('ModelDistributionChart', () => {
       raw: 1.4,
       dataset: { data: [1.4, 0.2] },
     })
-    expect(label).toBe('model-b: $1.40 (87.5%)')
+    expect.soft(label).toBe('model-b: ¥1.40 (87.5%)')
+    expect(label).not.toContain('$')
   })
 
   it('can hide account cost for user usage stats without account_cost', () => {
@@ -172,30 +174,60 @@ describe('ModelDistributionChart', () => {
     })
 
     const rankingButton = wrapper.findAll('button').find((button) => button.text() === 'User Spending Ranking')
-    expect(rankingButton).toBeTruthy()
+    expect.soft(rankingButton).toBeTruthy()
     await rankingButton!.trigger('click')
 
     const chartData = JSON.parse(wrapper.find('.chart-data').text())
-    expect(chartData.labels).toEqual([
+    expect.soft(chartData.labels).toEqual([
       '#1 alpha',
       '#2 beta@example.com',
       '#3 User #3',
       'Others',
     ])
-    expect(chartData.datasets[0].data).toEqual([12, 8, 0, 10])
-    expect(chartData.datasets[0].backgroundColor[0]).toBe('#3b82f6')
-    expect(chartData.datasets[0].backgroundColor[3]).toBe('#94a3b8')
-    expect(chartData.datasets[0].backgroundColor[3]).not.toBe(chartData.datasets[0].backgroundColor[0])
+    expect.soft(chartData.datasets[0].data).toEqual([12, 8, 0, 10])
+    expect.soft(chartData.datasets[0].backgroundColor[0]).toBe('#3b82f6')
+    expect.soft(chartData.datasets[0].backgroundColor[3]).toBe('#94a3b8')
+    expect.soft(chartData.datasets[0].backgroundColor[3]).not.toBe(chartData.datasets[0].backgroundColor[0])
 
     const rows = wrapper.findAll('tbody tr')
-    expect(rows).toHaveLength(4)
-    expect(rows[0].text()).toContain('alpha')
-    expect(rows[0].text()).not.toContain('alpha@example.com')
-    expect(rows[1].text()).toContain('beta@example.com')
-    expect(rows[2].text()).toContain('User #3')
-    expect(rows[3].text()).toContain('Others')
-    expect(rows[3].text()).toContain('4')
-    expect(rows[3].text()).toContain('400')
-    expect(rows[3].text()).toContain('$10.00')
+    expect.soft(rows).toHaveLength(4)
+    expect.soft(rows[0].text()).toContain('alpha')
+    expect.soft(rows[0].text()).not.toContain('alpha@example.com')
+    expect.soft(rows[1].text()).toContain('beta@example.com')
+    expect.soft(rows[2].text()).toContain('User #3')
+    expect.soft(rows[3].text()).toContain('Others')
+    expect.soft(rows[3].text()).toContain('4')
+    expect.soft(rows[3].text()).toContain('400')
+    expect.soft(rows[3].text()).toContain('¥10.00')
+    for (const row of rows) {
+      expect.soft(row.findAll('td')[3].text()).toMatch(/^¥[0-9]/)
+      expect.soft(row.findAll('td')[3].text()).not.toContain('$')
+    }
+    const options = (wrapper.vm as any).$?.setupState.rankingDoughnutOptions
+    const label = options.plugins.tooltip.callbacks.label({ label: 'alpha', raw: 12, dataset: { data: [12, 8, 0, 10] } })
+    expect.soft(label).toBe('alpha: ¥12.00 (40.0%)')
+    expect.soft(label).not.toContain('$')
   })
+
+  it('RMB actual table cells exclude dollars', () => {
+    const wrapper = mount(ModelDistributionChart, { props: { modelStats } })
+    for (const row of wrapper.findAll('tbody tr')) {
+      const actual = row.findAll('td')[3].text()
+      expect.soft(actual).toMatch(/^¥[0-9]/)
+      expect.soft(actual).not.toContain('$')
+    }
+    wrapper.unmount()
+  })
+
+  it('preserves dollar account and standard table cells', () => {
+    const wrapper = mount(ModelDistributionChart, { props: { modelStats } })
+    for (const row of wrapper.findAll('tbody tr')) {
+      for (const cell of row.findAll('td').slice(4, 6)) {
+        expect(cell.text()).toMatch(/^\$[0-9]/)
+        expect.soft(cell.text()).not.toContain('¥')
+      }
+    }
+    wrapper.unmount()
+  })
+
 })

@@ -459,4 +459,12 @@ describe('buildQuickConnectLink', () => {
     expect(buildQuickConnectLink('sk-a+b', '测试')).toBe('usegoodai://import?v=1&app=codex&key=sk-a%2Bb&name=%E6%B5%8B%E8%AF%95')
     expect(buildQuickConnectLink('sk-x')).toBe('usegoodai://import?v=1&app=codex&key=sk-x')
   })
+
+  it('RMB quick start balance excludes dollars', async () => {
+    const wrapper = await panel({ balance: 12.34 })
+    const balance = wrapper.get('[data-testid="quick-start-balance"]').text()
+    expect.soft(balance).toBe('¥12.34')
+    expect.soft(balance).not.toContain('$')
+  })
+
 })

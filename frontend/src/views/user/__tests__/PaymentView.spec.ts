@@ -83,7 +83,7 @@ const showInfo = vi.hoisted(() => vi.fn())
 const showWarning = vi.hoisted(() => vi.fn())
 const getCheckoutInfo = vi.hoisted(() => vi.fn())
 const bridgeInvoke = vi.hoisted(() => vi.fn())
-const translate = vi.hoisted(() => vi.fn((key: string) => key))
+const translate = vi.hoisted(() => vi.fn((key: string, _params?: Record<string, unknown>) => key))
 // Public settings live in a reactive holder so tests can flip feature flags after mount
 // and exercise the watchers that react to them.
 const appStoreState = vi.hoisted(() => ({
@@ -432,40 +432,126 @@ describe('PaymentView subscription plan grid', () => {
   })
 })
 
-describe('PaymentView recharge rate preview', () => {
-  it('uses the selected payment method currency in both locale templates', async () => {
-    translate.mockClear()
+describe('PaymentView recharge currencies and rate preview', () => {
+  beforeEach(() => {
+    vi.useRealTimers()
     routeState.path = '/purchase'
     routeState.query = {}
-    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({
-      balance_recharge_multiplier: 0.5,
-      methods: {
-        stripe: {
-          ...checkoutInfoFixture().data.methods.wxpay,
-          currency: 'USD',
-        },
-      },
-    }))
+    window.localStorage.clear()
+    createOrder.mockReset().mockRejectedValue(new Error('isolated checkout stops after payload'))
+    translate.mockClear()
+  })
+  afterEach(() => { translate.mockImplementation((key: string) => key) })
 
-    const wrapper = shallowMount(PaymentView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          Teleport: true,
-          Transition: false,
-        },
-      },
-    })
+  async function recharge(overrides: Partial<CheckoutInfoResponse> = {}, realAmountInput = false) {
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture(overrides))
+    const wrapper = shallowMount(PaymentView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, Teleport: true, Transition: false,
+      AmountInput: !realAmountInput,
+    } } })
     await flushPromises()
+    return wrapper
+  }
+  const rowValue = (wrapper: ReturnType<typeof shallowMount>, key: string) =>
+    wrapper.findAll('span').find(span => span.text() === key)!.element.parentElement!.lastElementChild!.textContent!
+
+  it.each([1, 5])('submits the real shortcut value %i through the existing recharge action', async amount => {
+    const method = { ...checkoutInfoFixture().data.methods.wxpay, single_min: 1, currency: 'CNY' }
+    const wrapper = await recharge({ methods: { wxpay: method } }, true)
+    expect(wrapper.find('[data-testid="quick-amount-2000"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="quick-amount-5000"]').exists()).toBe(false)
+    await wrapper.get(`[data-testid="quick-amount-${amount}"]`).trigger('click')
+    expect(wrapper.get<HTMLButtonElement>('[data-tour="recharge-submit"]').element.disabled).toBe(false)
+    await wrapper.get('[data-tour="recharge-submit"]').trigger('click')
+    await flushPromises()
+    expect(createOrder).toHaveBeenCalledOnce()
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ amount, order_type: 'balance', payment_type: 'wxpay' }))
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['zh', 1, '充值倍率 1:1'], ['zh', 0.5, '充值倍率 1:0.5'],
+    ['en', 1, 'Recharge rate 1:1'], ['en', 0.5, 'Recharge rate 1:0.5'],
+  ] as const)('RMB rate %s %s uses compact configured numbers', async (language, rate, text) => {
+    const template = (language === 'zh' ? zh : en).payment.rechargeRatePreview
+    translate.mockImplementation((key: string, params?: Record<string, unknown>) =>
+      key === 'payment.rechargeRatePreview' ? template.replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name])) : key)
+    const wrapper = await recharge({ balance_recharge_multiplier: rate })
+    expect.soft(wrapper.text()).not.toContain('1:')
     wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 10)
     await flushPromises()
+    expect.soft(translate).toHaveBeenCalledWith('payment.rechargeRatePreview', { rate: String(rate) })
+    expect.soft(wrapper.text()).toContain(text)
+    expect.soft(wrapper.text()).not.toContain('1:1.00')
+    expect.soft(wrapper.text()).not.toContain('1:0.50')
+    expect.soft(wrapper.text()).not.toContain('USD')
+    wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', null)
+    await flushPromises()
+    expect.soft(wrapper.text()).not.toContain(text)
+    wrapper.unmount()
+  })
 
-    expect(translate).toHaveBeenCalledWith('payment.rechargeRatePreview', {
-      currency: 'USD',
-      usd: '0.50',
-    })
-    expect(en.payment.rechargeRatePreview).toBe('Current rate: 1 {currency} = {usd} USD')
-    expect(zh.payment.rechargeRatePreview).toBe('当前倍率：1 {currency} = {usd} USD')
+  it('RMB rate locale templates match the specification', () => {
+    expect.soft(en.payment.rechargeRatePreview).toBe('Recharge rate 1:{rate}')
+    expect.soft(zh.payment.rechargeRatePreview).toBe('充值倍率 1:{rate}')
+  })
+
+  it('RMB recharge bonus and credited balance exclude dollars', async () => {
+    const wrapper = await recharge({ balance_recharge_multiplier: 0.5, recharge_bonus_tiers: [{ min_amount: 100, bonus_percent: 20 }] })
+    wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 100)
+    await flushPromises()
+    const bonus = wrapper.get('[data-testid="recharge-bonus-row"]').text()
+    const credited = wrapper.get('[data-testid="recharge-credited-row"]').text()
+    expect.soft(bonus).toContain('+¥10.00')
+    expect.soft(credited).toContain('¥60.00')
+    expect.soft(bonus).not.toContain('$')
+    expect.soft(credited).not.toContain('$')
+    wrapper.unmount()
+  })
+
+  it.each(['USD', 'HKD', 'CNY'])('preserves %s payment amounts and selected balance order amount', async currency => {
+    for (const mode of ['bonus', 'discount']) {
+      const wrapper = await recharge({
+        balance_recharge_multiplier: 0.5, recharge_fee_rate: 3, recharge_bonus_mode: mode,
+        recharge_bonus_tiers: [{ min_amount: 100, bonus_percent: 20 }],
+        methods: { stripe: { ...checkoutInfoFixture().data.methods.wxpay, currency } },
+      })
+      wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 100)
+      await flushPromises()
+      const base = rowValue(wrapper, 'payment.paymentAmount')
+      expect(base).toBe(formatPaymentAmount(100, currency))
+      const paid = rowValue(wrapper, 'payment.actualPay')
+      expect(paid).toBe(formatPaymentAmount(mode === 'discount' ? 82.4 : 103, currency))
+      const fee = wrapper.findAll('span').find(span => span.text() === 'payment.fee (3%)')!.element.parentElement!.lastElementChild!.textContent!
+      expect(fee).toBe(formatPaymentAmount(mode === 'discount' ? 2.4 : 3, currency))
+      if (currency !== 'CNY') {
+        for (const value of [base, paid, fee]) expect.soft(value).not.toContain('¥')
+      } else {
+        for (const value of [base, paid, fee]) expect(value).not.toContain('$')
+      }
+      if (mode === 'discount') {
+        const discount = wrapper.get('[data-testid="recharge-discount-row"]').element.lastElementChild!.textContent!
+        expect(discount).toBe('-' + formatPaymentAmount(20, currency))
+        if (currency !== 'CNY') expect.soft(discount).not.toContain('¥')
+        expect(wrapper.find('[data-testid="recharge-bonus-row"]').exists()).toBe(false)
+      }
+      const submit = wrapper.get('[data-tour="recharge-submit"]')
+      expect(submit.attributes('disabled')).toBeUndefined()
+      await submit.trigger('click')
+      await flushPromises()
+      expect(createOrder).toHaveBeenLastCalledWith(expect.objectContaining({ amount: 100, order_type: 'balance', payment_type: 'stripe' }))
+      expect(createOrder.mock.calls.at(-1)![0].amount).not.toBe(mode === 'discount' ? 50 : 60)
+      wrapper.unmount()
+    }
+  })
+
+  it('preserves default hidden bonus and credited rows at rate one', async () => {
+    const wrapper = await recharge()
+    wrapper.getComponent(AmountInput).vm.$emit('update:modelValue', 100)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="recharge-bonus-row"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="recharge-credited-row"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 })
 

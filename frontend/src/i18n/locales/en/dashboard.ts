@@ -199,6 +199,8 @@ export default {
     nameLabel: 'Name',
     namePlaceholder: 'test',
     quickCreateHint: 'Name and group are filled in for you, just click Create',
+    advancedSettings: 'Advanced settings (beginners can skip)',
+    createNextStepHint: 'After creating the key, follow the setup guide to configure it in your software.',
     groupLabel: 'Group',
     providerLabel: 'Provider',
     providers: {

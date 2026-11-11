@@ -5,6 +5,7 @@ import { nextTick } from 'vue'
 import { bindGuideBusinessSession } from '@/features/guide/businessEvents'
 import type { ApiKey } from '@/types'
 import { keysAPI } from '@/api'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import KeysView from '../KeysView.vue'
 
 const {
@@ -63,6 +64,8 @@ const messages: Record<string, string> = {
   'keys.usage': 'Usage',
   'keys.namePlaceholder': '测试',
   'keys.quickCreateHint': '直接点创建',
+  'keys.advancedSettings': '高级设置（新手不用点开）',
+  'keys.createNextStepHint': '创建后，还需要按接入教程，将密钥配置到你使用的软件中。',
 }
 
 vi.mock('@/api', () => ({
@@ -234,7 +237,7 @@ const IconStub = {
   template: '<span data-test="icon">{{ name }}</span>',
 }
 
-const mountView = async () => {
+const mountView = async (realDialog = false) => {
   const wrapper = mount(KeysView, {
     global: {
       stubs: {
@@ -242,7 +245,7 @@ const mountView = async () => {
         TablePageLayout: TablePageLayoutStub,
         DataTable: DataTableStub,
         Pagination: PaginationStub,
-        BaseDialog: {
+        BaseDialog: realDialog ? BaseDialog : {
           props: ['show', 'title'],
           emits: ['close'],
           template: '<div v-if="show" role="dialog"><button data-test="close-dialog" @click="$emit(\'close\')">Close</button><slot /><slot name="footer" /></div>',
@@ -663,6 +666,135 @@ describe('user KeysView column settings', () => {
 
     beforeEach(() => {
       getAvailableGroups.mockResolvedValue(availableGroups)
+    })
+
+    it('collapses optional settings on create and submits their original defaults', async () => {
+      const wrapper = await openCreate()
+      expect(wrapper.get('summary').text()).toContain('高级设置（新手不用点开）')
+      expect(wrapper.get<HTMLDetailsElement>('details').element.open).toBe(false)
+      expect(wrapper.get('[data-tour="key-form-quota"]').isVisible()).toBe(false)
+      expect(wrapper.get('[data-tour="key-form-name"]').isVisible()).toBe(true)
+      expect(wrapper.text()).toContain('创建后，还需要按接入教程，将密钥配置到你使用的软件中。')
+
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 2)
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), group_id: 2 })
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(keysAPI.create).toHaveBeenCalledWith('测试', 2, undefined, [], [], 0, undefined, {
+        rate_limit_5h: 0, rate_limit_1d: 0, rate_limit_7d: 0,
+      })
+      wrapper.unmount()
+    })
+
+    it('puts the setup hint above the action row inside the real dialog footer', async () => {
+      const wrapper = await mountView(true)
+      await wrapper.get('[data-tour="keys-create-btn"]').trigger('click')
+      const footer = wrapper.get('.modal-footer')
+      expect(footer.element.children).toHaveLength(1)
+      const content = footer.get('.w-full')
+      expect(content.element.children[0].textContent).toBe('创建后，还需要按接入教程，将密钥配置到你使用的软件中。')
+      expect(content.element.children[1].querySelector('[data-tour="key-form-submit"]')).not.toBeNull()
+      wrapper.unmount()
+    })
+
+    it('retains advanced settings after folding and retrying a failed creation', async () => {
+      const wrapper = await openCreate()
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 2)
+      await wrapper.get('summary').trigger('click')
+      const details = wrapper.get<HTMLDetailsElement>('details')
+      expect(details.element.open).toBe(true)
+      expect(wrapper.get('[data-tour="key-form-quota"]').isVisible()).toBe(true)
+      await details.findAll('button')[0].trigger('click')
+      const customKey = details.get<HTMLInputElement>('input[type="text"]')
+      await customKey.setValue('custom-key-for-test')
+      await details.findAll('button')[1].trigger('click')
+      await details.findAll('textarea')[0].setValue('192.0.2.1')
+      await details.findAll('textarea')[1].setValue('198.51.100.1')
+      await details.get('[data-tour="key-form-quota"] input').setValue('12.5')
+      await details.findAll('button')[2].trigger('click')
+      const limits = details.findAll('input[type="number"]').slice(1)
+      await limits[0].setValue('2')
+      await limits[1].setValue('5')
+      await limits[2].setValue('10')
+      await details.findAll('button')[3].trigger('click')
+      await details.get('input[type="datetime-local"]').setValue('2099-01-01T12:00')
+      await wrapper.get('summary').trigger('click')
+      expect(details.element.open).toBe(false)
+
+      vi.mocked(keysAPI.create).mockRejectedValueOnce(new Error('creation failed'))
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(wrapper.find('#key-form').exists()).toBe(true)
+      expect(details.element.open).toBe(false)
+      expect(keysAPI.create).toHaveBeenLastCalledWith('测试', 2, 'custom-key-for-test', ['192.0.2.1'], ['198.51.100.1'], 12.5, expect.any(Number), {
+        rate_limit_5h: 2, rate_limit_1d: 5, rate_limit_7d: 10,
+      })
+      const firstRequest = vi.mocked(keysAPI.create).mock.calls[0]
+      await wrapper.get('summary').trigger('click')
+      expect(customKey.element.value).toBe('custom-key-for-test')
+      expect(wrapper.get<HTMLInputElement>('[data-tour="key-form-quota"] input').element.value).toBe('12.5')
+      await wrapper.get('summary').trigger('click')
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), group_id: 2 })
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(keysAPI.create).toHaveBeenLastCalledWith(...firstRequest)
+      expect(wrapper.find('#key-form').exists()).toBe(false)
+      wrapper.unmount()
+    })
+
+    it.each(['', 'too-short'])('reveals a folded invalid custom key (%s) without creating', async (value) => {
+      const wrapper = await openCreate()
+      await groupSelect(wrapper).vm.$emit('update:modelValue', 2)
+      await wrapper.get('summary').trigger('click')
+      await wrapper.get('details button').trigger('click')
+      await wrapper.get('details input[type="text"]').setValue(value)
+      await wrapper.get('summary').trigger('click')
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(wrapper.get<HTMLDetailsElement>('details').element.open).toBe(true)
+      expect(wrapper.get('details input[type="text"]').isVisible()).toBe(true)
+      expect(showError).toHaveBeenCalledWith(value ? 'keys.customKeyTooShort' : 'keys.customKeyRequired')
+      expect(keysAPI.create).not.toHaveBeenCalled()
+      wrapper.unmount()
+    })
+
+    it('reveals a folded limit when native input validation fails', async () => {
+      const wrapper = await openCreate()
+      await wrapper.get('summary').trigger('click')
+      await wrapper.get('[data-tour="key-form-quota"] input').setValue('-1')
+      await wrapper.get('summary').trigger('click')
+      expect(wrapper.get<HTMLInputElement>('[data-tour="key-form-quota"] input').element.checkValidity()).toBe(false)
+      expect(wrapper.get<HTMLDetailsElement>('details').element.open).toBe(true)
+      expect(wrapper.get('[data-tour="key-form-quota"]').isVisible()).toBe(true)
+      expect(keysAPI.create).not.toHaveBeenCalled()
+      wrapper.unmount()
+    })
+
+    it('reopens a fresh create folded and keeps existing settings visible when editing', async () => {
+      const key = { ...createApiKey(), group_id: 2, quota: 12.5, ip_whitelist: ['192.0.2.1'], rate_limit_1d: 5, expires_at: '2099-01-01T12:00:00.000Z' }
+      listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = await openCreate()
+      await wrapper.get('summary').trigger('click')
+      await wrapper.get('[data-tour="key-form-quota"] input').setValue('99')
+      await wrapper.get('[data-test="close-dialog"]').trigger('click')
+      await wrapper.get('[data-tour="keys-create-btn"]').trigger('click')
+      expect(wrapper.get<HTMLDetailsElement>('details').element.open).toBe(false)
+      expect(wrapper.get<HTMLInputElement>('[data-tour="key-form-quota"] input').element.value).toBe('')
+      await wrapper.get('[data-test="close-dialog"]').trigger('click')
+      await getButtonByText(wrapper, 'common.edit').trigger('click')
+      expect(wrapper.get<HTMLDetailsElement>('details').element.open).toBe(true)
+      expect(wrapper.get('summary').isVisible()).toBe(false)
+      expect(wrapper.text()).not.toContain('创建后，还需要按接入教程，将密钥配置到你使用的软件中。')
+      expect(wrapper.get('[data-tour="key-form-quota"]').isVisible()).toBe(true)
+      expect(wrapper.get<HTMLInputElement>('[data-tour="key-form-quota"] input').element.value).toBe('12.5')
+      updateKey.mockResolvedValue(key)
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(updateKey).toHaveBeenCalledWith(key.id, expect.objectContaining({
+        quota: 12.5, ip_whitelist: ['192.0.2.1'], rate_limit_1d: 5, expires_at: key.expires_at,
+      }))
+      expect(keysAPI.create).not.toHaveBeenCalled()
+      wrapper.unmount()
     })
 
     it('classifies all configured platforms and retains the complete table filter', async () => {

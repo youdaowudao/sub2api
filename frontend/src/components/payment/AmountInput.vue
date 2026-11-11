@@ -91,7 +91,7 @@ const props = withDefaults(defineProps<{
   /** 支付币种（折扣模式第二行实付金额的币种与精度） */
   currency?: string
 }>(), {
-  amounts: () => [10, 20, 50, 100, 200, 500, 1000, 2000, 5000],
+  amounts: () => [1, 5, 10, 20, 50, 100, 200, 500, 1000],
   min: 0,
   max: 0,
   bonusTiers: () => [],
@@ -143,7 +143,7 @@ function secondLine(amt: number): string {
   if (props.bonusMode === 'discount') {
     return t('payment.rechargeBonus.payShort', { amount: formatPaymentAmount(quote.payBase, props.currency) })
   }
-  return t('payment.rechargeBonus.creditedShort', { amount: '$' + quote.credited.toFixed(2) })
+  return t('payment.rechargeBonus.creditedShort', { amount: '¥' + quote.credited.toFixed(2) })
 }
 
 const placeholderText = computed(() => {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, mount } from '@vue/test-utils'
 import AmountInput from '../AmountInput.vue'
+import { formatPaymentAmount } from '../currency'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -15,6 +16,16 @@ function mountInput(value: number | null = null) {
 }
 
 describe('recharge amount input', () => {
+  it('shows the nine updated shortcuts and emits small amounts when clicked', async () => {
+    const wrapper = mountInput()
+    expect(wrapper.findAll('button').map(button => Number(button.text()))).toEqual([1, 5, 10, 20, 50, 100, 200, 500, 1000])
+    for (const amount of [1, 5]) await wrapper.get(`[data-testid="quick-amount-${amount}"]`).trigger('click')
+    expect(wrapper.emitted('update:modelValue')).toEqual([[1], [5]])
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('5')
+    expect(wrapper.find('[data-testid="quick-amount-2000"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="quick-amount-5000"]').exists()).toBe(false)
+  })
+
   it.each(['10abc', '10.555', '-10', '1e2'])('restores the accepted amount after rejecting %s', async (value) => {
     const wrapper = mountInput(10)
     const input = wrapper.get('input')
@@ -60,11 +71,12 @@ describe('recharge bonus hints on quick amounts', () => {
     const second = wrapper.get('[data-testid="quick-amount-500"]')
 
     expect(below.find('[data-testid="quick-amount-bonus-badge"]').exists()).toBe(false)
-    expect(below.get('[data-testid="quick-amount-credited"]').text()).toContain('$50.00')
+    expect.soft(below.get('[data-testid="quick-amount-credited"]').text()).toContain('¥50.00')
     expect(first.get('[data-testid="quick-amount-bonus-badge"]').text()).toBe('+20%')
-    expect(first.get('[data-testid="quick-amount-credited"]').text()).toContain('$120.00')
+    expect.soft(first.get('[data-testid="quick-amount-credited"]').text()).toContain('¥120.00')
     expect(second.get('[data-testid="quick-amount-bonus-badge"]').text()).toBe('+30%')
-    expect(second.get('[data-testid="quick-amount-credited"]').text()).toContain('$650.00')
+    expect.soft(second.get('[data-testid="quick-amount-credited"]').text()).toContain('¥650.00')
+    for (const button of [below, first, second]) expect(button.get('[data-testid="quick-amount-credited"]').text()).not.toContain('$')
   })
 
   it('bonus mode: matches tiers by the entered amount but credits by the multiplier', () => {
@@ -74,7 +86,8 @@ describe('recharge bonus hints on quick amounts', () => {
     const button = wrapper.get('[data-testid="quick-amount-1000"]')
     expect(button.get('[data-testid="quick-amount-bonus-badge"]').text()).toBe('+30%')
     // 1000 × 0.14 = 140 base, +30% = 182
-    expect(button.get('[data-testid="quick-amount-credited"]').text()).toContain('$182.00')
+    expect.soft(button.get('[data-testid="quick-amount-credited"]').text()).toContain('¥182.00')
+    expect(button.get('[data-testid="quick-amount-credited"]').text()).not.toContain('$')
   })
 
   it('discount mode: tag reads N% OFF and the second line shows the discounted payment', () => {
@@ -88,5 +101,9 @@ describe('recharge bonus hints on quick amounts', () => {
     expect(hit.get('[data-testid="quick-amount-bonus-badge"]').text()).toBe('30% OFF')
     // 500 × (1 − 30%) = 350
     expect(hit.get('[data-testid="quick-amount-credited"]').text()).toContain('350.00')
+    for (const [button, amount] of [[below, 50], [hit, 350]] as const) {
+      expect(button.get('[data-testid="quick-amount-credited"]').text()).toContain(formatPaymentAmount(amount, 'USD'))
+      expect.soft(button.get('[data-testid="quick-amount-credited"]').text()).not.toContain('¥')
+    }
   })
 })

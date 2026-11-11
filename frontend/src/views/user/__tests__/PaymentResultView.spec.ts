@@ -535,4 +535,35 @@ describe('PaymentResultView', () => {
     expect(wrapper.text()).toContain('payment.methods.alipay')
     expect(wrapper.text()).not.toContain('payment.methods.alipay_direct')
   })
+
+  it('RMB balance order bonus and credited amounts exclude dollars', async () => {
+    routeState.query = { resume_token: 'isolated-rmb-balance' }
+    resolveOrderPublicByResumeToken.mockResolvedValue({ data: { ...orderFactory('COMPLETED'), amount: 120, pay_amount: 103, fee_rate: 3, bonus_amount: 20, currency: 'USD' } })
+    const wrapper = mount(PaymentResultView, { global: { stubs: { OrderStatusBadge: true } } })
+    await flushPromises()
+    const value = (key: string) => wrapper.findAll('span').find(span => span.text() === key)!.element.parentElement!.lastElementChild!.textContent!
+    expect.soft(value('payment.orders.bonusAmount')).toBe('+¥20.00')
+    expect.soft(value('payment.orders.creditedAmount')).toBe('¥120.00')
+    for (const key of ['payment.orders.bonusAmount', 'payment.orders.creditedAmount']) expect.soft(value(key)).not.toContain('$')
+    wrapper.unmount()
+  })
+
+  it.each(['balance', 'subscription'])('preserves %s order payment currency and subscription credited currency', async orderType => {
+    routeState.query = { resume_token: 'isolated-currency-order' }
+    resolveOrderPublicByResumeToken.mockResolvedValue({ data: { ...orderFactory('COMPLETED'), order_type: orderType, amount: 100, pay_amount: 103, fee_rate: 3, currency: 'USD' } })
+    const wrapper = mount(PaymentResultView, { global: { stubs: { OrderStatusBadge: true } } })
+    await flushPromises()
+    const value = (key: string) => wrapper.findAll('span').find(span => span.text() === key)!.element.parentElement!.lastElementChild!.textContent!
+    for (const [key, amount] of [['payment.orders.baseAmount', 100], ['payment.orders.fee', 3], ['payment.orders.payAmount', 103]] as const) {
+      const label = key === 'payment.orders.fee' ? key + ' (3%)' : key
+      expect(value(label)).toBe(formatPaymentAmount(amount, 'USD'))
+      expect.soft(value(label)).not.toContain('¥')
+    }
+    if (orderType === 'subscription') {
+      expect(value('payment.orders.creditedAmount')).toBe(formatPaymentAmount(100, 'USD'))
+      expect.soft(value('payment.orders.creditedAmount')).not.toContain('¥')
+      expect(wrapper.findAll('span').some(span => span.text() === 'payment.orders.bonusAmount')).toBe(false)
+    }
+    wrapper.unmount()
+  })
 })

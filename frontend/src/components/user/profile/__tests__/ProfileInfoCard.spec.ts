@@ -208,4 +208,13 @@ describe('ProfileInfoCard', () => {
     expect(wrapper.get('[data-testid="profile-basics-panel"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="profile-auth-bindings-panel"]').exists()).toBe(true)
   })
+
+  it.each([12.34, 0])('RMB profile balance %s excludes dollars', (balance) => {
+    const wrapper = mount(ProfileInfoCard, { props: { user: createUser({ balance }) }, global: { stubs: { Icon: true } } })
+    const text = wrapper.get('[data-testid="profile-overview-metric-balance"]').text()
+    expect.soft(text).toContain(`¥${balance.toFixed(2)}`)
+    expect.soft(text).not.toContain('$')
+    wrapper.unmount()
+  })
+
 })
