@@ -443,16 +443,31 @@ describe('PaymentView recharge currencies and rate preview', () => {
   })
   afterEach(() => { translate.mockImplementation((key: string) => key) })
 
-  async function recharge(overrides: Partial<CheckoutInfoResponse> = {}) {
+  async function recharge(overrides: Partial<CheckoutInfoResponse> = {}, realAmountInput = false) {
     getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture(overrides))
     const wrapper = shallowMount(PaymentView, { global: { stubs: {
       AppLayout: { template: '<div><slot /></div>' }, Teleport: true, Transition: false,
+      AmountInput: !realAmountInput,
     } } })
     await flushPromises()
     return wrapper
   }
   const rowValue = (wrapper: ReturnType<typeof shallowMount>, key: string) =>
     wrapper.findAll('span').find(span => span.text() === key)!.element.parentElement!.lastElementChild!.textContent!
+
+  it.each([1, 5])('submits the real shortcut value %i through the existing recharge action', async amount => {
+    const method = { ...checkoutInfoFixture().data.methods.wxpay, single_min: 1, currency: 'CNY' }
+    const wrapper = await recharge({ methods: { wxpay: method } }, true)
+    expect(wrapper.find('[data-testid="quick-amount-2000"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="quick-amount-5000"]').exists()).toBe(false)
+    await wrapper.get(`[data-testid="quick-amount-${amount}"]`).trigger('click')
+    expect(wrapper.get<HTMLButtonElement>('[data-tour="recharge-submit"]').element.disabled).toBe(false)
+    await wrapper.get('[data-tour="recharge-submit"]').trigger('click')
+    await flushPromises()
+    expect(createOrder).toHaveBeenCalledOnce()
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ amount, order_type: 'balance', payment_type: 'wxpay' }))
+    wrapper.unmount()
+  })
 
   it.each([
     ['zh', 1, '充值倍率 1:1'], ['zh', 0.5, '充值倍率 1:0.5'],
