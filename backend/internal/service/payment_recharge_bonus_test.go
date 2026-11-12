@@ -65,6 +65,37 @@ func TestNormalizeRechargeBonusTiers(t *testing.T) {
 	})
 }
 
+// The campaign is configuration, never a client-controlled bonus amount.
+func TestCampaignRechargeTiersAndRebateBase(t *testing.T) {
+	ctx := context.Background()
+	repo := &paymentConfigSettingRepoStub{values: map[string]string{SettingRechargeFeeRate: "3", SettingBalanceRechargeMult: "1"}}
+	svc := &PaymentConfigService{settingRepo: repo}
+	tiers := []RechargeBonusTier{{MinAmount: 100, BonusPercent: 3}, {MinAmount: 200, BonusPercent: 3.5}, {MinAmount: 500, BonusPercent: 4}, {MinAmount: 1000, BonusPercent: 5}}
+	mode := RechargeBonusModeBonus
+	require.NoError(t, svc.UpdatePaymentConfig(ctx, UpdatePaymentConfigRequest{RechargeBonusTiers: &tiers, RechargeBonusMode: &mode}))
+	cfg := svc.parsePaymentConfig(repo.values)
+	require.Equal(t, tiers, cfg.RechargeBonusTiers)
+	for _, tc := range []struct{ amount, bonus float64 }{
+		{1, 0}, {5, 0}, {10, 0}, {50, 0}, {99.99, 0}, {100, 3}, {199.99, 6},
+		{200, 7}, {499.99, 17.5}, {500, 20}, {999.99, 40}, {1000, 50}, {2000, 100},
+	} {
+		q := quoteRechargeBonus(cfg, tc.amount, "CNY")
+		require.InDelta(t, tc.bonus, q.Bonus, 1e-9)
+		require.InDelta(t, tc.amount+tc.bonus, q.Credited, 1e-9)
+		order := &dbent.PaymentOrder{OrderType: payment.OrderTypeBalance, Amount: q.Credited, BonusAmount: q.Bonus, PayAmount: tc.amount * 1.03}
+		require.InDelta(t, tc.amount, affiliateRebateBaseAmount(order), 1e-9, "neither gift nor fee can earn referral rebate")
+	}
+	// A settings change cannot retroactively alter a persisted order snapshot.
+	old := &dbent.PaymentOrder{OrderType: payment.OrderTypeBalance, Amount: 103, BonusAmount: 3, PayAmount: 103}
+	cfg.RechargeBonusTiers = nil
+	require.Zero(t, quoteRechargeBonus(cfg, 100, "CNY").Bonus)
+	require.Equal(t, 103.0, old.Amount)
+	require.Equal(t, 100.0, affiliateRebateBaseAmount(old))
+	cfg.RechargeBonusTiers = tiers
+	cfg.BalanceRechargeMultiplier = 0.5
+	require.Equal(t, 51.5, quoteRechargeBonus(cfg, 100, "CNY").Credited)
+}
+
 func TestParseRechargeBonusTiers(t *testing.T) {
 	t.Run("empty or invalid json yields empty slice", func(t *testing.T) {
 		require.NotNil(t, parseRechargeBonusTiers(""))

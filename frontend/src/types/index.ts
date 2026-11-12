@@ -153,6 +153,10 @@ export interface AffiliateInvitee {
   total_rebate: number
 }
 
+export interface UserAffiliateRate {
+  effective_rebate_rate_percent: number
+}
+
 export interface UserAffiliateDetail {
   user_id: number
   aff_code: string

@@ -373,6 +373,10 @@ func newOAuthEmailAffiliateRepoStub(codeOwners map[string]int64) *oauthEmailAffi
 	return &oauthEmailAffiliateRepoStub{codeOwners: codeOwners}
 }
 
+func (r *oauthEmailAffiliateRepoStub) GetUserRebateRate(context.Context, int64) (*float64, error) {
+	panic("unexpected GetUserRebateRate call")
+}
+
 func (r *oauthEmailAffiliateRepoStub) EnsureUserAffiliate(_ context.Context, userID int64) (*service.AffiliateSummary, error) {
 	r.ensureUserIDs = append(r.ensureUserIDs, userID)
 	return &service.AffiliateSummary{UserID: userID, AffCode: "SELF"}, nil

@@ -316,6 +316,7 @@ export default {
     paymentAmount: '支付金额',
     creditedBalance: '到账余额',
     rechargeBonus: {
+      quickAmountLabel: '充值 {amount}，赠送 {percent}%，到账 {credited}',
       creditedShort: '到账 {amount}',
       payShort: '实付 {amount}',
       amountLabel: '赠送额度',

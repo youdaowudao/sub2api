@@ -101,6 +101,10 @@ type paymentFulfillmentAffiliateRepoStub struct {
 	accrueCalls    []paymentFulfillmentAffiliateAccrueCall
 }
 
+func (r *paymentFulfillmentAffiliateRepoStub) GetUserRebateRate(context.Context, int64) (*float64, error) {
+	panic("unexpected GetUserRebateRate call")
+}
+
 func (r *paymentFulfillmentAffiliateRepoStub) EnsureUserAffiliate(_ context.Context, userID int64) (*AffiliateSummary, error) {
 	switch {
 	case r.inviteeSummary != nil && r.inviteeSummary.UserID == userID:
