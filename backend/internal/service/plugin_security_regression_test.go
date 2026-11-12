@@ -231,6 +231,68 @@ func TestNormalizePluginRPCErrorPreservesCallerCancellation(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+// A caller deadline can pass before the context timer publishes Err().
+type pluginRPCPendingDeadlineContext struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c pluginRPCPendingDeadlineContext) Deadline() (time.Time, bool) {
+	return c.deadline, true
+}
+
+func TestNormalizePluginRPCErrorHandlesPendingDeadline(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, test := range []struct {
+		name        string
+		hasDeadline bool
+		expired     bool
+		requestSent bool
+	}{
+		{name: "elapsed_after_delivery", hasDeadline: true, expired: true, requestSent: true},
+		{name: "future_after_delivery", hasDeadline: true, requestSent: true},
+		{name: "unbounded_after_delivery", requestSent: true},
+		{name: "elapsed_before_delivery", hasDeadline: true, expired: true},
+		{name: "future_before_delivery", hasDeadline: true},
+		{name: "unbounded_before_delivery"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			if test.hasDeadline {
+				deadline := time.Now().Add(time.Hour)
+				if test.expired {
+					deadline = time.Now().Add(-time.Second)
+				}
+				ctx = pluginRPCPendingDeadlineContext{Context: ctx, deadline: deadline}
+			}
+			require.NoError(t, ctx.Err())
+			err := normalizePluginRPCError(ctx, "接收插件响应头", errors.New("连接已断开"), test.requestSent)
+			if test.expired && test.requestSent {
+				require.ErrorIs(t, err, context.DeadlineExceeded)
+			} else {
+				require.NotErrorIs(t, err, context.DeadlineExceeded)
+			}
+			var transportErr *PluginTransportError
+			require.ErrorAs(t, err, &transportErr)
+			require.Equal(t, "PLUGIN_RPC_ERROR", transportErr.Code)
+			require.Equal(t, test.requestSent, transportErr.RequestSent)
+
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			result := (&OpenAIGatewayService{}).handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
+			var failover *UpstreamFailoverError
+			if test.requestSent {
+				require.Same(t, err, result)
+				require.False(t, errors.As(result, &failover))
+			} else {
+				require.ErrorAs(t, result, &failover)
+			}
+		})
+	}
+}
+
 func TestPluginStartingStateUsesBoundedCrashRecoveryWindow(t *testing.T) {
 	manager := &PluginManager{cfg: &config.Config{Plugins: config.PluginConfig{StartTimeoutSeconds: 15}}}
 

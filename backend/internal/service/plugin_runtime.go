@@ -465,11 +465,18 @@ func normalizePluginRPCError(ctx context.Context, operation string, err error, r
 	if ctx != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
-	return &PluginTransportError{
+	transportErr := &PluginTransportError{
 		Code:        "PLUGIN_RPC_ERROR",
 		Message:     fmt.Sprintf("%s: %v", operation, err),
 		RequestSent: requestMayHaveBeenSent,
 	}
+	if requestMayHaveBeenSent && ctx != nil {
+		if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+			// Keep the delivery marker while the caller's cancellation timer catches up.
+			return errors.Join(context.DeadlineExceeded, transportErr)
+		}
+	}
+	return transportErr
 }
 
 func sendPluginRequestBody(stream pluginv1.TransportPlugin_ForwardClient, body io.ReadCloser) error {

@@ -8,7 +8,7 @@
 
 建议使用以下环境：
 
-- 构建本仓库 Go SDK 和示例时，使用 [`backend/go.mod`](../backend/go.mod) 声明的 Go 版本，当前为 1.27.2；
+- 构建本仓库 Go SDK 和示例时，使用 [`backend/go.mod`](../backend/go.mod) 声明的 Go 版本，当前为 1.27.4；
 - Node.js（运行示例 JavaScript 语法检查时使用）；
 - Git；
 - 与目标部署环境一致的构建工具链。
