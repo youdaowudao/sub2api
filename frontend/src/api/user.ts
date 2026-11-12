@@ -181,6 +181,11 @@ export async function getAffiliateDetail(): Promise<UserAffiliateDetail> {
   return data
 }
 
+export async function getAffiliateRebateRate(): Promise<import('@/types').UserAffiliateRate> {
+  const { data } = await apiClient.get<import('@/types').UserAffiliateRate>('/user/aff/rate')
+  return data
+}
+
 export async function transferAffiliateQuota(): Promise<AffiliateTransferResponse> {
   const { data } = await apiClient.post<AffiliateTransferResponse>('/user/aff/transfer')
   return data

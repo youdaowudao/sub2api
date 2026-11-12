@@ -14,24 +14,24 @@
             'relative rounded-lg border-2 px-3 py-3 text-center font-medium transition-colors',
             modelValue === amt
               ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/40 dark:text-primary-300'
-              : quoteFor(amt).percent > 0
-                ? 'border-red-200 bg-white text-gray-700 hover:border-red-300 dark:border-red-500/40 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-red-400/60'
-                : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-dark-500',
+              : 'border-red-200 bg-white text-gray-700 hover:border-red-300 dark:border-red-500/40 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-red-400/60',
           ]"
           :data-testid="`quick-amount-${amt}`"
+          :aria-label="hasGlassBonus(amt) ? t('payment.rechargeBonus.quickAmountLabel', { amount: formatPaymentAmount(amt, props.currency), percent: formatRechargeBonusNumber(quoteFor(amt).percent), credited: '¥' + quoteFor(amt).credited.toFixed(2) }) : undefined"
           @click="selectAmount(amt)"
         >
           <!-- 促销价签（单行）：仅命中档位的金额显示；红底白字、内圈点线、右侧圆孔、整体旋转 -->
           <span
             v-if="quoteFor(amt).percent > 0"
-            class="pointer-events-none absolute -right-2 -top-3 z-10 rotate-12"
+            class="pointer-events-none absolute -right-2 -top-3 z-10"
+            :class="hasGlassBonus(amt) ? 'recharge-glass-badge' : 'rotate-12'"
             data-testid="quick-amount-bonus-badge"
           >
             <span
-              class="relative flex items-center gap-1 whitespace-nowrap rounded bg-red-600 py-0.5 pl-1.5 pr-1 text-[11px] font-extrabold leading-tight tracking-tight text-white shadow-md ring-2 ring-white before:pointer-events-none before:absolute before:inset-[2px] before:rounded-sm before:border before:border-dotted before:border-white/70 dark:bg-red-500 dark:ring-dark-800"
+              :class="hasGlassBonus(amt) ? 'recharge-glass-label' : 'relative flex items-center gap-1 whitespace-nowrap rounded bg-red-600 py-0.5 pl-1.5 pr-1 text-[11px] font-extrabold leading-tight tracking-tight text-white shadow-md ring-2 ring-white before:pointer-events-none before:absolute before:inset-[2px] before:rounded-sm before:border before:border-dotted before:border-white/70 dark:bg-red-500 dark:ring-dark-800'"
             >
               <span>{{ badgeText(amt) }}</span>
-              <span class="h-1 w-1 shrink-0 rounded-full bg-white"></span>
+              <span v-if="!hasGlassBonus(amt)" class="h-1 w-1 shrink-0 rounded-full bg-white"></span>
             </span>
           </span>
           <span class="block">{{ amt }}</span>
@@ -132,6 +132,11 @@ function quoteFor(amt: number) {
   })
 }
 
+function hasGlassBonus(amt: number): boolean {
+  const quote = quoteFor(amt)
+  return props.bonusMode === 'bonus' && quote.percent > 0 && quote.bonus > 0
+}
+
 // 价签文案：赠金「+20%」，折扣「20% OFF」
 function badgeText(amt: number): string {
   const percent = formatRechargeBonusNumber(quoteFor(amt).percent)
@@ -186,3 +191,14 @@ watch(() => props.modelValue, (v) => {
   }
 }, { immediate: true })
 </script>
+
+<style scoped>
+.recharge-glass-badge { isolation:isolate; padding:1px; overflow:hidden; border:1px solid #7dd3fc; border-radius:999px; background:linear-gradient(120deg,#e0f7ffcc,#f7ffe5e6); box-shadow:0 2px 8px #38bdf82e,inset 0 1px #fff; backdrop-filter:blur(8px); }
+.recharge-glass-badge::before { content:''; position:absolute; z-index:-1; inset:-90%; background:conic-gradient(from 0deg,transparent 65%,#38bdf8 80%,#fff 87%,#67e8f9 93%,transparent); animation:recharge-border-orbit 4s linear infinite; }
+.recharge-glass-label { position:relative; display:flex; align-items:center; overflow:hidden; padding:3px 9px; border-radius:999px; background:linear-gradient(120deg,#edfbffff,#f7ffeaff); color:#075985; font-size:11px; font-weight:800; line-height:1.2; white-space:nowrap; }
+.recharge-glass-label::after { content:''; position:absolute; inset:-50% -100%; background:linear-gradient(110deg,transparent 40%,#ffffffd9 49%,transparent 58%); transform:translateX(-70%); animation:recharge-glass-sweep 6s ease-in-out infinite; pointer-events:none; }
+@keyframes recharge-border-orbit { to { transform:rotate(360deg); } }
+@keyframes recharge-glass-sweep { 0%,70% { transform:translateX(-70%); opacity:0; } 73% { opacity:.8; } 88%,100% { transform:translateX(70%); opacity:0; } }
+@supports not (backdrop-filter:blur(8px)) { .recharge-glass-badge { background:#e0f7ff; } }
+@media (prefers-reduced-motion:reduce) { .recharge-glass-badge::before,.recharge-glass-label::after { animation:none; } .recharge-glass-label::after { display:none; } }
+</style>

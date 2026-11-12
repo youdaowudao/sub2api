@@ -100,6 +100,7 @@ type AffiliateDetail struct {
 }
 
 type AffiliateRepository interface {
+	GetUserRebateRate(ctx context.Context, userID int64) (*float64, error)
 	EnsureUserAffiliate(ctx context.Context, userID int64) (*AffiliateSummary, error)
 	GetAffiliateByCode(ctx context.Context, code string) (*AffiliateSummary, error)
 	BindInviter(ctx context.Context, userID, inviterID int64) (bool, error)
@@ -260,6 +261,25 @@ func (s *AffiliateService) EnsureUserAffiliate(ctx context.Context, userID int64
 		return nil, infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
 	}
 	return s.repo.EnsureUserAffiliate(ctx, userID)
+}
+
+// GetUserRebateRate reads the effective rate without creating affiliate data,
+// thawing funds, or loading invitees. The caller supplies the authenticated user.
+func (s *AffiliateService) GetUserRebateRate(ctx context.Context, userID int64) (float64, error) {
+	if userID <= 0 {
+		return 0, ErrUserNotFound
+	}
+	if s == nil || s.repo == nil {
+		return 0, infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	if !s.IsEnabled(ctx) {
+		return 0, infraerrors.Forbidden("AFFILIATE_DISABLED", "affiliate program is disabled")
+	}
+	rate, err := s.repo.GetUserRebateRate(ctx, userID)
+	if err != nil {
+		return 0, infraerrors.ServiceUnavailable("AFFILIATE_RATE_UNAVAILABLE", "unable to load referral rebate rate")
+	}
+	return s.resolveRebateRatePercent(ctx, &AffiliateSummary{AffRebateRatePercent: rate}), nil
 }
 
 func (s *AffiliateService) GetAffiliateDetail(ctx context.Context, userID int64) (*AffiliateDetail, error) {

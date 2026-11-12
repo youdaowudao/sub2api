@@ -30,7 +30,7 @@
     </div>
 
     <!-- Navigation -->
-    <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
+    <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide min-h-0">
       <!-- Admin View: Admin menu first, then personal menu -->
       <template v-if="isAdmin">
         <!-- Admin Section -->
@@ -148,7 +148,16 @@
     </nav>
 
     <!-- Bottom Section -->
-    <div class="mt-auto border-t border-gray-100 p-3 dark:border-dark-800">
+    <div class="mt-auto shrink-0 border-t border-gray-100 p-3 dark:border-dark-800">
+      <AffiliatePromoCard
+        v-if="canShowAffiliatePromo"
+        class="mb-3"
+        :collapsed="promoPreference.collapsed"
+        :compact="sidebarCollapsed"
+        :rebate-rate="promoRate"
+        @toggle="toggleAffiliatePromo"
+        @navigate="handleMenuItemClick('/affiliate')"
+      />
       <!-- Theme Toggle -->
       <button
         @click="toggleTheme"
@@ -203,6 +212,9 @@ import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { resolveSiteBillingMode } from '@/utils/siteBillingMode'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
+import AffiliatePromoCard from './AffiliatePromoCard.vue'
+import { useAffiliatePromoPreferenceStore } from '@/stores/affiliatePromoPreference'
+import { getAffiliateRebateRate } from '@/api/user'
 
 interface NavItem {
   path: string
@@ -877,6 +889,45 @@ function toggleSidebar() {
   appStore.toggleSidebar()
 }
 
+const promoPreference = useAffiliatePromoPreferenceStore()
+const promoUserId = computed(() => authStore.isAuthenticated ? authStore.user?.id ?? null : null)
+const canShowAffiliatePromo = computed(() => promoUserId.value !== null && (
+  isAdmin.value ? personalNavItems.value : appStore.backendModeEnabled ? [] : userNavItems.value
+).some(item => item.path === '/affiliate'))
+const promoRate = ref<number | null>(null)
+let promoGeneration = 0
+let promoPending = false
+
+watch([promoUserId, canShowAffiliatePromo], ([id]) => {
+  promoPreference.bindUser(id)
+  promoGeneration++
+  promoRate.value = null
+  promoPending = false
+}, { immediate: true, flush: 'sync' })
+
+async function loadPromoRate(): Promise<void> {
+  if (!canShowAffiliatePromo.value || sidebarCollapsed.value || promoPreference.collapsed || promoPending) return
+  const generation = promoGeneration
+  promoPending = true
+  try {
+    const result = await getAffiliateRebateRate()
+    if (generation !== promoGeneration) return
+    const value = result.effective_rebate_rate_percent
+    promoRate.value = Number.isFinite(value) && value >= 0 && value <= 100 ? value : null
+  } catch {
+    if (generation === promoGeneration) promoRate.value = null
+  } finally {
+    if (generation === promoGeneration) promoPending = false
+  }
+}
+
+watch(() => [promoUserId.value, canShowAffiliatePromo.value && !sidebarCollapsed.value && !promoPreference.collapsed] as const,
+  ([, open]) => { if (open && promoRate.value === null) void loadPromoRate() }, { immediate: true })
+
+function toggleAffiliatePromo(): void {
+  if (!promoPreference.toggleCollapsed()) appStore.showWarning(t('nav.affiliatePromo.saveFailed'))
+}
+
 function toggleTheme() {
   isDark.value = !isDark.value
   document.documentElement.classList.toggle('dark', isDark.value)
@@ -968,6 +1019,7 @@ watch(
 )
 
 onMounted(() => {
+  window.addEventListener('storage', promoPreference.applyStorageEvent)
   void refreshBatchImageAccess()
   if (isAdmin.value) {
     adminSettingsStore.fetch()
@@ -983,6 +1035,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  promoGeneration++
+  window.removeEventListener('storage', promoPreference.applyStorageEvent)
   if (sidebarNavRef.value) {
     appStore.sidebarScrollTop = sidebarNavRef.value.scrollTop
   }

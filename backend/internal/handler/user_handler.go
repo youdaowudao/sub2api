@@ -194,6 +194,21 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	response.Success(c, profileResp)
 }
 
+// GetAffiliateRebateRate returns only the authenticated user's effective rate.
+func (h *UserHandler) GetAffiliateRebateRate(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	rate, err := h.affiliateService.GetUserRebateRate(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"effective_rebate_rate_percent": rate})
+}
+
 // GetAffiliate returns the current user's affiliate details.
 // GET /api/v1/user/aff
 func (h *UserHandler) GetAffiliate(c *gin.Context) {

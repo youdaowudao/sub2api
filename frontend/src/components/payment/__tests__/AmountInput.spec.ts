@@ -53,6 +53,23 @@ describe('recharge amount input', () => {
 })
 
 describe('recharge bonus hints on quick amounts', () => {
+  it('shows the agreed four tiers using actual quotes and does not change the submitted amount', async () => {
+    const wrapper = mount(AmountInput, { props: { modelValue: null, bonusTiers: [
+      { min_amount: 100, bonus_percent: 3 }, { min_amount: 200, bonus_percent: 3.5 },
+      { min_amount: 500, bonus_percent: 4 }, { min_amount: 1000, bonus_percent: 5 },
+    ] } })
+    for (const [amount, bonus, total] of [[100, 3, '103.00'], [200, 3.5, '207.00'], [500, 4, '520.00'], [1000, 5, '1050.00']]) {
+      const button = wrapper.get(`[data-testid=quick-amount-${amount}]`)
+      expect(button.get('.recharge-glass-badge').text()).toBe(`+${bonus}%`)
+      expect(button.text()).toContain(`¥${total}`)
+      await button.trigger('click')
+    }
+    expect(wrapper.emitted('update:modelValue')).toEqual([[100], [200], [500], [1000]])
+    for (const amount of [1, 5, 10, 20, 50]) expect(wrapper.get(`[data-testid=quick-amount-${amount}]`).find('.recharge-glass-badge').exists()).toBe(false)
+    await wrapper.setProps({ bonusMode: 'discount' })
+    expect(wrapper.find('.recharge-glass-badge').exists()).toBe(false)
+    expect(wrapper.text()).toContain('3.5% OFF')
+  })
   const tiers = [
     { min_amount: 100, bonus_percent: 20 },
     { min_amount: 500, bonus_percent: 30 },

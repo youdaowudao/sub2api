@@ -63,6 +63,32 @@ func NewAffiliateRepository(client *dbent.Client, _ *sql.DB) service.AffiliateRe
 	return &affiliateRepository{client: client}
 }
 
+func (r *affiliateRepository) GetUserRebateRate(ctx context.Context, userID int64) (*float64, error) {
+	if userID <= 0 {
+		return nil, service.ErrUserNotFound
+	}
+	rows, err := clientFromContext(ctx, r.client).QueryContext(ctx,
+		"SELECT aff_rebate_rate_percent::double precision FROM user_affiliates WHERE user_id = $1", userID)
+	if err != nil {
+		return nil, fmt.Errorf("read affiliate rebate rate: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return nil, rows.Err()
+	}
+	var rate sql.NullFloat64
+	if err := rows.Scan(&rate); err != nil {
+		return nil, fmt.Errorf("scan affiliate rebate rate: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !rate.Valid {
+		return nil, nil
+	}
+	return &rate.Float64, nil
+}
+
 func (r *affiliateRepository) EnsureUserAffiliate(ctx context.Context, userID int64) (*service.AffiliateSummary, error) {
 	if userID <= 0 {
 		return nil, service.ErrUserNotFound
