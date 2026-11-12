@@ -15,7 +15,14 @@ describe('referral promotion card', () => {
   it('toggles independently without navigation, and keeps links pointed to the invitation page', async () => {
     const wrapper = create()
     expect(wrapper.text()).toContain('10%')
-    expect(wrapper.text()).not.toMatch(/首充|永久有效/)
+    expect(wrapper.text()).not.toMatch(/首充|符合规则/)
+    expect(wrapper.get('.promo-body').text()).toContain('好友通过邀请链接加入，')
+    expect(wrapper.get('.promo-body').text()).toContain('TA 每笔充值，你都享')
+    expect(wrapper.get('.promo-body').text()).toContain('邀请返利')
+    expect(wrapper.get('.promo-lasting').text()).toContain('永久有效！')
+    expect(wrapper.get('.promo-lasting').find('svg').exists()).toBe(true)
+    expect(wrapper.get('.promo-rate').find('svg').exists()).toBe(false)
+    expect(wrapper.text().match(/10%/g)).toHaveLength(1)
     expect(wrapper.findAllComponents(RouterLinkStub).every(link => link.props('to') === '/affiliate')).toBe(true)
     const toggle = wrapper.get('button')
     expect(toggle.attributes('aria-expanded')).toBe('true')
@@ -34,6 +41,7 @@ describe('referral promotion card', () => {
     const wrapper = create({ rebateRate: rate })
     expect(wrapper.text()).toContain('查看返利规则')
     expect(wrapper.text()).not.toContain('10%')
+    expect(wrapper.text()).not.toContain('永久有效')
   })
 
   it('preserves fractional rates and compact sidebar mode has only an invitation link', async () => {

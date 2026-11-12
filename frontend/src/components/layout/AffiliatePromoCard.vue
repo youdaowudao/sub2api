@@ -14,8 +14,14 @@
     </div>
     <div v-if="!collapsed" class="promo-body">
       <template v-if="validRate">
-        <span class="promo-rate"><span>{{ rateText }}%</span><svg viewBox="0 0 130 48" fill="none" preserveAspectRatio="none" aria-hidden="true"><ellipse cx="65" cy="24" rx="62" ry="21" stroke="currentColor" stroke-width="1.3" transform="rotate(-4 65 24)" /></svg></span>
-        <p>{{ t('nav.affiliatePromo.description', { rate: rateText }) }}</p>
+        <i18n-t keypath="nav.affiliatePromo.invitation" tag="p" scope="global">
+          <template #invite><router-link to="/affiliate" class="promo-invite" @click="emit('navigate')">{{ t('nav.affiliatePromo.inviteLink') }}</router-link></template>
+        </i18n-t>
+        <p>{{ t('nav.affiliatePromo.recharge') }}</p>
+        <i18n-t keypath="nav.affiliatePromo.commission" tag="p" scope="global" class="promo-reward">
+          <template #rate><strong class="promo-rate">{{ rateText }}%</strong></template>
+        </i18n-t>
+        <p class="promo-lasting"><span>{{ t('nav.affiliatePromo.lasting') }}<svg viewBox="0 0 130 48" fill="none" preserveAspectRatio="none" aria-hidden="true"><ellipse cx="65" cy="24" rx="62" ry="21" stroke="currentColor" stroke-width="1.3" transform="rotate(-4 65 24)" /></svg></span></p>
       </template>
       <p v-else>{{ t('nav.affiliatePromo.fallback') }}</p>
     </div>
@@ -37,7 +43,7 @@ const rateText = computed(() => validRate.value ? String(Math.round(props.rebate
 </script>
 
 <style scoped>
-.affiliate-promo { display:flex; flex-direction:column; gap:12px; max-height:min(280px, calc(100dvh - 200px)); padding:16px; border:1px solid #b3e2ff; border-radius:28px; background:linear-gradient(125deg,#f1faff 0%,#fff 54%,#f6ffe6 100%); color:#111827; box-shadow:0 2px 3px #12243918; }
+.affiliate-promo { display:flex; flex-direction:column; gap:12px; max-height:min(360px, calc(100dvh - 200px)); padding:16px; border:1px solid #b3e2ff; border-radius:28px; background:linear-gradient(125deg,#f1faff 0%,#fff 54%,#f6ffe6 100%); color:#111827; box-shadow:0 2px 3px #12243918; }
 .affiliate-promo-collapsed { padding:12px 10px; border-radius:999px; }
 .promo-heading { display:flex; flex-shrink:0; align-items:center; gap:6px; }
 .promo-heading-link { display:flex; flex:1; min-width:0; align-items:center; gap:10px; font-size:15px; font-weight:750; line-height:1.3; }
@@ -46,12 +52,15 @@ const rateText = computed(() => validRate.value ? String(Math.round(props.rebate
 .promo-toggle { display:flex; flex-shrink:0; align-items:center; justify-content:center; width:32px; height:32px; border:1px solid #b3e2ff; border-radius:50%; background:#ffffffed; color:#0073b6; box-shadow:0 2px 3px #12243915; }
 .promo-toggle svg { width:19px; height:19px; }
 .promo-body { min-height:0; overflow-y:auto; font-size:14px; line-height:1.9; color:#64748b; }
-.promo-rate { position:relative; display:inline-block; margin:3px 0 7px; padding:3px 16px; color:#ff346d; font-size:20px; font-weight:700; }
-.promo-rate svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
-.promo-body p { text-decoration:underline; text-decoration-color:#10b981; text-underline-offset:5px; text-decoration-thickness:1px; }
+.promo-invite { color:#0073b6; font-weight:700; text-decoration:underline; text-underline-offset:5px; }
+.promo-reward { color:#00875b; font-weight:700; text-decoration:underline; text-underline-offset:5px; text-decoration-thickness:1px; }
+.promo-rate { display:inline-block; margin:3px 4px 5px 0; font-size:32px; font-weight:800; line-height:1.1; white-space:nowrap; }
+.promo-lasting { margin-top:5px; color:#ff346d; font-size:19px; font-weight:700; }
+.promo-lasting > span { position:relative; display:inline-block; padding:3px 12px; }
+.promo-lasting svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
 .promo-action { display:flex; flex-shrink:0; align-items:center; justify-content:space-between; margin-top:4px; font-size:16px; font-weight:700; color:#0073b6; }
 .promo-arrow { display:flex; align-items:center; justify-content:center; width:38px; height:38px; border:1px solid #e5e7eb; border-radius:50%; background:#ffffffb3; font-size:23px; transition:transform .2s; }
 .promo-action:hover .promo-arrow { transform:translate(2px,-2px); }
-.promo-heading-link:focus-visible,.promo-toggle:focus-visible,.promo-action:focus-visible,.promo-compact:focus-visible { outline:2px solid #0073b6; outline-offset:3px; border-radius:8px; }
+.promo-heading-link:focus-visible,.promo-invite:focus-visible,.promo-toggle:focus-visible,.promo-action:focus-visible,.promo-compact:focus-visible { outline:2px solid #0073b6; outline-offset:3px; border-radius:8px; }
 @media (prefers-reduced-motion:reduce) { .promo-arrow { transition:none; } .promo-action:hover .promo-arrow { transform:none; } }
 </style>

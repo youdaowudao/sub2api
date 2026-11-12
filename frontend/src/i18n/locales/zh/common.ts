@@ -174,7 +174,11 @@ export default {
     affiliate: '邀请返利',
     affiliatePromo: {
       title: '专属推广官',
-      description: '好友通过邀请链接加入，符合规则的充值可享 {rate}% 推广返利。',
+      invitation: '好友通过{invite}加入，',
+      inviteLink: '邀请链接',
+      recharge: 'TA 每笔充值，你都享',
+      commission: '{rate}邀请返利',
+      lasting: '永久有效！',
       fallback: '分享专属邀请链接，查看返利规则。',
       action: '马上出发',
       collapse: '收起推广卡片',

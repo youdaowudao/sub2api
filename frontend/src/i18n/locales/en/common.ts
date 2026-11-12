@@ -174,7 +174,11 @@ export default {
     affiliate: 'Affiliate Rebates',
     affiliatePromo: {
       title: 'Referral Partner',
-      description: 'Friends who join through your invite link can earn you a {rate}% rebate on eligible top-ups.',
+      invitation: 'Friends join through your {invite}.',
+      inviteLink: 'invite link',
+      recharge: 'On every top-up, you earn',
+      commission: '{rate} referral rebate',
+      lasting: 'No expiry!',
       fallback: 'Share your invite link and view the rebate rules.',
       action: 'Get started',
       collapse: 'Collapse referral card',
