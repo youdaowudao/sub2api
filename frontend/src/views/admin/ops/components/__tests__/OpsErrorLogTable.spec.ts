@@ -122,3 +122,21 @@ describe('OpsErrorLogTable i18n keys exist in the errorLog namespace', () => {
     })
   }
 })
+
+it('renders aggregate identities and unknown values instead of a representative person', async () => {
+  const wrapper = mountTable({ user_id: null, user_email: '', api_key_id: null, api_key_name: '', client_ip: null, user_agent: '' })
+  await wrapper.setProps({ recordMeta: { 1: {
+    representative_id: 1, count: 12, first_at: '2026-06-05T23:50:00Z', last_at: '2026-06-05T23:59:50Z',
+    user_count: 3, api_key_count: 4, has_unknown_user: true, has_unknown_api_key: true,
+    client_ip_count: 2, has_unknown_client_ip: true, user_agent_count: 2, has_unknown_user_agent: true,
+    is_request_error: true, is_upstream_error: true,
+  } } } as never)
+  expect(wrapper.text()).toContain('admin.ops.records.users')
+  expect(wrapper.text()).toContain('admin.ops.records.keys')
+  expect(wrapper.text()).toContain('admin.ops.records.unknownKey')
+  expect(wrapper.text()).toContain('admin.ops.records.unknownValue')
+  expect(wrapper.text()).toContain('admin.ops.records.span')
+  expect(wrapper.text()).not.toContain('alice@test.com')
+  expect(wrapper.find('button[title="admin.usage.clickToViewBalance"]').exists()).toBe(false)
+  wrapper.unmount()
+})

@@ -892,32 +892,23 @@ func escapeLikePattern(s string) string {
 }
 
 func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
-	clauses := make([]string, 0, 12)
-	args := make([]any, 0, 12)
-	clauses = append(clauses, "1=1")
-
-	phaseFilter := ""
-	if filter != nil {
-		phaseFilter = strings.TrimSpace(strings.ToLower(filter.Phase))
+	if filter == nil {
+		filter = &service.OpsErrorLogFilter{}
 	}
-	// ops_error_logs stores client-visible error requests (status>=400),
-	// but we also persist "recovered" upstream errors (status<400) for upstream health visibility.
-	// If Resolved is not specified, do not filter by resolved state (backward-compatible).
-	resolvedFilter := (*bool)(nil)
-	if filter != nil {
-		resolvedFilter = filter.Resolved
-	}
-	// Keep list endpoints scoped to client errors unless the caller explicitly opts
-	// into recovered provider-health rows (upstream/account_auth). Request-error
-	// endpoints never set the opt-in and retain this guard.
-	// cyber_policy is exempt from the status >= 400 guard: streaming cyber hits arrive with
-	// status 200 (the SSE stream opened successfully before upstream returned response.failed),
-	// but they are always client-visible blocked requests that belong in admin + user error
-	// lists.  Without the exemption the entire streaming-path cyber sink would be invisible.
-	if !opsFilterIncludesRecoveredProviderRows(filter, phaseFilter) {
+	clauses := []string{"1=1"}
+	args := []any{}
+	phase := strings.ToLower(strings.TrimSpace(filter.Phase))
+	if !opsFilterIncludesRecoveredProviderRows(filter, phase) {
 		clauses = append(clauses, "(COALESCE(e.status_code, 0) >= 400 OR e.error_type = 'cyber_policy')")
 	}
+	clauses, args = appendOpsErrorCommonWhere(clauses, args, filter)
+	clauses = appendOpsErrorViewWhere(clauses, filter.View)
+	return "WHERE " + strings.Join(clauses, " AND "), args
+}
 
+func appendOpsErrorCommonWhere(clauses []string, args []any, filter *service.OpsErrorLogFilter) ([]string, []any) {
+	phaseFilter := strings.ToLower(strings.TrimSpace(filter.Phase))
+	resolvedFilter := filter.Resolved
 	if filter.StartTime != nil && !filter.StartTime.IsZero() {
 		args = append(args, filter.StartTime.UTC())
 		clauses = append(clauses, "e.created_at >= $"+itoa(len(args)))
@@ -958,24 +949,6 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 		clauses = append(clauses, "COALESCE(e.resolved,false) = $"+itoa(len(args)))
 	}
 
-	// View filter: errors vs excluded vs all.
-	// Excluded = business-limited errors (quota/concurrency/billing).
-	// Upstream 429/529 are included in errors view to match SLA calculation.
-	view := ""
-	if filter != nil {
-		view = strings.ToLower(strings.TrimSpace(filter.View))
-	}
-	switch view {
-	case "", "errors":
-		clauses = append(clauses, "COALESCE(e.is_business_limited,false) = false")
-	case "excluded":
-		clauses = append(clauses, "COALESCE(e.is_business_limited,false) = true")
-	case "all":
-		// no-op
-	default:
-		// treat unknown as default 'errors'
-		clauses = append(clauses, "COALESCE(e.is_business_limited,false) = false")
-	}
 	if len(filter.StatusCodes) > 0 {
 		args = append(args, pq.Array(filter.StatusCodes))
 		clauses = append(clauses, "COALESCE(e.upstream_status_code, e.status_code, 0) = ANY($"+itoa(len(args))+")")
@@ -1039,7 +1012,18 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 		clauses = append(clauses, "e.error_type = ANY($"+itoa(len(args))+")")
 	}
 
-	return "WHERE " + strings.Join(clauses, " AND "), args
+	return clauses, args
+}
+
+func appendOpsErrorViewWhere(clauses []string, value string) []string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "all":
+	case "excluded":
+		clauses = append(clauses, "COALESCE(e.is_business_limited,false) = true")
+	default:
+		clauses = append(clauses, "COALESCE(e.is_business_limited,false) = false")
+	}
+	return clauses
 }
 
 func opsFilterIncludesRecoveredProviderRows(filter *service.OpsErrorLogFilter, phaseFilter string) bool {

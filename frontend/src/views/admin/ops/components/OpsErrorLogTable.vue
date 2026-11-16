@@ -6,16 +6,22 @@
       <DataTable
         :columns="columns"
         :data="rows"
+        :column-width-storage-key="columnWidthStorageKey"
         :loading="loading"
         clickable-rows
         server-side-sort
-        default-sort-key="created_at"
-        default-sort-order="desc"
+        :default-sort-key="sortBy === 'status_code' ? 'status' : (sortBy || 'created_at')"
+        :default-sort-order="sortOrder || 'desc'"
         @sort="onSort"
         @rowClick="(row) => emit('openErrorDetail', row.id)"
       >
         <template #cell-created_at="{ row }">
-          <span
+          <div v-if="(recordOf(row)?.count ?? 0) > 1" class="space-y-0.5 text-xs text-gray-500 dark:text-gray-400">
+            <div class="font-medium text-gray-700 dark:text-gray-200">{{ t('admin.ops.records.latest') }} {{ formatDateTime(recordOf(row)?.last_at || row.created_at) }}</div>
+            <div>{{ t('admin.ops.records.first') }} {{ formatDateTime(recordOf(row)?.first_at || row.created_at) }}</div>
+            <div>{{ t('admin.ops.records.span') }} {{ formatSpan(recordOf(row)) }}</div>
+          </div>
+          <span v-else
             class="text-sm text-gray-600 dark:text-gray-400"
             :title="row.request_id || row.client_request_id"
           >{{ formatDateTime(row.created_at) }}</span>
@@ -65,11 +71,13 @@
         </template>
 
         <template #cell-user="{ row }">
-          <div v-if="row.user_id" class="text-sm">
+          <button v-if="(recordOf(row)?.user_count ?? 0) > 1" type="button" class="text-sm text-primary-600 dark:text-primary-400" @click.stop="emit('openErrorDetail', row.id)">{{ t('admin.ops.records.users', { count: recordOf(row)?.user_count }) }}</button>
+          <div v-else-if="row.user_id" class="text-sm">
             <button
               v-if="userClickable && row.user_email"
               class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-              :title="t('admin.usage.clickToViewBalance')"
+              :class="recordOf(row) ? 'ops-record-identity max-w-[140px] truncate align-middle' : ''"
+              :title="recordOf(row) ? row.user_email : t('admin.usage.clickToViewBalance')"
               @click.stop="emit('userClick', row.user_id, row.user_email)"
             >
               {{ row.user_email }}
@@ -78,10 +86,17 @@
             <span class="ml-1 text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
           </div>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+          <div v-if="recordOf(row)?.has_unknown_user" class="text-xs text-gray-400">{{ t('admin.ops.records.unknownUser') }}</div>
+          <div v-if="recordOf(row) && !columns.some(c => c.key === 'api_key')" class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+            <span v-if="(recordOf(row)?.api_key_count ?? 0) > 1">{{ t('admin.ops.records.keys', { count: recordOf(row)?.api_key_count }) }}</span>
+            <span v-else-if="row.api_key_id"><span :class="recordOf(row) ? 'ops-record-identity inline-block max-w-[140px] truncate align-middle' : ''" :title="row.api_key_name">{{ row.api_key_name || '#' + row.api_key_id }}</span><span v-if="row.api_key_deleted" class="ml-1 text-rose-500">{{ t('admin.ops.errorLog.keyDeletedBadge') }}</span></span>
+            <span v-if="recordOf(row)?.has_unknown_api_key" class="ml-1">{{ t('admin.ops.records.unknownKey') }}</span>
+          </div>
         </template>
 
         <template #cell-api_key="{ row }">
-          <div v-if="row.api_key_id || row.api_key_name" class="text-sm">
+          <button v-if="(recordOf(row)?.api_key_count ?? 0) > 1" type="button" class="text-sm text-primary-600 dark:text-primary-400" @click.stop="emit('openErrorDetail', row.id)">{{ t('admin.ops.records.keys', { count: recordOf(row)?.api_key_count }) }}</button>
+          <div v-else-if="row.api_key_id || row.api_key_name" class="text-sm">
             <span class="text-gray-900 dark:text-white">{{ row.api_key_name || '#' + row.api_key_id }}</span>
             <span
               v-if="row.api_key_deleted"
@@ -89,13 +104,15 @@
             >{{ t('admin.ops.errorLog.keyDeletedBadge') }}</span>
           </div>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+          <div v-if="recordOf(row)?.has_unknown_api_key" class="text-xs text-gray-400">{{ t('admin.ops.records.unknownKey') }}</div>
         </template>
 
         <template #cell-account="{ row }">
           <span
             v-if="row.account_id"
             class="text-sm text-gray-900 dark:text-white"
-            :title="t('admin.ops.errorLog.accountId') + ' ' + row.account_id"
+            :class="recordOf(row) ? 'ops-record-identity inline-block max-w-[140px] truncate align-middle' : ''"
+            :title="(row.account_name || '') + ' · ' + t('admin.ops.errorLog.accountId') + ' ' + row.account_id"
           >{{ row.account_name || '#' + row.account_id }}</span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
@@ -123,30 +140,38 @@
         </template>
 
         <template #cell-message="{ row }">
-          <span
-            v-if="row.message"
-            class="block max-w-[280px] truncate text-sm text-gray-600 dark:text-gray-400"
-            :title="row.message"
-          >{{ formatSmartMessage(row.message) || '-' }}</span>
-          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+          <div :class="recordOf(row) ? ['rounded border-l-2 px-2 py-1', messageTone(row.severity)] : ''">
+            <div v-if="recordOf(row)" class="mb-1 flex flex-wrap items-center gap-1 text-[11px]">
+              <span class="rounded px-1.5 py-0.5 font-medium" :class="getStatusClass(row.status_code)">{{ row.status_code }}</span>
+              <span v-if="recordOf(row)?.is_request_error" class="text-rose-600 dark:text-rose-400">{{ t('admin.ops.records.request') }}</span>
+              <span v-if="recordOf(row)?.is_upstream_error" class="text-amber-700 dark:text-amber-400">{{ t('admin.ops.records.upstream') }}</span>
+              <button v-if="(recordOf(row)?.count ?? 0) > 1" type="button" class="ml-1 rounded bg-primary-50 px-1.5 py-0.5 font-semibold text-primary-700 dark:bg-primary-900/30 dark:text-primary-300" @click.stop="emit('openErrorDetail', row.id)">{{ t('admin.ops.records.count', { count: recordOf(row)?.count }) }}</button>
+            </div>
+            <span v-if="row.message" class="block text-sm text-gray-700 dark:text-gray-300" :class="recordOf(row) ? 'ops-record-message line-clamp-2 max-w-[340px] break-words' : 'max-w-[280px] truncate'" :title="row.message">{{ formatSmartMessage(row.message) || '-' }}</span>
+            <span v-else class="text-sm text-gray-400">-</span>
+          </div>
         </template>
 
         <template #cell-user_agent="{ row }">
+          <span v-if="(recordOf(row)?.user_agent_count ?? 0) > 1" class="text-xs text-gray-500">{{ t('admin.ops.records.multiple') }}</span>
           <span
-            v-if="row.user_agent"
+            v-else-if="row.user_agent"
             class="block max-w-[320px] truncate text-sm text-gray-600 dark:text-gray-400"
             :title="row.user_agent"
           >{{ row.user_agent }}</span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+          <div v-if="recordOf(row)?.has_unknown_user_agent" class="text-xs text-gray-400">{{ t('admin.ops.records.unknownValue') }}</div>
         </template>
 
         <template #cell-client_ip="{ row }">
           <div @click.stop>
-            <div v-if="row.client_ip">
+            <button v-if="(recordOf(row)?.client_ip_count ?? 0) > 1" class="text-xs text-primary-600" @click="emit('openErrorDetail', row.id)">{{ t('admin.ops.records.multiple') }}</button>
+            <div v-else-if="row.client_ip">
               <span class="text-sm font-mono text-gray-600 dark:text-gray-400">{{ row.client_ip }}</span>
               <IpGeoCell :ip="row.client_ip" />
             </div>
             <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+            <div v-if="recordOf(row)?.has_unknown_client_ip" class="text-xs text-gray-400">{{ t('admin.ops.records.unknownValue') }}</div>
           </div>
         </template>
 
@@ -161,7 +186,7 @@
           </button>
         </template>
 
-        <template #empty><EmptyState :message="t('admin.ops.errorLog.noErrors')" /></template>
+        <template #empty><EmptyState :message="emptyMessage || t('admin.ops.errorLog.noErrors')" /></template>
       </DataTable>
     </div>
 
@@ -171,6 +196,8 @@
         :total="total"
         :page="page"
         :page-size="pageSize"
+        :page-size-options="pageSizeOptions"
+        :persist-page-size="pageSizeOptions === undefined"
         @update:page="emit('update:page', $event)"
         @update:pageSize="emit('update:pageSize', $event)"
       />
@@ -186,7 +213,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import IpGeoBatchToolbar from '@/components/common/IpGeoBatchToolbar.vue'
-import type { OpsErrorLog } from '@/api/admin/ops'
+import type { OpsErrorLog, OpsErrorRecord } from '@/api/admin/ops'
 import type { Column } from '@/components/common/types'
 import { getSeverityClass, formatDateTime } from '../utils/opsFormatters'
 import { mapErrorCategory } from '@/utils/errorCategory'
@@ -219,6 +246,7 @@ const columns = computed<Column[]>(() => {
   const visibleColumns = props.visibleColumnKeys
     ? allColumns.value.filter((c) => props.visibleColumnKeys!.includes(c.key))
     : allColumns.value
+  if (props.columnOrder) return [...visibleColumns].sort((a, b) => props.columnOrder!.indexOf(a.key) - props.columnOrder!.indexOf(b.key))
   if (!props.summaryFirst) return visibleColumns
 
   return [
@@ -286,6 +314,13 @@ function getTypeBadge(log: OpsErrorLog): { label: string; className: string } {
 }
 
 interface Props {
+  recordMeta?: Record<number, OpsErrorRecord>
+  columnOrder?: string[]
+  pageSizeOptions?: number[]
+  columnWidthStorageKey?: string
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
+  emptyMessage?: string
   rows: OpsErrorLog[]
   total: number
   loading: boolean
@@ -312,6 +347,15 @@ interface Emits {
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
+const recordOf = (row: OpsErrorLog) => props.recordMeta?.[row.id]
+function formatSpan(record?: OpsErrorRecord): string {
+  if (!record) return ''
+  const seconds = Math.max(0, Math.floor((Date.parse(record.last_at) - Date.parse(record.first_at)) / 1000))
+  return seconds >= 60 ? t('admin.ops.records.minutes', { count: Math.floor(seconds / 60) }) : t('admin.ops.records.seconds', { count: seconds })
+}
+function messageTone(severity: string): string {
+  return ({ P0: 'border-red-400 bg-red-50/40 dark:bg-red-900/10', P1: 'border-orange-400 bg-orange-50/40 dark:bg-orange-900/10', P2: 'border-yellow-400 bg-yellow-50/30 dark:bg-yellow-900/10', P3: 'border-blue-300 bg-blue-50/30 dark:bg-blue-900/10' } as Record<string, string>)[severity] || 'border-gray-300 bg-gray-50/40 dark:bg-dark-800'
+}
 
 function onSort(key: string, order: 'asc' | 'desc') {
   emit('sort', mapErrorSortKey(key), order)
@@ -341,3 +385,11 @@ function formatSmartMessage(msg: string): string {
   return msg.length > 200 ? msg.substring(0, 200) + '...' : msg
 }
 </script>
+
+<style scoped>
+/* Auto layout stays compact; explicit column widths control the full cell. */
+:deep(table[style*="table-layout: fixed"] .ops-record-identity),
+:deep(table[style*="table-layout: fixed"] .ops-record-message) {
+  max-width: 100%;
+}
+</style>

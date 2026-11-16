@@ -969,6 +969,55 @@ export interface OpsErrorDetail extends OpsErrorLog {
   api_key_prefix?: string | null
 }
 
+export interface OpsErrorRecord extends Partial<OpsErrorLog> {
+  representative?: OpsErrorLog
+  representative_id: number
+  client_status_code: number | null
+  is_request_error: boolean
+  is_upstream_error: boolean
+  count: number
+  first_at: string
+  last_at: string
+  user_count: number
+  api_key_count: number
+  has_unknown_user: boolean
+  has_unknown_api_key: boolean
+  single_user?: { id: number; email: string } | null
+  single_api_key?: { id: number; name: string; deleted: boolean } | null
+  single_client_ip: string | null
+  client_ip_count: number
+  has_unknown_client_ip: boolean
+  single_user_agent: string | null
+  user_agent_count: number
+  has_unknown_user_agent: boolean
+}
+
+export interface OpsErrorRecordsResponse {
+  items: OpsErrorRecord[]
+  total: number
+  total_records: number
+  page: number
+  page_size: number
+  window_start: string
+  window_end: string
+}
+
+export type OpsErrorRecordsParams = OpsErrorListQueryParams & {
+  scope?: 'all' | 'request' | 'upstream'
+  display?: 'grouped' | 'raw'
+  finance?: 'hide' | 'include' | 'only'
+}
+
+export async function listErrorRecords(params: OpsErrorRecordsParams, options: OpsRequestOptions = {}): Promise<OpsErrorRecordsResponse> {
+  const { data } = await apiClient.get<OpsErrorRecordsResponse>('/admin/ops/error-records', { params, signal: options.signal })
+  return data
+}
+
+export async function listErrorRecordMembers(id: number, params: Omit<OpsErrorRecordsParams, 'display'>, options: OpsRequestOptions = {}): Promise<OpsErrorRecordsResponse> {
+  const { data } = await apiClient.get<OpsErrorRecordsResponse>(`/admin/ops/error-records/${id}/members`, { params, signal: options.signal })
+  return data
+}
+
 export type OpsErrorLogsResponse = PaginatedResponse<OpsErrorLog>
 
 export async function getDashboardOverview(
@@ -1329,6 +1378,9 @@ export const opsAPI = {
   getAccountAvailabilityStats,
   getRealtimeTrafficSummary,
   subscribeQPS,
+
+  listErrorRecords,
+  listErrorRecordMembers,
 
   // Legacy unified endpoints
   listErrorLogs,

@@ -767,11 +767,14 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes,
-  scrollBehavior(_to, _from, savedPosition) {
+  scrollBehavior(to, from, savedPosition) {
     // Scroll to saved position when using browser back/forward
     if (savedPosition) {
       return savedPosition
     }
+    // The inline monitor list persists filters in the query string. Keep its
+    // current scroll position when those controls update the same page.
+    if (to.path === '/admin/ops' && from.path === to.path) return false
     // Scroll to top for new routes
     return { top: 0 }
   }

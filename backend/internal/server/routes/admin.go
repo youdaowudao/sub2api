@@ -241,6 +241,10 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 			ws.GET("/qps", h.Admin.Ops.QPSWSHandler)
 		}
 
+		// Read-only unified records; grouping never alters ingestion or dashboard metrics.
+		ops.GET("/error-records", h.Admin.Ops.ListErrorRecords)
+		ops.GET("/error-records/:representative_id/members", h.Admin.Ops.ListErrorRecordMembers)
+
 		// Error logs (legacy)
 		ops.GET("/errors", h.Admin.Ops.GetErrorLogs)
 		ops.GET("/errors/:id", h.Admin.Ops.GetErrorLogByID)
