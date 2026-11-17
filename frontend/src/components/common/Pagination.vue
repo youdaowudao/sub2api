@@ -132,6 +132,7 @@ interface Props {
   page: number
   pageSize: number
   pageSizeOptions?: number[]
+  persistPageSize?: boolean
   showPageSizeSelector?: boolean
   showJump?: boolean
 }
@@ -143,6 +144,7 @@ interface Emits {
 
 const props = withDefaults(defineProps<Props>(), {
   pageSizeOptions: () => getConfiguredTablePageSizeOptions(),
+  persistPageSize: true,
   showPageSizeSelector: true,
   showJump: false
 })
@@ -162,6 +164,7 @@ const toItem = computed(() => {
 })
 
 const pageSizeSelectOptions = computed(() => {
+  if (!props.persistPageSize) return Array.from(new Set(props.pageSizeOptions.filter(size => Number.isSafeInteger(size) && size > 0))).sort((a, b) => a - b).map(size => ({ value: size, label: String(size) }))
   const options = Array.from(
     new Set([
       ...getConfiguredTablePageSizeOptions(),
@@ -224,6 +227,11 @@ const goToPage = (newPage: number) => {
 
 const handlePageSizeChange = (value: string | number | boolean | null) => {
   if (value === null || typeof value === 'boolean') return
+  if (!props.persistPageSize) {
+    const size = typeof value === 'string' ? Number(value) : value
+    if (pageSizeSelectOptions.value.some(option => option.value === size)) emit('update:pageSize', size)
+    return
+  }
   const newPageSize = normalizeTablePageSize(typeof value === 'string' ? parseInt(value, 10) : value)
   setPersistedPageSize(newPageSize)
   emit('update:pageSize', newPageSize)

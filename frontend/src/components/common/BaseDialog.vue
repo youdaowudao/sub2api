@@ -2,7 +2,8 @@
   <Teleport to="body">
     <Transition name="modal">
       <div
-        v-if="show"
+        v-if="show || keepMounted"
+        v-show="show"
         class="modal-overlay"
         :style="zIndexStyle"
         :aria-labelledby="dialogId"
@@ -68,6 +69,8 @@ interface Props {
   closeOnEscape?: boolean
   closeOnClickOutside?: boolean
   showCloseButton?: boolean
+  keepMounted?: boolean
+  preventScrollOnFocus?: boolean
   zIndex?: number
 }
 
@@ -80,6 +83,8 @@ const props = withDefaults(defineProps<Props>(), {
   closeOnEscape: true,
   closeOnClickOutside: false,
   showCloseButton: true,
+  keepMounted: false,
+  preventScrollOnFocus: false,
   zIndex: 50
 })
 
@@ -134,20 +139,22 @@ watch(
 
       // 等待DOM更新后设置焦点到对话框
       await nextTick()
-      if (modalBodyRef.value) {
+      if (modalBodyRef.value && !props.keepMounted) {
         modalBodyRef.value.scrollTop = 0
       }
       if (dialogRef.value) {
         const firstFocusable = dialogRef.value.querySelector<HTMLElement>(
           'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
         )
-        firstFocusable?.focus()
+        if (props.preventScrollOnFocus) firstFocusable?.focus({ preventScroll: true })
+        else firstFocusable?.focus()
       }
     } else {
       updateScrollLock(false)
       // 恢复之前的焦点
       if (previousActiveElement && typeof previousActiveElement.focus === 'function') {
-        previousActiveElement.focus()
+        if (props.preventScrollOnFocus) previousActiveElement.focus({ preventScroll: true })
+        else previousActiveElement.focus()
       }
       previousActiveElement = null
     }
@@ -163,5 +170,6 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleEscape)
   // 确保组件卸载时移除滚动锁定
   updateScrollLock(false)
+  if (props.preventScrollOnFocus && previousActiveElement?.isConnected) previousActiveElement.focus({ preventScroll: true })
 })
 </script>

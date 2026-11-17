@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
+enableAutoUnmount(afterEach)
 import { nextTick } from 'vue'
 import BaseDialog from '../BaseDialog.vue'
 
@@ -34,4 +35,17 @@ describe('BaseDialog', () => {
     expect(document.body.querySelector<HTMLElement>('.modal-body')?.scrollTop).toBe(0)
     wrapper.unmount()
   })
+})
+
+it('keeps an opted-in dialog and its scrolled content when returning from details', async () => {
+  const wrapper = mount(BaseDialog, { attachTo: document.body, props: { show: true, title: 'Group', keepMounted: true }, slots: { default: '<div style="height:2000px">rows</div>' }, global: { stubs: { Icon: true } } })
+  await nextTick()
+  const body = document.body.querySelector<HTMLElement>('.modal-body')!
+  body.scrollTop = 480
+  await wrapper.setProps({ show: false })
+  expect(document.body.querySelector('.modal-body')).toBe(body)
+  await wrapper.setProps({ show: true }); await nextTick()
+  expect(document.body.querySelector('.modal-body')).toBe(body)
+  expect(body.scrollTop).toBe(480)
+  wrapper.unmount()
 })

@@ -6,6 +6,8 @@ import (
 )
 
 type OpsRepository interface {
+	ListErrorRecords(ctx context.Context, filter *OpsErrorRecordsFilter) (*OpsErrorRecordsList, error)
+	ListErrorRecordMembers(ctx context.Context, filter *OpsErrorRecordsFilter, id int64) (*OpsErrorRecordsList, error)
 	InsertErrorLog(ctx context.Context, input *OpsInsertErrorLogInput) (int64, error)
 	BatchInsertErrorLogs(ctx context.Context, inputs []*OpsInsertErrorLogInput) (int64, error)
 	ListErrorLogs(ctx context.Context, filter *OpsErrorLogFilter) (*OpsErrorLogList, error)

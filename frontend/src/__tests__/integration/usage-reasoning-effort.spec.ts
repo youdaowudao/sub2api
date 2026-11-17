@@ -138,7 +138,10 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
+vi.mock('@/stores/adminSettings', () => ({ useAdminSettingsStore: () => ({ fetch: vi.fn().mockResolvedValue(undefined), opsMonitoringEnabled: true }) }))
+
 vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: vi.fn().mockResolvedValue(undefined), replace: vi.fn().mockResolvedValue(undefined) }),
   useRoute: () => ({ query: {} }),
 }))
 

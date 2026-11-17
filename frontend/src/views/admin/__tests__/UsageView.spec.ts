@@ -4,7 +4,7 @@ import { defineComponent, ref } from 'vue'
 
 import UsageView from '../UsageView.vue'
 
-const { list, exportList, getCacheHitRate, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
+const { list, exportList, getCacheHitRate, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routerPush, routerReplace, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -20,6 +20,8 @@ const { list, exportList, getCacheHitRate, getStats, getSnapshotV2, getById, get
     getById: vi.fn(),
     getModelStats: vi.fn(),
     listErrorLogs: vi.fn(),
+    routerPush: vi.fn().mockResolvedValue(undefined),
+    routerReplace: vi.fn().mockResolvedValue(undefined),
     routeQuery: {} as Record<string, string>,
 		aoaToSheet: vi.fn(() => ({})),
 		sheetAddAoa: vi.fn(),
@@ -113,7 +115,10 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
+vi.mock('@/stores/adminSettings', () => ({ useAdminSettingsStore: () => ({ fetch: vi.fn().mockResolvedValue(undefined), opsMonitoringEnabled: true }) }))
+
 vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPush, replace: routerReplace }),
   useRoute: () => ({
     query: routeQuery
   })
@@ -697,7 +702,7 @@ describe('admin UsageView errors tab filter forwarding', () => {
     vi.useRealTimers()
   })
 
-  it('forwards model/account_id/group_id to listErrorLogs on the errors tab', async () => {
+  it('moves the error entry to Ops with request scope and preserves filters', async () => {
     const wrapper = mount(UsageView, {
       global: { stubs: {
         AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
@@ -718,17 +723,14 @@ describe('admin UsageView errors tab filter forwarding', () => {
     vm.filters.group_id = 3
     await flushPromises()
 
-    // 切换到「错误请求」标签（第二个 tab 按钮）触发 loadAdminErrors
+    // 已授权替换旧内嵌错误页签：带筛选跳转到同一个运维列表。
     const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
     await tabs[1].trigger('click')
     await flushPromises()
 
-    expect(listErrorLogs).toHaveBeenCalledWith(expect.objectContaining({
-      view: 'all',
-      model: 'gpt-5.3-codex',
-      account_id: 7,
-      group_id: 3,
-    }))
+    expect(routerPush).toHaveBeenCalledWith({ path: '/admin/ops', query: expect.objectContaining({ errors_scope: 'request', errors_view: 'all', errors_model: 'gpt-5.3-codex', errors_account_id: '7', group_id: '3', tr: 'custom' }) })
+    expect(routerReplace).toHaveBeenCalledWith({ query: expect.objectContaining({ model: 'gpt-5.3-codex', account_id: '7', group_id: '3' }) })
+    expect(listErrorLogs).not.toHaveBeenCalled()
   })
 })
 

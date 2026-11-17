@@ -30,7 +30,7 @@
         @update:group="onGroupChange"
         @update:query-mode="onQueryModeChange"
         @update:custom-time-range="onCustomTimeRangeChange"
-        @refresh="fetchData"
+        @refresh="refreshDashboardAndErrors"
         @open-request-details="handleOpenRequestDetails"
         @open-error-details="openErrorDetails"
         @open-settings="showSettingsDialog = true"
@@ -66,6 +66,13 @@
           />
         </div>
       </div>
+
+      <OpsErrorRecordsPanel
+        v-if="!isFullscreen && opsEnabled && !(loading && !hasLoadedOnce)"
+        ref="errorRecordsPanel"
+        :time-range="timeRange" :custom-start-time="customStartTime" :custom-end-time="customEndTime"
+        :platform="platform" :group-id="groupId" :refresh-token="errorListRefreshToken"
+      />
 
       <!-- Row: Visual Analysis (baseline 3-up grid) -->
       <div v-if="opsEnabled && !(loading && !hasLoadedOnce)" class="grid grid-cols-1 gap-6 md:grid-cols-3">
@@ -111,19 +118,6 @@
           <OpsAlertRulesCard />
         </BaseDialog>
 
-        <OpsErrorDetailsModal
-          :show="showErrorDetails"
-          :time-range="timeRange"
-          :custom-start-time="customStartTime"
-          :custom-end-time="customEndTime"
-          :platform="platform"
-          :group-id="groupId"
-          :error-type="errorDetailsType"
-          :resume-state="resumeListState"
-          @update:show="showErrorDetails = $event"
-          @openErrorDetail="openError"
-        />
-
         <OpsErrorDetailModal v-model:show="showErrorModal" :error-id="selectedErrorId" :error-type="errorDetailsType" :back-to-list="detailReturnTarget !== null" @back="handleBackToList" />
 
         <OpsRequestDetailsModal
@@ -141,10 +135,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import { useDebounceFn, useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import {
@@ -162,7 +156,6 @@ import OpsDashboardSkeleton from './components/OpsDashboardSkeleton.vue'
 import OpsConcurrencyCard from './components/OpsConcurrencyCard.vue'
 import OpsErrorDetailModal from './components/OpsErrorDetailModal.vue'
 import OpsErrorDistributionChart from './components/OpsErrorDistributionChart.vue'
-import OpsErrorDetailsModal from './components/OpsErrorDetailsModal.vue'
 import OpsErrorTrendChart from './components/OpsErrorTrendChart.vue'
 import OpsLatencyChart from './components/OpsLatencyChart.vue'
 import OpsThroughputTrendChart from './components/OpsThroughputTrendChart.vue'
@@ -173,6 +166,8 @@ import OpsSystemLogTable from './components/OpsSystemLogTable.vue'
 import OpsRequestDetailsModal, { type OpsRequestDetailsPreset } from './components/OpsRequestDetailsModal.vue'
 import OpsSettingsDialog from './components/OpsSettingsDialog.vue'
 import OpsAlertRulesCard from './components/OpsAlertRulesCard.vue'
+
+const OpsErrorRecordsPanel = defineAsyncComponent(() => import('./components/OpsErrorRecordsPanel.vue'))
 
 const route = useRoute()
 const router = useRouter()
@@ -209,6 +204,8 @@ const QUERY_KEYS = {
   groupId: 'group_id',
   queryMode: 'mode',
   fullscreen: 'fullscreen',
+  customStart: 'start_time',
+  customEnd: 'end_time',
 
   // Deep links
   openErrorDetails: 'open_error_details',
@@ -245,6 +242,8 @@ function handleKeydown(e: KeyboardEvent) {
 
 let dashboardFetchController: AbortController | null = null
 let dashboardFetchSeq = 0
+let dashboardStarted = false
+let dashboardRequestParamsKey = ''
 
 function isCanceledRequest(err: unknown): boolean {
   return (
@@ -276,23 +275,31 @@ const readQueryNumber = (key: string): number | null => {
   return Number.isFinite(n) ? n : null
 }
 
-const applyRouteQueryToState = () => {
-  const nextTimeRange = readQueryString(QUERY_KEYS.timeRange)
-  if (nextTimeRange && allowedTimeRanges.has(nextTimeRange as TimeRange)) {
-    timeRange.value = nextTimeRange as TimeRange
-  }
+const applyRouteQueryToState = (preserveMissingMode = false, applyGlobals = true) => {
+  if (applyGlobals) {
+    const nextTimeRange = readQueryString(QUERY_KEYS.timeRange)
+    timeRange.value = allowedTimeRanges.has(nextTimeRange as TimeRange) ? nextTimeRange as TimeRange : '1h'
 
-  platform.value = readQueryString(QUERY_KEYS.platform) || ''
+    if (timeRange.value === 'custom') {
+      customStartTime.value = readQueryString(QUERY_KEYS.customStart) || null
+      customEndTime.value = readQueryString(QUERY_KEYS.customEnd) || null
+    } else {
+      customStartTime.value = null
+      customEndTime.value = null
+    }
+    platform.value = readQueryString(QUERY_KEYS.platform) || ''
 
-  const groupIdRaw = readQueryNumber(QUERY_KEYS.groupId)
-  groupId.value = typeof groupIdRaw === 'number' && groupIdRaw > 0 ? groupIdRaw : null
+    const groupIdRaw = readQueryNumber(QUERY_KEYS.groupId)
+    groupId.value = typeof groupIdRaw === 'number' && groupIdRaw > 0 ? groupIdRaw : null
 
-  const nextMode = readQueryString(QUERY_KEYS.queryMode)
-  if (nextMode && allowedQueryModes.has(nextMode as QueryMode)) {
-    queryMode.value = nextMode as QueryMode
-  } else {
-    const fallback = adminSettingsStore.opsQueryModeDefault || 'auto'
-    queryMode.value = allowedQueryModes.has(fallback as QueryMode) ? (fallback as QueryMode) : 'auto'
+    const nextMode = readQueryString(QUERY_KEYS.queryMode)
+    if (nextMode && allowedQueryModes.has(nextMode as QueryMode)) {
+      queryMode.value = nextMode as QueryMode
+    } else if (!preserveMissingMode) {
+      const fallback = adminSettingsStore.opsQueryModeDefault || 'auto'
+      queryMode.value = allowedQueryModes.has(fallback as QueryMode) ? (fallback as QueryMode) : 'auto'
+    }
+
   }
 
   // Deep links
@@ -309,8 +316,11 @@ const applyRouteQueryToState = () => {
   const openErr = readQueryString(QUERY_KEYS.openErrorDetails)
   if (openErr === '1' || openErr === 'true') {
     const typ = readQueryString(QUERY_KEYS.errorType)
-    errorDetailsType.value = typ === 'upstream' ? 'upstream' : 'request'
-    showErrorDetails.value = true
+    const query: LocationQueryRaw = { ...route.query, errors_focus: '1', errors_scope: typ === 'upstream' ? 'upstream' : 'request', errors_view: 'errors' }
+    delete query[QUERY_KEYS.openErrorDetails]
+    delete query[QUERY_KEYS.errorType]
+    if (query[QUERY_KEYS.groupId] === '') delete query[QUERY_KEYS.groupId]
+    void router.replace({ query })
   }
 }
 
@@ -322,6 +332,10 @@ const buildQueryFromState = () => {
   })
 
   if (timeRange.value !== '1h') next[QUERY_KEYS.timeRange] = timeRange.value
+  if (timeRange.value === 'custom') {
+    if (customStartTime.value) next[QUERY_KEYS.customStart] = customStartTime.value
+    if (customEndTime.value) next[QUERY_KEYS.customEnd] = customEndTime.value
+  }
   if (platform.value) next[QUERY_KEYS.platform] = platform.value
   if (typeof groupId.value === 'number' && groupId.value > 0) next[QUERY_KEYS.groupId] = String(groupId.value)
   if (queryMode.value !== 'auto') next[QUERY_KEYS.queryMode] = queryMode.value
@@ -369,7 +383,8 @@ const loadingErrorDistribution = ref(false)
 const selectedErrorId = ref<number | null>(null)
 const showErrorModal = ref(false)
 
-const showErrorDetails = ref(false)
+const errorRecordsPanel = ref<InstanceType<typeof OpsErrorRecordsPanel> | null>(null)
+const errorListRefreshToken = ref(0)
 const errorDetailsType = ref<'request' | 'upstream'>('request')
 
 const showRequestDetails = ref(false)
@@ -380,7 +395,7 @@ const requestDetailsPreset = ref<OpsRequestDetailsPreset>({
 })
 
 // 记录单条错误详情来自哪个列表，便于"返回列表"时重新打开对应弹窗并保留状态。
-type DetailReturnTarget = 'errorList' | 'requestList' | null
+type DetailReturnTarget = 'requestList' | null
 const detailReturnTarget = ref<DetailReturnTarget>(null)
 
 // 从详情返回时，列表弹窗应保留上一次的筛选/分页状态而非重置。
@@ -460,18 +475,22 @@ function handleOpenRequestDetails(preset?: OpsRequestDetailsPreset) {
   requestDetailsPreset.value = { ...basePreset, ...(preset ?? {}) }
   if (!requestDetailsPreset.value.title) requestDetailsPreset.value.title = basePreset.title
   // Ensure only one modal visible at a time.
-  showErrorDetails.value = false
   showErrorModal.value = false
   showRequestDetails.value = true
 }
 
-function openErrorDetails(kind: 'request' | 'upstream') {
-  errorDetailsType.value = kind
-  // Ensure only one modal visible at a time.
-  showRequestDetails.value = false
-  showErrorModal.value = false
-  showErrorDetails.value = true
+async function openErrorDetails(kind: 'request' | 'upstream') {
+  const same = route.query.errors_scope === kind && route.query.errors_view === 'errors'
+  await router.replace({ query: { ...route.query, errors_focus: '1', errors_scope: kind, errors_view: 'errors' } })
+  if (same) errorRecordsPanel.value?.refresh()
+  await errorRecordsPanel.value?.focus()
 }
+
+function refreshDashboardAndErrors() {
+  errorListRefreshToken.value++
+  void fetchData()
+}
+watch(errorRecordsPanel, panel => { if (panel && route.query.errors_focus === '1') void nextTick(() => panel.focus()) })
 
 function onTimeRangeChange(v: string | number | boolean | null) {
   if (typeof v !== 'string') return
@@ -495,18 +514,13 @@ function onPlatformChange(v: string | number | boolean | null) {
 }
 
 function onGroupChange(v: string | number | boolean | null) {
-  if (v === null) {
-    groupId.value = null
-    return
-  }
-  if (typeof v === 'number') {
-    groupId.value = v > 0 ? v : null
-    return
-  }
-  if (typeof v === 'string') {
+  if (v === null) groupId.value = null
+  else if (typeof v === 'number') groupId.value = v > 0 ? v : null
+  else if (typeof v === 'string') {
     const n = Number.parseInt(v, 10)
     groupId.value = Number.isFinite(n) && n > 0 ? n : null
-  }
+  } else return
+  syncQueryToRoute()
 }
 
 function onQueryModeChange(v: string | number | boolean | null) {
@@ -518,9 +532,8 @@ function onQueryModeChange(v: string | number | boolean | null) {
 function openError(id: number) {
   selectedErrorId.value = id
   // 记录来源列表，便于详情页"返回列表"。
-  detailReturnTarget.value = showRequestDetails.value ? 'requestList' : showErrorDetails.value ? 'errorList' : null
+  detailReturnTarget.value = showRequestDetails.value ? 'requestList' : null
   // Ensure only one modal visible at a time.
-  showErrorDetails.value = false
   showRequestDetails.value = false
   showErrorModal.value = true
 }
@@ -531,12 +544,7 @@ function handleBackToList() {
   resumeListState.value = true
   if (target === 'requestList') {
     showErrorModal.value = false
-    showErrorDetails.value = false
     showRequestDetails.value = true
-  } else if (target === 'errorList') {
-    showErrorModal.value = false
-    showRequestDetails.value = false
-    showErrorDetails.value = true
   }
   detailReturnTarget.value = null
   // 子组件 watch 在本次 show 变化中消费 resumeState 后复位，保证下次手动打开仍会重置筛选。
@@ -729,6 +737,7 @@ function isOpsDisabledError(err: unknown): boolean {
 
 async function fetchData() {
   if (!opsEnabled.value) return
+  dashboardRequestParamsKey = JSON.stringify(buildApiParams())
 
   abortDashboardFetch()
   dashboardFetchSeq += 1
@@ -770,36 +779,30 @@ async function fetchData() {
 }
 
 watch(
-  () => [timeRange.value, platform.value, groupId.value, queryMode.value] as const,
+  () => [timeRange.value, customStartTime.value, customEndTime.value, platform.value, groupId.value, queryMode.value] as const,
   () => {
     if (isApplyingRouteQuery.value) return
-    if (opsEnabled.value) {
+    if (opsEnabled.value && dashboardStarted) {
       fetchData()
     }
     syncQueryToRoute()
   }
 )
 
+let routeApplySequence = 0
 watch(
   () => route.query,
-  () => {
+  async (query, previous) => {
     if (isSyncingRouteQuery.value) return
-
-    const prevTimeRange = timeRange.value
-    const prevPlatform = platform.value
-    const prevGroupId = groupId.value
-
+    const sequence = ++routeApplySequence
     isApplyingRouteQuery.value = true
-    applyRouteQueryToState()
+    const globalKeys = [QUERY_KEYS.timeRange, QUERY_KEYS.platform, QUERY_KEYS.groupId, QUERY_KEYS.queryMode, QUERY_KEYS.customStart, QUERY_KEYS.customEnd]
+    const applyGlobals = !previous || Object.keys(query).length === 0 || globalKeys.some(key => query[key] !== previous[key])
+    applyRouteQueryToState(query.mode === previous?.mode && query.mode == null, applyGlobals)
+    await nextTick()
+    if (sequence !== routeApplySequence) return
     isApplyingRouteQuery.value = false
-
-    const changed =
-      prevTimeRange !== timeRange.value || prevPlatform !== platform.value || prevGroupId !== groupId.value
-    if (changed) {
-      if (opsEnabled.value) {
-        fetchData()
-      }
-    }
+    if (opsEnabled.value && dashboardStarted && JSON.stringify(buildApiParams()) !== dashboardRequestParamsKey) void fetchData()
   }
 )
 
@@ -819,6 +822,7 @@ onMounted(async () => {
   // Load auto refresh settings
   await loadDashboardAdvancedSettings()
 
+  dashboardStarted = true
   if (opsEnabled.value) {
     await fetchData()
   }
