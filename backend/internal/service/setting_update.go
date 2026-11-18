@@ -38,6 +38,9 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 // UpdateSettingsOmitting persists system settings, leaving the keys in omitted
 // at their stored value.
 func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *SystemSettings, omitted OmittedSettingKeys) error {
+	if err := s.validateQuickImportImageGroupSetting(ctx, settings.QuickImportImageGroupID, omitted); err != nil {
+		return err
+	}
 	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
@@ -60,6 +63,9 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Contex
 // auth-source defaults in a single write, leaving the keys in omitted at their
 // stored value.
 func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings, omitted OmittedSettingKeys) error {
+	if err := s.validateQuickImportImageGroupSetting(ctx, settings.QuickImportImageGroupID, omitted); err != nil {
+		return err
+	}
 	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
@@ -345,6 +351,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyHomeContent] = settings.HomeContent
 	updates[SettingKeyCompactHomeEnabled] = strconv.FormatBool(settings.CompactHomeEnabled)
 	updates[SettingKeyHideCcsImportButton] = strconv.FormatBool(settings.HideCcsImportButton)
+	updates[SettingKeyQuickImportImageGroupID] = strconv.FormatInt(settings.QuickImportImageGroupID, 10)
 	updates[SettingKeyPurchaseSubscriptionEnabled] = strconv.FormatBool(settings.PurchaseSubscriptionEnabled)
 	updates[SettingKeyPurchaseSubscriptionURL] = strings.TrimSpace(settings.PurchaseSubscriptionURL)
 	tableDefaultPageSize, tablePageSizeOptions := normalizeTablePreferences(
@@ -857,5 +864,38 @@ func (s *SettingService) validateDefaultSubscriptionGroups(ctx context.Context, 
 		}
 	}
 
+	return nil
+}
+
+const maxQuickImportGroupID int64 = 1<<53 - 1
+
+func parseQuickImportImageGroupID(raw string) int64 {
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id < -1 || id > maxQuickImportGroupID {
+		return 0
+	}
+	return id
+}
+
+func (s *SettingService) validateQuickImportImageGroupSetting(ctx context.Context, id int64, omitted OmittedSettingKeys) error {
+	if _, skip := omitted[SettingKeyQuickImportImageGroupID]; skip {
+		return nil
+	}
+	if id < -1 || id > maxQuickImportGroupID {
+		return infraerrors.BadRequest("QUICK_IMPORT_IMAGE_GROUP_INVALID", "Choose a valid group for image import")
+	}
+	if id <= 0 {
+		return nil
+	}
+	if s.defaultSubGroupReader == nil {
+		return errors.New("quick import group validation unavailable")
+	}
+	group, err := s.defaultSubGroupReader.GetByID(ctx, id)
+	if err != nil && !errors.Is(err, ErrGroupNotFound) {
+		return fmt.Errorf("validate quick import image group: %w", err)
+	}
+	if group == nil || !group.IsActive() || group.Platform != PlatformOpenAI {
+		return infraerrors.BadRequest("QUICK_IMPORT_IMAGE_GROUP_INVALID", "Choose an active OpenAI group for image import")
+	}
 	return nil
 }

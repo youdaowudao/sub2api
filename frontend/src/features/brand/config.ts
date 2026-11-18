@@ -53,22 +53,32 @@ export function currentTipIndex(now = Date.now(), count: number = quickStartTips
 }
 
 /** 一键导入的目标软件，对应导入链接里的 app 参数 */
-export type ImportApp = 'codex' | 'claude'
+export type ImportApp = 'codex' | 'claude' | 'image'
 
-/** 一键导入的唯一判断规则（首页快速开始和 API 密钥页共用）：
- *  分组平台是 anthropic 导入 Claude；其它情况（openai、gemini、antigravity、组合分组、没有分组）一律导入 Codex */
-export function importAppForGroup(group?: { platform?: string } | null): ImportApp {
-  return group?.platform === 'anthropic' ? 'claude' : 'codex'
+type ImportGroup = { id?: number; platform?: string; status?: string }
+
+/** 两个入口按站点设置和分组 ID 决定导入目标。 */
+export function importAppForGroup(group?: ImportGroup | null, imageGroupId = 0): ImportApp | null {
+  if (!group) return null
+  if (imageGroupId > 0 && group.id === imageGroupId) {
+    return group.platform === 'openai' && group.status === 'active' ? 'image' : null
+  }
+  if (group.platform === 'anthropic') return 'claude'
+  if (group.platform === 'openai' && isCodingImportConfigured(imageGroupId)) return 'codex'
+  return null
 }
 
-/** 显示一键导入按钮的分组平台：OpenAI 导入 Codex，Anthropic 导入 Claude；其它平台导入后用不了，不显示 */
-export function canQuickImport(group?: { platform?: string } | null): boolean {
-  return group?.platform === 'openai' || group?.platform === 'anthropic'
+export function isCodingImportConfigured(imageGroupId?: number): boolean {
+  return Number.isSafeInteger(imageGroupId) && (imageGroupId === -1 || (imageGroupId ?? 0) > 0)
+}
+
+export function canQuickImport(group?: ImportGroup | null, imageGroupId?: number): boolean {
+  return importAppForGroup(group, imageGroupId) !== null
 }
 
 /** 接入助手的导入链接，格式与助手 connect/link.go 一致；不带其它参数（带地址参数助手会拒绝） */
 export function buildQuickConnectLink(key: string, name?: string, app: ImportApp = 'codex'): string {
-  const params = new URLSearchParams({ v: '1', app, key })
+  const params = new URLSearchParams({ v: app === 'claude' ? '1' : '2', app, key })
   if (name) params.set('name', name)
   return `usegoodai://import?${params.toString()}`
 }

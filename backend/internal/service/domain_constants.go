@@ -373,6 +373,8 @@ const (
 	SettingKeyGoogleOAuthRedirectURL         = "google_oauth_redirect_url"
 	SettingKeyGoogleOAuthFrontendRedirectURL = "google_oauth_frontend_redirect_url"
 
+	SettingKeyQuickImportImageGroupID = "quick_import_image_group_id"
+
 	// OEM设置
 	SettingKeySiteName                    = "site_name"                     // 网站名称
 	SettingKeySiteLogo                    = "site_logo"                     // 网站Logo (base64)

@@ -344,6 +344,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.HideCcsImportButton != after.HideCcsImportButton {
 		changed = append(changed, "hide_ccs_import_button")
 	}
+	if before.QuickImportImageGroupID != after.QuickImportImageGroupID {
+		changed = append(changed, service.SettingKeyQuickImportImageGroupID)
+	}
 	if before.DefaultConcurrency != after.DefaultConcurrency {
 		changed = append(changed, "default_concurrency")
 	}

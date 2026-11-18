@@ -1,5 +1,7 @@
 import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
-import { getKeyGroupProvider } from '@/utils/keyGroupProviders'
+import { keysAPI } from '@/api/keys'
+import { getPublicSettings } from '@/api/auth'
+import { importAppForGroup } from './config'
 import type { Group } from '@/types'
 
 /**
@@ -15,7 +17,14 @@ export function nextTestKeyName(existingNames: readonly (string | null | undefin
   }
 }
 
-/** 「GPT 第一个分组」：按密钥页的分组显示顺序，取第一个 OpenAI 分组 */
-export function pickFirstGptGroup<T extends Pick<Group, 'id' | 'platform'>>(groups: readonly T[]): T | null {
-  return sortGroupsForDisplay(groups as readonly (T & Group)[]).find((group) => getKeyGroupProvider(group.platform) === 'openai') ?? null
+/** 按密钥页的分组显示顺序，取第一个适合导入 Codex 的分组。 */
+export function pickFirstGptGroup<T extends Pick<Group, 'id' | 'platform'>>(groups: readonly T[], imageGroupId?: number): T | null {
+  return sortGroupsForDisplay(groups).find((group) => importAppForGroup(group, imageGroupId) === 'codex') ?? null
+}
+
+/** 两个入口发链接前重新确认当前分组和站点设置。 */
+export async function getCurrentQuickImport(id: number) {
+  const [key, settings] = await Promise.all([keysAPI.getById(id), getPublicSettings()])
+  const app = key.status === 'active' && key.group?.status === 'active' ? importAppForGroup(key.group, settings.quick_import_image_group_id) : null
+  return { key, app }
 }

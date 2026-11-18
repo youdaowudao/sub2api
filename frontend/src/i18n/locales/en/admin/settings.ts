@@ -732,6 +732,12 @@ export default {
         homeContentIframeWarning: '⚠️ iframe mode note: Some websites have X-Frame-Options or CSP security policies that prevent embedding in iframes. If the page appears blank or shows an error, please verify the target website allows embedding, or consider using HTML mode to build your own content.',
         compactHome: 'Compact Home Page',
         compactHomeHint: 'Show a restrained site identity page when no custom home page content is set.',
+        quickImportImageGroup: 'Image group for one-click import',
+        quickImportImageGroupHint: 'Both one-click import entry points use this group. Before changing it, confirm that the previous group is now used for coding.',
+        quickImportImageGroupUnset: 'Not configured',
+        quickImportImageGroupNone: 'This site has no dedicated image group',
+        quickImportImageGroupLoadFailed: 'The group list could not load. The current choice was kept. Refresh to try again.',
+        quickImportImageGroupUnavailable: 'The saved group is no longer eligible. Choose another one.',
         hideCcsImportButton: 'Hide CCS Import Button',
         hideCcsImportButtonHint: 'When enabled, the "Import to CCS" button will be hidden on the API Keys page'
       },

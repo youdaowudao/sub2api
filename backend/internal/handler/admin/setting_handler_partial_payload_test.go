@@ -3,6 +3,9 @@
 package admin
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
 	"net/http"
 	"testing"
 
@@ -202,4 +205,58 @@ func TestUpdateSettingsSubscriptionEnabledIsWritableAndKeptWhenOmitted(t *testin
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "false", repo.values[service.SettingKeySubscriptionEnabled],
 		"a payload without subscription_enabled must not flip the stored value back to true")
+}
+
+func TestUpdateSettingsQuickImportImageGroupExplicitStates(t *testing.T) {
+	const setting = "quick_import_image_group_id"
+	var auditLog bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&auditLog, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{setting: "-1"})
+	for _, form := range []map[string]any{
+		{"risk_control_enabled": true},
+		{setting: nil},
+	} {
+		rec := doUpdateSettings(t, h, form, nil)
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, "-1", repo.values[setting])
+		require.NotContains(t, auditLog.String(), setting)
+	}
+	rec := doUpdateSettings(t, h, map[string]any{setting: -2}, nil)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Equal(t, "-1", repo.values[setting])
+	rec = doUpdateSettings(t, h, map[string]any{setting: 0}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "0", repo.values[setting])
+	require.Contains(t, rec.Body.String(), `"quick_import_image_group_id":0`)
+	require.Contains(t, auditLog.String(), setting)
+}
+
+type quickImportGroupReader map[int64]*service.Group
+
+func (groups quickImportGroupReader) GetByID(_ context.Context, id int64) (*service.Group, error) {
+	group, ok := groups[id]
+	if !ok {
+		return nil, service.ErrGroupNotFound
+	}
+	return group, nil
+}
+
+func TestUpdateSettingsQuickImportImageGroupOnlyAcceptsActiveOpenAI(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{})
+	h.settingService.SetDefaultSubscriptionGroupReader(quickImportGroupReader{
+		4: {ID: 4, Platform: service.PlatformOpenAI, Status: service.StatusActive},
+		5: {ID: 5, Platform: service.PlatformOpenAI, Status: service.StatusDisabled},
+		6: {ID: 6, Platform: service.PlatformAnthropic, Status: service.StatusActive},
+	})
+	key := service.SettingKeyQuickImportImageGroupID
+	rec := doUpdateSettings(t, h, map[string]any{key: 4}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "4", repo.values[key])
+	for _, id := range []int64{5, 6, 7} {
+		rec = doUpdateSettings(t, h, map[string]any{key: id}, nil)
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		require.Equal(t, "4", repo.values[key])
+	}
 }

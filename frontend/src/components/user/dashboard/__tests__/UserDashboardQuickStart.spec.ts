@@ -6,10 +6,12 @@ import zh from '@/i18n/locales/zh/dashboard'
 import { buildQuickConnectLink, canQuickImport, currentTipIndex, importAppForGroup, quickConnect, quickStartTips } from '@/features/brand/config'
 import { nextTestKeyName, pickFirstGptGroup } from '@/features/brand/quickKey'
 
-const { list, create, getAvailable, showSuccess, showError, copyToClipboard, settings, push } = vi.hoisted(() => ({
+const { list, create, getKeyById, getPublicSettings, getAvailable, showSuccess, showError, copyToClipboard, settings, push } = vi.hoisted(() => ({
   push: vi.fn(),
   list: vi.fn(),
   create: vi.fn(),
+  getKeyById: vi.fn(),
+  getPublicSettings: vi.fn(),
   getAvailable: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
@@ -17,19 +19,26 @@ const { list, create, getAvailable, showSuccess, showError, copyToClipboard, set
   settings: { value: { payment_enabled: true } as { payment_enabled: boolean } | null }
 }))
 
-vi.mock('@/api/keys', () => ({ keysAPI: { list, create } }))
+vi.mock('@/api/keys', () => ({ keysAPI: { list, create, getById: getKeyById } }))
+vi.mock('@/api/auth', () => ({ getPublicSettings }))
 vi.mock('@/api/groups', () => ({ userGroupsAPI: { getAvailable } }))
 vi.mock('@/composables/useClipboard', () => ({ useClipboard: () => ({ copyToClipboard }) }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess, showError, get cachedPublicSettings() { return settings.value } }) }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }))
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => (params ? `${key}:${JSON.stringify(params)}` : key) })
+  useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => {
+    if (key.startsWith('keys.import')) {
+      const message = zh.keys[key.slice('keys.'.length) as keyof typeof zh.keys]
+      if (typeof message === 'string') return message.replace('{app}', String(params?.app ?? ''))
+    }
+    return params ? `${key}:${JSON.stringify(params)}` : key
+  } })
 }))
 
 enableAutoUnmount(afterEach)
 
 const key = (id: number, name: string, platform: string, created_at: string, status = 'active') => ({
-  id, name, key: `sk-${id}`, status, created_at, group: { platform }
+  id, name, key: `sk-${id}`, status, created_at, group: { platform, status: 'active' }
 })
 
 async function collapsedPanel() {
@@ -55,6 +64,11 @@ beforeEach(() => {
   localStorage.clear()
   settings.value = { payment_enabled: true }
   list.mockResolvedValue({ items: [] })
+  getPublicSettings.mockReset().mockResolvedValue({ quick_import_image_group_id: -1 })
+  getKeyById.mockReset().mockImplementation(async (id: number) => {
+    const result = await list.mock.results.at(-1)?.value
+    return result?.items.find((item: { id: number }) => item.id === id)
+  })
   getAvailable.mockResolvedValue([])
 })
 
@@ -116,6 +130,7 @@ describe('quick start panel', () => {
     expect(step3()).toContain('{"app":"Claude"}')
     expect(w.get('[data-testid="quick-start-step-4"]').text()).toContain('step4HintClaude')
     await w.get('[data-testid="quick-start-import"]').trigger('click')
+    await flushPromises()
     expect(location.href).toBe(buildQuickConnectLink('sk-3', 'claude', 'claude'))
 
     // 切到 OpenAI 密钥：按钮文字和链接立刻变回 Codex
@@ -125,11 +140,78 @@ describe('quick start panel', () => {
     expect(step3()).toContain('{"app":"Codex"}')
     expect(w.get('[data-testid="quick-start-step-4"]').text()).not.toContain('step4HintClaude')
     await w.get('[data-testid="quick-start-import"]').trigger('click')
+    await flushPromises()
     expect(location.href).toBe(buildQuickConnectLink('sk-2', '测试'))
     await select.setValue(1)
     await w.get('[data-testid="quick-start-import"]').trigger('click')
+    await flushPromises()
     expect(location.href).toBe(buildQuickConnectLink('sk-1', '旧'))
     vi.unstubAllGlobals()
+  })
+
+  it('switches label and actual link for image, both coding types and Claude', async () => {
+    getPublicSettings.mockResolvedValue({ quick_import_image_group_id: 10 })
+    const groups = [
+      { id: 10, platform: 'openai', allow_image_generation: true, app: 'image', label: '一键导入生图工具' },
+      { id: 11, platform: 'openai', allow_image_generation: false, app: 'codex', label: '一键导入 Codex' },
+      { id: 12, platform: 'openai', allow_image_generation: true, app: 'codex', label: '一键导入 Codex' },
+      { id: 13, platform: 'anthropic', allow_image_generation: false, app: 'claude', label: '一键导入 Claude' },
+    ]
+    list.mockResolvedValue({ items: groups.map(group => ({
+      ...key(group.id, `k${group.id}`, group.platform, '2026-11-18'),
+      group_id: group.id,
+      group: { ...group, status: 'active' },
+    })) })
+    const wrapper = await panel({ totalApiKeys: groups.length })
+    const select = wrapper.get('[data-testid="quick-start-key-select"]')
+    const location = { href: '' }
+    vi.stubGlobal('location', location)
+    try {
+      for (const group of groups) {
+        await select.setValue(group.id)
+        const button = wrapper.get('[data-testid="quick-start-import"]')
+        expect(button.text()).toBe(group.label)
+        expect(button.attributes('data-app')).toBe(group.app)
+        await button.trigger('click')
+        await flushPromises()
+        expect(location.href).toBe(`usegoodai://import?v=${group.app === 'claude' ? 1 : 2}&app=${group.app}&key=sk-${group.id}&name=k${group.id}`)
+      }
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('does not create a key when refreshed settings restore an existing import choice', async () => {
+    const previousGroup = { id: 3, platform: 'anthropic', status: 'active' }
+    list.mockResolvedValue({ items: [{
+      ...key(8, 'Claude', previousGroup.platform, '2026-11-18'),
+      group: previousGroup,
+      group_id: previousGroup.id,
+    }] })
+    getAvailable.mockResolvedValue([{ id: 5, platform: 'openai' }, { id: 6, platform: 'openai' }])
+    getPublicSettings.mockResolvedValueOnce({ quick_import_image_group_id: previousGroup.id })
+      .mockResolvedValue({ quick_import_image_group_id: 5 })
+    const wrapper = await panel({ totalApiKeys: 1 })
+    const button = wrapper.get('[data-testid="quick-start-import"]')
+    expect(button.attributes('data-app')).toBe('codex')
+    await button.trigger('click')
+    await flushPromises()
+    expect(create).not.toHaveBeenCalled()
+    expect(button.attributes('data-app')).toBe('claude')
+  })
+
+  it('blocks automatic creation while existing keys load or the list request fails', async () => {
+    let rejectList!: (error: Error) => void
+    list.mockReturnValue(new Promise((_, reject) => { rejectList = reject }))
+    const wrapper = await panel({ totalApiKeys: 1 })
+    const button = wrapper.get<HTMLButtonElement>('[data-testid="quick-start-import"]')
+    expect(button.element.disabled).toBe(true)
+    await button.trigger('click')
+    rejectList(new Error('list unavailable'))
+    await flushPromises()
+    expect(button.element.disabled).toBe(true)
+    expect(wrapper.text()).toContain('keys.failedToLoad')
+    expect(create).not.toHaveBeenCalled()
   })
 
   it('always shows the key picker and import button, even with one key or none', async () => {
@@ -168,13 +250,13 @@ describe('quick start panel', () => {
     const step3 = w.get('[data-testid="quick-start-step-3"]')
     expect(step3.get('[data-testid="quick-start-step-badge"]').text()).toBe('dashboard.quickStart.step3Badge')
     expect(w.findAll('[data-testid="quick-start-step-badge"]')).toHaveLength(1)
-    expect(step3.get('[data-testid="quick-start-step3-hint"]').text()).toBe('dashboard.quickStart.step3Hint')
+    expect(step3.get('[data-testid="quick-start-step3-hint"]').text()).toBe('dashboard.quickStart.step3Hint:{"app":"Codex"}')
     expect(step3.get('[data-testid="quick-start-group-lead"]').text()).toContain('dashboard.quickStart.step3GroupLead')
     expect(step3.get('[data-testid="quick-start-group-lead"]').text()).toContain('dashboard.quickStart.step3GroupTail')
     expect(step3.get('[data-testid="quick-start-group-join"]').text()).toContain('dashboard.quickStart.step3GroupLabel')
     expect(step3.get('[data-testid="quick-start-group-join"]').text()).toContain('1020015031')
     expect(step3.get('[data-testid="quick-start-group-join"] img').attributes('src')).toBe('/brand/qq-penguin.png')
-    expect(step3.get('[data-testid="quick-start-import-lead"]').text()).toBe('dashboard.quickStart.step3ImportLead')
+    expect(step3.get('[data-testid="quick-start-import-lead"]').text()).toBe('dashboard.quickStart.step3ImportLead:{"app":"Codex"}')
     expect(step3.get('[data-testid="quick-start-trust"]').text()).toBe('dashboard.quickStart.step3Trust')
 
     // 原求助入口保留，群文件说明复用同一二维码弹窗。
@@ -296,7 +378,7 @@ describe('PowerShell helper instructions', () => {
   const command = 'irm https://docs.usegoodai.com/install/helper.ps1 | iex'
 
   it('names the one-click import button and the Windows Run anyway action', () => {
-    expect(zh.dashboard.quickStart.step3Hint).toBe('打开助手后，点一下网站一键导入按钮就好（浏览器询问时点「打开」）')
+    expect(zh.dashboard.quickStart.step3Hint).toBe('打开助手后，点击按钮导入{app}。浏览器询问时点「打开」。')
     expect(zh.dashboard.quickStart.step3Trust).toBe('Windows 保护阻止运行时，点「更多信息」→「仍要运行」。')
     expect(en.dashboard.quickStart.step3Trust).toBe('If Windows Security blocks the helper, click "More info" → "Run anyway".')
   })
@@ -375,8 +457,11 @@ describe('one-click import without a key', () => {
   ]
 
   it('creates a test key in the first GPT group, shows it in the picker and continues importing', async () => {
-    getAvailable.mockResolvedValue(groups)
-    create.mockResolvedValue({ id: 99, name: 'keys.namePlaceholder', key: 'sk-new', status: 'active', created_at: '2026-11-03', group: { id: 3, platform: 'openai' } })
+    getPublicSettings.mockResolvedValue({ quick_import_image_group_id: 10 })
+    getAvailable.mockResolvedValue([{ id: 10, platform: 'openai', sort_order: 0 }, ...groups])
+    const created = { id: 99, name: 'keys.namePlaceholder', key: 'sk-new', status: 'active', created_at: '2026-11-03', group_id: 3 }
+    create.mockResolvedValue(created)
+    getKeyById.mockResolvedValue({ ...created, group: { id: 3, platform: 'openai', status: 'active' } })
     const location = { href: '' }
     vi.stubGlobal('location', location)
     try {
@@ -389,6 +474,33 @@ describe('one-click import without a key', () => {
       expect(w.get('[data-testid="quick-start-key-select"]').findAll('option').map((o) => o.text())).toEqual(['keys.namePlaceholder'])
       // 建好密钥后第一步也算完成
       expect(done(w, 1)).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it.each([
+    { changedImageGroupId: 3, status: 'active' },
+    { changedImageGroupId: -1, status: 'disabled' },
+  ])('keeps the created key and skips import when config becomes $changedImageGroupId and group is $status', async ({ changedImageGroupId, status }) => {
+    getAvailable.mockResolvedValue(groups)
+    getPublicSettings.mockResolvedValue({ quick_import_image_group_id: -1 })
+    const created = { id: 97, name: 'test', key: 'sk-fake-created', group_id: 3, status: 'active' }
+    create.mockImplementationOnce(async () => {
+      getPublicSettings.mockResolvedValue({ quick_import_image_group_id: changedImageGroupId })
+      return created
+    })
+    getKeyById.mockResolvedValueOnce({ ...created, group: { id: 3, platform: 'openai', status } })
+    const location = { href: '' }
+    vi.stubGlobal('location', location)
+    try {
+      const wrapper = await panel()
+      await wrapper.get('[data-testid="quick-start-import"]').trigger('click')
+      await flushPromises()
+      expect(getKeyById).toHaveBeenCalledWith(97)
+      expect(done(wrapper, 1)).toBe(true)
+      expect(showError).toHaveBeenCalledWith(expect.stringContaining('autoKeyCreatedNotImported'))
+      expect(location.href).toBe('')
     } finally {
       vi.unstubAllGlobals()
     }
@@ -421,8 +533,8 @@ describe('one-click import without a key', () => {
   it('picks names and the default group the same way everywhere', () => {
     expect(nextTestKeyName([], '测试')).toBe('测试')
     expect(nextTestKeyName(['测试', '测试1', ' 测试3 '], '测试')).toBe('测试2')
-    expect(pickFirstGptGroup(groups as never)?.id).toBe(3)
-    expect(pickFirstGptGroup([groups[0]] as never)).toBeNull()
+    expect(pickFirstGptGroup(groups as never, -1)?.id).toBe(3)
+    expect(pickFirstGptGroup([groups[0]] as never, -1)).toBeNull()
   })
 })
 
@@ -444,20 +556,25 @@ describe('buildQuickConnectLink', () => {
     expect(buildQuickConnectLink('sk-x', undefined, 'claude')).toBe('usegoodai://import?v=1&app=claude&key=sk-x')
   })
 
-  it('picks Claude only for anthropic groups and Codex for everything else', () => {
+  it('preserves platform visibility and skips OpenAI when no rollout choice is saved', () => {
     expect(importAppForGroup({ platform: 'anthropic' })).toBe('claude')
+    expect(importAppForGroup({ platform: 'openai' }, -1)).toBe('codex')
     for (const group of [{ platform: 'openai' }, { platform: 'gemini' }, { platform: 'antigravity' }, { platform: 'composite' }, {}, null, undefined]) {
-      expect(importAppForGroup(group)).toBe('codex')
+      expect(importAppForGroup(group)).toBeNull()
     }
-    expect(canQuickImport({ platform: 'openai' })).toBe(true)
+    expect(canQuickImport({ platform: 'openai' }, -1)).toBe(true)
+    expect(canQuickImport({ platform: 'openai' })).toBe(false)
+    expect(importAppForGroup({ id: 4, platform: 'openai', status: 'active' }, 4)).toBe('image')
+    expect(canQuickImport({ id: 4, platform: 'openai', status: 'disabled' }, 4)).toBe(false)
+    expect(canQuickImport({ id: 4, platform: 'anthropic', status: 'active' }, 4)).toBe(false)
     expect(canQuickImport({ platform: 'anthropic' })).toBe(true)
     expect(canQuickImport({ platform: 'gemini' })).toBe(false)
     expect(canQuickImport(null)).toBe(false)
   })
 
   it('matches the helper link format', () => {
-    expect(buildQuickConnectLink('sk-a+b', '测试')).toBe('usegoodai://import?v=1&app=codex&key=sk-a%2Bb&name=%E6%B5%8B%E8%AF%95')
-    expect(buildQuickConnectLink('sk-x')).toBe('usegoodai://import?v=1&app=codex&key=sk-x')
+    expect(buildQuickConnectLink('sk-a+b', '测试')).toBe('usegoodai://import?v=2&app=codex&key=sk-a%2Bb&name=%E6%B5%8B%E8%AF%95')
+    expect(buildQuickConnectLink('sk-x')).toBe('usegoodai://import?v=2&app=codex&key=sk-x')
   })
 
   it('RMB quick start balance excludes dollars', async () => {

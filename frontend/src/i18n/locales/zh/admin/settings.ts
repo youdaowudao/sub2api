@@ -727,6 +727,12 @@ export default {
           '⚠️ iframe 模式提示：部分网站设置了 X-Frame-Options 或 CSP 安全策略，禁止被嵌入到 iframe 中。如果页面显示空白或报错，请确认目标网站允许被嵌入，或考虑使用 HTML 模式自行构建页面内容。',
         compactHome: '简洁首页',
         compactHomeHint: '未设置自定义首页内容时，展示简洁的站点信息页面。',
+        quickImportImageGroup: '一键导入的专用画图分组',
+        quickImportImageGroupHint: '两处一键导入入口都会使用这个分组。更换前请确认旧分组已改为编程用途。',
+        quickImportImageGroupUnset: '未设置',
+        quickImportImageGroupNone: '本站没有专用画图分组',
+        quickImportImageGroupLoadFailed: '暂时无法加载分组，当前选择已保留。请刷新后重试。',
+        quickImportImageGroupUnavailable: '原分组已不可选，请重新选择。',
         hideCcsImportButton: '隐藏 CCS 导入按钮',
         hideCcsImportButtonHint: '启用后将在 API Keys 页面隐藏"导入 CCS"按钮'
       },

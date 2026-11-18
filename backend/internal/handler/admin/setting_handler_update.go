@@ -162,6 +162,7 @@ type UpdateSettingsRequest struct {
 	HomeContent                 string                `json:"home_content"`
 	CompactHomeEnabled          bool                  `json:"compact_home_enabled"`
 	HideCcsImportButton         bool                  `json:"hide_ccs_import_button"`
+	QuickImportImageGroupID     int64                 `json:"quick_import_image_group_id"`
 	PurchaseSubscriptionEnabled *bool                 `json:"purchase_subscription_enabled"`
 	PurchaseSubscriptionURL     *string               `json:"purchase_subscription_url"`
 	TableDefaultPageSize        int                   `json:"table_default_page_size"`
@@ -504,12 +505,19 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	auditReq := settingsAuditRequest(req)
+	if string(sentFields[service.SettingKeyQuickImportImageGroupID]) == "null" {
+		delete(sentFields, service.SettingKeyQuickImportImageGroupID)
+	}
 	omitted := omittedSettingKeys(sentFields)
 
 	previousSettings, err := h.settingService.GetAllSettings(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	quickImportImageGroupID := req.QuickImportImageGroupID
+	if _, skipped := omitted[service.SettingKeyQuickImportImageGroupID]; skipped {
+		quickImportImageGroupID = previousSettings.QuickImportImageGroupID
 	}
 	previousAuthSourceDefaults, err := h.settingService.GetAuthSourceDefaultSettings(c.Request.Context())
 	if err != nil {
@@ -1656,6 +1664,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		HomeContent:                            req.HomeContent,
 		CompactHomeEnabled:                     req.CompactHomeEnabled,
 		HideCcsImportButton:                    req.HideCcsImportButton,
+		QuickImportImageGroupID:                quickImportImageGroupID,
 		PurchaseSubscriptionEnabled:            purchaseEnabled,
 		PurchaseSubscriptionURL:                purchaseURL,
 		TableDefaultPageSize:                   req.TableDefaultPageSize,
@@ -2332,6 +2341,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		HomeContent:                                            updatedSettings.HomeContent,
 		CompactHomeEnabled:                                     updatedSettings.CompactHomeEnabled,
 		HideCcsImportButton:                                    updatedSettings.HideCcsImportButton,
+		QuickImportImageGroupID:                                updatedSettings.QuickImportImageGroupID,
 		PurchaseSubscriptionEnabled:                            updatedSettings.PurchaseSubscriptionEnabled,
 		PurchaseSubscriptionURL:                                updatedSettings.PurchaseSubscriptionURL,
 		TableDefaultPageSize:                                   updatedSettings.TableDefaultPageSize,
