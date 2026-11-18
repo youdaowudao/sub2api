@@ -773,6 +773,38 @@ describe("admin SettingsView payment visible method controls", () => {
     wrapper.unmount();
   });
 
+  it("offers active OpenAI groups and only saves an explicit image group change", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, quick_import_image_group_id: 0 });
+    getGroups.mockResolvedValueOnce([
+      { id: 34, name: "专门画图分组", platform: "openai", status: "active" },
+      { id: 35, name: "Inactive", platform: "openai", status: "inactive" },
+      { id: 36, name: "Claude", platform: "anthropic", status: "active" },
+    ]);
+    const wrapper = mountView();
+    await flushPromises();
+    const selector = wrapper.get('[data-testid="quick-import-image-group"]');
+    expect(selector.findAll("option").map((option) => option.attributes("value"))).toEqual(["0", "-1", "34"]);
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+    expect(updateSettings.mock.lastCall?.[0]).not.toHaveProperty("quick_import_image_group_id");
+    const picker = wrapper.findAllComponents(SelectStub).find((component) => component.element === selector.element);
+    expect(picker).toBeDefined();
+    picker!.vm.$emit("update:modelValue", 34);
+    let finishSave!: () => void;
+    updateSettings.mockImplementationOnce(async (payload) => {
+      await new Promise<void>((resolve) => { finishSave = resolve; });
+      return { ...baseSettingsResponse, ...payload };
+    });
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+    expect(selector.attributes("disabled")).toBeDefined();
+    finishSave();
+    await flushPromises();
+    expect(updateSettings.mock.lastCall?.[0]).toHaveProperty("quick_import_image_group_id", 34);
+    expect(selector.attributes("disabled")).toBeUndefined();
+    wrapper.unmount();
+  });
+
   it("submits the compact home page toggle", async () => {
     const wrapper = mountView();
     await flushPromises();

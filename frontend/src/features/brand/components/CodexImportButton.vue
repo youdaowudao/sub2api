@@ -3,7 +3,8 @@
     type="button"
     class="codex-import-btn"
     :class="stacked ? 'codex-import-btn-stacked' : compact ? 'codex-import-btn-compact' : ''"
-    title="到群文件里下载接入助手打开再点击这里哦"
+    :title="t('keys.importAssistantHint', { app: appLabel })"
+    :aria-label="buttonLabel"
     :data-app="app"
     data-testid="codex-import"
     @click="launch"
@@ -11,33 +12,51 @@
     <!-- stacked：表格操作列里用，两行字，和旁边的图标按钮一样高 -->
     <template v-if="stacked">
       <span>{{ t('keys.importToCodexLine1') }}</span>
-      <span>{{ app === 'claude' ? 'Claude' : 'Codex' }}</span>
+      <span>{{ appLabel }}</span>
     </template>
     <template v-else>
       <Icon name="bolt" size="sm" />
-      <span>{{ app === 'claude' ? t('keys.importToClaude') : t('keys.importToCodex') }}</span>
+      <span>{{ buttonLabel }}</span>
     </template>
   </button>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import { useAppStore } from '@/stores/app'
+import type { ApiKey } from '@/types'
 import { buildQuickConnectLink, type ImportApp } from '../config'
+import { getCurrentQuickImport } from '../quickKey'
 
-/** app：导入到哪个软件，由 importAppForGroup 按分组得出，默认 Codex */
-const props = withDefaults(defineProps<{ apiKey?: string; name?: string; app?: ImportApp; compact?: boolean; stacked?: boolean }>(), { app: 'codex' })
+const props = withDefaults(defineProps<{ apiKey?: ApiKey; app?: ImportApp; compact?: boolean; stacked?: boolean }>(), { app: 'codex' })
 const emit = defineEmits<{ 'missing-key': [] }>()
 const { t } = useI18n()
+const appStore = useAppStore()
+const appLabel = computed(() => props.app === 'image' ? t('keys.importImageApp') : props.app === 'claude' ? 'Claude' : 'Codex')
+const buttonLabel = computed(() => {
+  if (props.app === 'image') return t('keys.importToImage')
+  return t(props.app === 'claude' ? 'keys.importToClaude' : 'keys.importToCodex')
+})
 
-/** 打开接入助手的导入链接；没装助手时浏览器不会有反应，由页面上的「没反应？」兜底。
- *  还没有可用密钥时不跳链接，交给页面处理（例如去创建密钥） */
-function launch() {
-  if (!props.apiKey) {
+async function launch() {
+  const selected = props.apiKey
+  if (!selected?.key) {
     emit('missing-key')
     return
   }
-  window.location.href = buildQuickConnectLink(props.apiKey, props.name, props.app)
+  const target = props.app
+  try {
+    const { key, app } = await getCurrentQuickImport(selected.id)
+    if (props.apiKey?.id !== selected.id || app !== target || key.group_id !== selected.group_id || key.key !== selected.key) {
+      appStore.showError(t('keys.importChanged'))
+      return
+    }
+    window.location.href = buildQuickConnectLink(key.key, key.name, app)
+  } catch {
+    appStore.showError(t('keys.importCheckFailed'))
+  }
 }
 </script>
 
@@ -72,6 +91,8 @@ function launch() {
 }
 .codex-import-btn-stacked {
   flex-direction: column;
+  max-width: 100%;
+  white-space: normal;
   gap: 0;
   height: auto;
   padding: 4px 6px;

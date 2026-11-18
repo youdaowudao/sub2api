@@ -91,7 +91,7 @@
         </div>
       </li>
 
-      <!-- ③ 连接 Codex：出现使用记录就算连接成功 -->
+      <!-- ③ 连接所选工具 -->
       <li class="step" :class="stepClass(3, hasUsage)" data-testid="quick-start-step-3">
         <div class="step-inner step3-inner">
           <StepHead :index="3" :done="hasUsage" :active="guideStep === 3" :title="t('dashboard.quickStart.step3', { app: appLabel })" :badge="t('dashboard.quickStart.step3Badge')" />
@@ -106,7 +106,7 @@
               <span class="helper-file-name">{{ t('dashboard.quickStart.step3HelperFile') }}</span>
             </p>
 
-            <p class="step3-lead mt-1" data-testid="quick-start-import-lead">{{ t('dashboard.quickStart.step3ImportLead') }}</p>
+            <p class="step3-lead mt-1" data-testid="quick-start-import-lead">{{ t('dashboard.quickStart.step3ImportLead', { app: appLabel }) }}</p>
             <!-- 手机上下拉框和一键导入上下排、各占满一行；电脑上同一行，卡片窄时下拉框自动变窄，再窄就上下排，按钮不伸出卡片 -->
             <div class="import-row -mt-1">
               <div class="import-select relative">
@@ -116,14 +116,17 @@
               </select>
               <Icon name="chevronDown" size="xs" class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-gray-400" />
             </div>
-              <!-- 还没有可导入的密钥时：自动建一把「测试」密钥（GPT 第一个分组）再继续导入；按选中密钥的分组切换 Codex / Claude -->
+              <!-- 还没有可导入的密钥时，选择编程分组自动创建测试密钥 -->
               <span class="import-btn-wrap relative flex">
-                <CodexImportButton :api-key="selectedKey?.key" :name="selectedKey?.name" :app="importApp" :disabled="creatingKey" class="import-big w-full" data-testid="quick-start-import" @missing-key="createKeyAndImport" />
-                <GuideBubble v-if="showImportGuide" :text="t('dashboard.quickStart.guide.import')" placement="bottom" xl="right" />
+                <CodexImportButton :api-key="selectedKey ?? undefined" :app="importApp" :disabled="creatingKey || (!selectedKey && !canCreateTestKey)" class="import-big w-full" data-testid="quick-start-import" @missing-key="createKeyAndImport" />
+                <GuideBubble v-if="showImportGuide" :text="t('dashboard.quickStart.guide.import', { app: appLabel })" placement="bottom" xl="right" />
               </span>
             </div>
           </div>
-          <p class="mt-3 max-w-md text-[13px] leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint') }}</p>
+          <p class="mt-3 max-w-md text-[13px] leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint', { app: appLabel }) }}</p>
+          <p v-if="keyListStatus === 'failed'" class="mt-1.5 text-sm text-gray-500">{{ t('keys.failedToLoad') }}</p>
+          <p v-else-if="!selectedKey && !isCodingImportConfigured(imageGroupId)" class="mt-1.5 text-sm text-gray-500">{{ t('dashboard.quickStart.step3ConfigurationNeeded') }}</p>
+          <p v-if="importApp === 'image' && os === 'mac'" class="mt-1.5 text-sm text-gray-500">{{ t('dashboard.quickStart.step3ImageMac') }}</p>
           <p class="mt-1.5 flex max-w-md items-start gap-1.5 text-[13px] leading-relaxed text-red-600 dark:text-red-400" data-testid="quick-start-trust">
             <Icon name="shield" size="sm" class="mt-0.5 flex-none" />
             <span>{{ t(os === 'mac' ? 'dashboard.quickStart.step3TrustMac' : 'dashboard.quickStart.step3Trust') }}</span>
@@ -171,11 +174,11 @@
       <!-- ④ 发送第一条消息 -->
       <li class="step" :class="stepClass(4, hasUsage)" data-testid="quick-start-step-4">
         <div class="step-inner">
-          <StepHead :index="4" :done="hasUsage" :title="t('dashboard.quickStart.step4')" />
-          <p class="step-text">{{ t(importApp === 'claude' ? 'dashboard.quickStart.step4HintClaude' : 'dashboard.quickStart.step4Hint') }}</p>
+          <StepHead :index="4" :done="hasUsage" :title="t(importApp === 'image' ? 'dashboard.quickStart.step4Image' : 'dashboard.quickStart.step4')" />
+          <p class="step-text">{{ t(importApp === 'image' ? 'dashboard.quickStart.step4HintImage' : importApp === 'claude' ? 'dashboard.quickStart.step4HintClaude' : 'dashboard.quickStart.step4Hint') }}</p>
           <!-- 示意要发什么：一个迷你对话输入框 -->
           <div class="chat-mock" aria-hidden="true">
-            <span class="min-w-0 flex-1 truncate">{{ t('dashboard.quickStart.step4Sample') }}</span>
+            <span class="min-w-0 flex-1 truncate">{{ t(importApp === 'image' ? 'dashboard.quickStart.step4SampleImage' : 'dashboard.quickStart.step4Sample') }}</span>
             <span class="chat-send"><Icon name="arrowUp" size="sm" /></span>
           </div>
           <div class="step-foot">
@@ -233,12 +236,13 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import Icon from '@/components/icons/Icon.vue'
 import QqGroupDialog from '@/features/brand/components/QqGroupDialog.vue'
-import { buildQuickConnectLink, canQuickImport, currentTipIndex, importAppForGroup, qqGroup, quickConnect, quickStartTips } from '@/features/brand/config'
+import { buildQuickConnectLink, canQuickImport, currentTipIndex, importAppForGroup, isCodingImportConfigured, qqGroup, quickConnect, quickStartTips } from '@/features/brand/config'
 import CodexImportButton from '@/features/brand/components/CodexImportButton.vue'
 import CreateKeyGuideDialog from './CreateKeyGuideDialog.vue'
 import GuideBubble from '@/features/brand/components/GuideBubble.vue'
-import { nextTestKeyName, pickFirstGptGroup } from '@/features/brand/quickKey'
+import { getCurrentQuickImport, nextTestKeyName, pickFirstGptGroup } from '@/features/brand/quickKey'
 import { keysAPI } from '@/api/keys'
+import { getPublicSettings } from '@/api/auth'
 import { userGroupsAPI } from '@/api/groups'
 import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
@@ -279,26 +283,38 @@ async function copyHelperCommand() {
 }
 
 const selectedKeyId = ref<number | null>(null)
+const imageGroupId = ref(0)
+const keyListStatus = ref<'loading' | 'ready' | 'failed'>('loading')
+const canCreateTestKey = computed(() => keyListStatus.value === 'ready' && isCodingImportConfigured(imageGroupId.value))
 const byNewest = (a: ApiKey, b: ApiKey) => (b.created_at || '').localeCompare(a.created_at || '') || b.id - a.id
-/** 能一键导入的密钥：启用中的 OpenAI（导入 Codex）和 Anthropic（导入 Claude）分组密钥，最新的在前 */
-const importKeys = computed(() => keys.value.filter((k) => k.status === 'active' && canQuickImport(k.group)).sort(byNewest))
+/** 能一键导入的密钥，最新的在前 */
+const importKeys = computed(() => keys.value.filter((k) => k.status === 'active' && canQuickImport(k.group, imageGroupId.value)).sort(byNewest))
 
 onMounted(async () => {
   restoreDownloaded()
-  if (!hasKey.value) return
+  try {
+    imageGroupId.value = (await getPublicSettings()).quick_import_image_group_id ?? 0
+  } catch {
+    imageGroupId.value = 0
+  }
+  if (!hasKey.value) {
+    keyListStatus.value = 'ready'
+    return
+  }
   try {
     const res = await keysAPI.list(1, 100)
     keys.value = res.items || []
     selectedKeyId.value = importKeys.value[0]?.id ?? null
+    keyListStatus.value = 'ready'
   } catch {
-    keys.value = []
+    keyListStatus.value = 'failed'
   }
 })
 
 const selectedKey = computed(() => importKeys.value.find((k) => k.id === selectedKeyId.value) ?? importKeys.value[0] ?? null)
 /** 第 3、4 步的软件名和导入目标跟着选中的密钥变 */
-const importApp = computed(() => importAppForGroup(selectedKey.value?.group))
-const appLabel = computed(() => (importApp.value === 'claude' ? 'Claude' : 'Codex'))
+const importApp = computed(() => importAppForGroup(selectedKey.value?.group, imageGroupId.value) ?? 'codex')
+const appLabel = computed(() => importApp.value === 'image' ? t('keys.importImageApp') : importApp.value === 'claude' ? 'Claude' : 'Codex')
 
 /** 第一步「去创建」：到密钥页并直接打开创建窗口 */
 const quickCreateRoute = { path: '/keys', query: { create: 'quick' } }
@@ -345,21 +361,31 @@ const showImportGuide = computed(() => guideStep.value === 3 && importHintReady.
 /** 第三步没有可导入的密钥时：自动建一把 GPT 第一个分组的「测试」密钥，选中后继续导入 */
 const creatingKey = ref(false)
 async function createKeyAndImport() {
-  if (creatingKey.value) return
+  if (creatingKey.value || !canCreateTestKey.value || selectedKey.value) return
   creatingKey.value = true
   try {
-    const group = pickFirstGptGroup(await userGroupsAPI.getAvailable())
+    const groups = await userGroupsAPI.getAvailable()
+    imageGroupId.value = (await getPublicSettings()).quick_import_image_group_id ?? 0
+    if (selectedKey.value) return
+    const group = pickFirstGptGroup(groups, imageGroupId.value)
     if (!group) {
       router.push('/keys')
       return
     }
     const name = nextTestKeyName(keys.value.map((k) => k.name), t('keys.namePlaceholder'))
     const created = await keysAPI.create(name, group.id)
-    const withGroup = { ...created, group: created.group ?? ({ ...group } as ApiKey['group']) }
-    keys.value = [withGroup, ...keys.value]
-    selectedKeyId.value = withGroup.id
+    const withGroup = { ...created, group: created.group ?? group }
+    const latest = await getCurrentQuickImport(created.id).catch(() => null)
+    const changedSelection = selectedKey.value !== null
+    const confirmedKey = latest?.key ?? withGroup
+    keys.value = [confirmedKey, ...keys.value]
+    if (!changedSelection) selectedKeyId.value = confirmedKey.id
+    if (changedSelection || latest?.app !== 'codex' || latest.key.group_id !== group.id) {
+      appStore.showError(t('dashboard.quickStart.autoKeyCreatedNotImported', { name }))
+      return
+    }
     appStore.showSuccess(t('dashboard.quickStart.autoKeyCreated', { name }))
-    window.location.href = buildQuickConnectLink(withGroup.key, withGroup.name, importAppForGroup(withGroup.group))
+    window.location.href = buildQuickConnectLink(latest.key.key, latest.key.name, latest.app)
   } catch (error) {
     appStore.showError((error as { message?: string })?.message || t('keys.failedToSave'))
   } finally {

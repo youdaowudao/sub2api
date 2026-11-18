@@ -11,6 +11,7 @@ import KeysView from '../KeysView.vue'
 const {
   listKeys,
   updateKey,
+  getKeyById,
   getPublicSettings,
   getDashboardApiKeysUsage,
   getAvailableGroups,
@@ -27,6 +28,7 @@ const {
   routerReplace: vi.fn(),
   listKeys: vi.fn(),
   updateKey: vi.fn(),
+  getKeyById: vi.fn(),
   getPublicSettings: vi.fn(),
   getDashboardApiKeysUsage: vi.fn(),
   getAvailableGroups: vi.fn(),
@@ -63,10 +65,15 @@ const messages: Record<string, string> = {
   'keys.status.quota_exhausted': 'Quota exhausted',
   'keys.usage': 'Usage',
   'keys.namePlaceholder': '测试',
+  'keys.importToCodexLine1': '一键导入',
+  'keys.importImageApp': '生图工具',
   'keys.quickCreateHint': '直接点创建',
   'keys.advancedSettings': '高级设置（新手不用点开）',
   'keys.createNextStepHint': '创建后，还需要按接入教程，将密钥配置到你使用的软件中。',
 }
+
+vi.mock('@/api/auth', () => ({ getPublicSettings }))
+vi.mock('@/api/keys', () => ({ keysAPI: { getById: getKeyById } }))
 
 vi.mock('@/api', () => ({
   keysAPI: {
@@ -310,7 +317,7 @@ describe('user KeysView column settings', () => {
       page_size: 20,
       pages: 1,
     })
-    getPublicSettings.mockResolvedValue({})
+    getPublicSettings.mockResolvedValue({ quick_import_image_group_id: -1 })
     getDashboardApiKeysUsage.mockResolvedValue({ stats: {} })
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
@@ -519,36 +526,47 @@ describe('user KeysView column settings', () => {
     expect(columnMenuText).not.toContain('Actions')
   })
 
-  it('shows one import button per row, Claude for anthropic groups and Codex for openai groups', async () => {
-    const row = (id: number, platform: string | null, status = 'active') => ({
+  it('shows the real destination and launches the right protocol for all four group types', async () => {
+    const row = (id: number, platform: string | null, status = 'active', allowImage = false) => ({
       ...createApiKey(),
       id,
       name: `k${id}`,
-      key: `sk-${id}`,
+      key: `sk-fake-${id}`,
+      group_id: platform ? id : null,
       status,
-      group: platform ? { id, name: `g${id}`, platform } : undefined,
+      group: platform ? { id, name: `g${id}`, platform, status: 'active', allow_image_generation: allowImage } : undefined,
     })
-    listKeys.mockResolvedValueOnce({
-      items: [row(1, 'anthropic'), row(2, 'openai'), row(3, 'gemini'), row(4, null), row(5, 'anthropic', 'inactive')],
-      total: 5,
-      page: 1,
-      page_size: 20,
-      pages: 1,
-    })
+    const items = [
+      row(1, 'anthropic'), row(2, 'openai'), row(3, 'openai', 'active', true),
+      row(4, 'openai', 'active', true), row(5, 'gemini'), row(6, null), row(7, 'openai', 'inactive')
+    ]
+    getPublicSettings.mockResolvedValue({ quick_import_image_group_id: 4 })
+    getKeyById.mockImplementation(async (id: number) => items.find((item) => item.id === id))
+    listKeys.mockResolvedValueOnce({ items, total: items.length, page: 1, page_size: 20, pages: 1 })
     const wrapper = await mountView()
-
     const buttons = wrapper.findAll('[data-testid="codex-import"]')
-    expect(buttons.map((b) => b.attributes('data-app'))).toEqual(['claude', 'codex'])
-    expect(buttons[0].text()).toContain('Claude')
-    expect(buttons[1].text()).toContain('Codex')
-
+    expect(buttons.map((b) => b.attributes('data-app'))).toEqual(['claude', 'codex', 'codex', 'image'])
+    const targets = ['Claude', 'Codex', 'Codex', '生图工具']
     const location = { href: '' }
     vi.stubGlobal('location', location)
-    await buttons[0].trigger('click')
-    expect(location.href).toBe('usegoodai://import?v=1&app=claude&key=sk-1&name=k1')
-    await buttons[1].trigger('click')
-    expect(location.href).toBe('usegoodai://import?v=1&app=codex&key=sk-2&name=k2')
-    vi.unstubAllGlobals()
+    try {
+      for (const [index, app] of ['claude', 'codex', 'codex', 'image'].entries()) {
+        const button = buttons[index]
+        expect(button.text()).toBe(`一键导入${targets[index]}`)
+        await button.trigger('click')
+        await flushPromises()
+        const id = index + 1
+        expect(location.href).toBe(`usegoodai://import?v=${app === 'claude' ? 1 : 2}&app=${app}&key=sk-fake-${id}&name=k${id}`)
+      }
+      location.href = ''
+      getPublicSettings.mockResolvedValue({ quick_import_image_group_id: 3 })
+      await buttons[2].trigger('click')
+      await flushPromises()
+      expect(location.href).toBe('')
+      expect(showError).toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('switches the row import button between Codex and Claude after changing the key group', async () => {
@@ -1050,6 +1068,20 @@ describe('user KeysView column settings', () => {
       await flushPromises()
       expect(vi.mocked(keysAPI.create).mock.calls[0].slice(0, 2)).toEqual(['测试', 4])
       expect(wrapper.find('[data-testid="guide-bubble"]').exists()).toBe(false)
+    })
+
+    it('does not replace a manually selected group when settings arrive late', async () => {
+      routeState.query = { create: 'quick' }
+      getAvailableGroups.mockResolvedValue([group(4, 'openai', 1), group(8, 'openai', 2)])
+      let finishSettings!: (settings: { quick_import_image_group_id: number }) => void
+      getPublicSettings.mockReturnValueOnce(new Promise(resolve => { finishSettings = resolve }))
+      const wrapper = await mountView()
+      const state = wrapper.vm as unknown as { formData: { group_id: number | null } }
+      expect(state.formData.group_id).toBeNull()
+      state.formData.group_id = 8
+      finishSettings({ quick_import_image_group_id: -1 })
+      await flushPromises()
+      expect(state.formData.group_id).toBe(8)
     })
 
     it('numbers the default name when test keys already exist, and stays normal without the query', async () => {

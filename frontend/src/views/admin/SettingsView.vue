@@ -6714,6 +6714,27 @@
                 </div>
                 <Toggle v-model="form.hide_ccs_import_button" />
               </div>
+              <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
+                <label class="mb-2 block font-medium text-gray-900 dark:text-white">
+                  {{ t("admin.settings.site.quickImportImageGroup") }}
+                </label>
+                <Select
+                  v-model="form.quick_import_image_group_id"
+                  :options="quickImportImageGroupOptions"
+                  :disabled="!groupListLoaded || loading || saving"
+                  :aria-label="t('admin.settings.site.quickImportImageGroup')"
+                  data-testid="quick-import-image-group"
+                />
+                <p class="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
+                  {{ t("admin.settings.site.quickImportImageGroupHint") }}
+                </p>
+                <p v-if="groupListFailed" class="mt-1.5 text-sm text-red-600 dark:text-red-400">
+                  {{ t("admin.settings.site.quickImportImageGroupLoadFailed") }}
+                </p>
+                <p v-else-if="quickImportImageGroupUnavailable" class="mt-1.5 text-sm text-red-600 dark:text-red-400">
+                  {{ t("admin.settings.site.quickImportImageGroupUnavailable") }}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -9180,7 +9201,12 @@ const adminApiKeyExists = ref(false);
 const adminApiKeyMasked = ref("");
 const adminApiKeyOperating = ref(false);
 const newAdminApiKey = ref("");
-const subscriptionGroups = ref<AdminGroup[]>([]);
+const eligibleGroups = ref<AdminGroup[]>([]);
+const groupListLoaded = ref(false);
+const groupListFailed = ref(false);
+const subscriptionGroups = computed(() => eligibleGroups.value.filter(
+  (group) => group.subscription_type === "subscription",
+));
 
 // Upstream billing probe state
 const upstreamBillingProbeLoading = ref(true);
@@ -9813,6 +9839,7 @@ const form = reactive<SettingsForm>({
   compact_home_enabled: false,
   backend_mode_enabled: false,
   hide_ccs_import_button: false,
+  quick_import_image_group_id: 0,
   payment_enabled: false,
   risk_control_enabled: false,
   cyber_policy_user_allowlist: "",
@@ -10467,6 +10494,25 @@ async function saveWebSearchConfig(): Promise<boolean> {
   }
 }
 
+const savedQuickImportImageGroupId = ref(0);
+const quickImportImageGroups = computed(() =>
+  sortGroupsForDisplay(eligibleGroups.value.filter((group) => group.platform === "openai")),
+);
+const quickImportImageGroupUnavailable = computed(() => {
+  const id = form.quick_import_image_group_id ?? 0;
+  return groupListLoaded.value && id > 0 && !quickImportImageGroups.value.some((group) => group.id === id);
+});
+const quickImportImageGroupOptions = computed(() => [
+  { value: 0, label: t("admin.settings.site.quickImportImageGroupUnset") },
+  { value: -1, label: t("admin.settings.site.quickImportImageGroupNone") },
+  ...quickImportImageGroups.value.map((group) => ({ value: group.id, label: group.name })),
+  ...(quickImportImageGroupUnavailable.value ? [{
+    value: form.quick_import_image_group_id ?? 0,
+    label: t("admin.settings.site.quickImportImageGroupUnavailable"),
+    disabled: true,
+  }] : []),
+]);
+
 const defaultSubscriptionGroupOptions = computed<
   DefaultSubscriptionGroupOption[]
 >(() =>
@@ -11046,6 +11092,8 @@ async function loadSettings() {
   loadFailed.value = false;
   try {
     const settings = await adminAPI.settings.getSettings();
+    savedQuickImportImageGroupId.value = settings.quick_import_image_group_id ?? 0;
+    form.quick_import_image_group_id = savedQuickImportImageGroupId.value;
     settings.payment_load_balance_strategy =
       settings.payment_load_balance_strategy || "round-robin";
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
@@ -11230,15 +11278,13 @@ async function loadSettings() {
   }
 }
 
-async function loadSubscriptionGroups() {
+async function loadSettingsGroups() {
   try {
     const groups = await adminAPI.groups.getAll();
-    subscriptionGroups.value = groups.filter(
-      (group) =>
-        group.subscription_type === "subscription" && group.status === "active",
-    );
-  } catch (_error: unknown) {
-    subscriptionGroups.value = [];
+    eligibleGroups.value = groups.filter((group) => group.status === "active");
+    groupListLoaded.value = true;
+  } catch {
+    groupListFailed.value = true;
   }
 }
 
@@ -11523,6 +11569,9 @@ async function saveSettings() {
       compact_home_enabled: form.compact_home_enabled,
       backend_mode_enabled: form.backend_mode_enabled,
       hide_ccs_import_button: form.hide_ccs_import_button,
+      ...(form.quick_import_image_group_id !== savedQuickImportImageGroupId.value
+        ? { quick_import_image_group_id: form.quick_import_image_group_id }
+        : {}),
       table_default_page_size: form.table_default_page_size,
       table_page_size_options: form.table_page_size_options,
       custom_menu_items: form.custom_menu_items,
@@ -11847,6 +11896,9 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
+    if (updated.quick_import_image_group_id !== undefined) {
+      savedQuickImportImageGroupId.value = updated.quick_import_image_group_id;
+    }
     adminSettingsStore.setCacheHitRateDefaultRangeLocal(normalizeCacheHitRateRange(updated.cache_hit_rate_default_range ?? payload.cache_hit_rate_default_range));
 
     for (const [key, value] of Object.entries(updated)) {
@@ -12925,7 +12977,7 @@ async function handleDeleteProvider() {
 
 onMounted(() => {
   loadSettings();
-  loadSubscriptionGroups();
+  loadSettingsGroups();
   loadAdminApiKey();
   loadUpstreamBillingProbeSettings();
   loadOllamaCloudUsageSettings();

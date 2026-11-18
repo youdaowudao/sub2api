@@ -398,14 +398,12 @@
           <template #cell-actions="{ row }">
             <!-- 一行操作：一键导入（双行字，强调色）+ 手动配置 + 导入到 CC Switch + 编辑 + 删除 -->
             <div data-tour="key-actions" class="flex items-stretch">
-              <!-- 一键导入区：OpenAI 分组导入 Codex，Anthropic 分组导入 Claude（规则见 importAppForGroup）。
-                   没有可导入目标的行保留同宽空位，各行按钮对齐 -->
+              <!-- 没有可导入目标的行保留同宽空位，各行按钮对齐 -->
               <div class="mr-0.5 flex w-[3.6rem] flex-none items-center">
                 <CodexImportButton
-                  v-if="canQuickImport(row.group) && row.status === 'active'"
-                  :api-key="row.key"
-                  :app="importAppForGroup(row.group)"
-                  :name="row.name"
+                  v-if="canQuickImport(row.group, publicSettings?.quick_import_image_group_id) && row.status === 'active'"
+                  :api-key="row"
+                  :app="importAppForGroup(row.group, publicSettings?.quick_import_image_group_id) ?? undefined"
                   stacked
                   data-tour="key-codex"
                 />
@@ -1619,10 +1617,11 @@ function openQuickCreate() {
   void router?.replace({ query: rest })
 }
 // 分组可能在窗口打开后才加载完，等到有分组再选
-watch([showCreateModal, groups], () => {
-  if (!quickCreatePending || !showCreateModal.value || !groups.value.length) return
+watch([showCreateModal, groups, publicSettings], () => {
+  if (!quickCreatePending || !showCreateModal.value || !groups.value.length || !publicSettings.value) return
   quickCreatePending = false
-  const group = pickFirstGptGroup(groups.value)
+  if (formData.value.group_id !== null) return
+  const group = pickFirstGptGroup(groups.value, publicSettings.value.quick_import_image_group_id)
   if (!group) return
   selectCreateProvider('openai')
   formData.value.group_id = group.id
