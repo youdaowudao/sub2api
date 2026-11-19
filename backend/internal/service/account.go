@@ -47,6 +47,8 @@ type Account struct {
 	UpdatedAt          time.Time
 
 	Schedulable bool
+	// Management-only pending action; not serialized into scheduler/plugin snapshots.
+	ScheduleResumeAt *time.Time `json:"-"`
 
 	RateLimitedAt    *time.Time
 	RateLimitResetAt *time.Time
@@ -86,6 +88,12 @@ type Account struct {
 	headerOverrideCacheRawPtr         uintptr
 	headerOverrideCacheRawLen         int
 	headerOverrideCacheRawSig         uint64
+}
+
+type AccountScheduleTimerResult struct {
+	ID               int64      `json:"id"`
+	Schedulable      bool       `json:"schedulable"`
+	ScheduleResumeAt *time.Time `json:"schedule_resume_at"`
 }
 
 type OpenAIEndpointCapability string

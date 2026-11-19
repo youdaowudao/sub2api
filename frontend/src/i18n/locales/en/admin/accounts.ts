@@ -95,6 +95,15 @@ export default {
       schedulableHint: 'Enable to include this account in API request scheduling',
       schedulableEnabled: 'Scheduling enabled',
       schedulableDisabled: 'Scheduling disabled',
+      scheduleTimer: {
+        button: 'Pause for…',
+        hours: 'Pause for {hours} hours',
+        alreadyClosed: 'Scheduling is already disabled',
+        resumeAt: 'Scheduling will be enabled at {time}',
+        saved: 'Scheduling disabled; it will be enabled at {time}',
+        failed: 'Could not save the timer. Refresh and try again.',
+        unknown: 'Could not confirm whether the timer was saved. Refresh before trying again.'
+      },
       failedToToggleSchedulable: 'Failed to toggle scheduling status',
       priorityQuick: {
         raise: 'Raise priority (value -1)',

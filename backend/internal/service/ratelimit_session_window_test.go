@@ -445,3 +445,11 @@ func TestUpdateSessionWindow_NoStatusHeader(t *testing.T) {
 		t.Errorf("expected no calls when status header absent, got %d", len(repo.sessionWindowCalls))
 	}
 }
+
+func (m *sessionWindowMockRepo) StartAccountScheduleTimer(context.Context, int64, int) (*AccountScheduleTimerResult, error) {
+	panic("unexpected StartAccountScheduleTimer call")
+}
+
+func (m *sessionWindowMockRepo) ResumeDueScheduleTimers(context.Context) (int64, error) {
+	panic("unexpected ResumeDueScheduleTimers call")
+}

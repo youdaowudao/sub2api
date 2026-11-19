@@ -292,9 +292,12 @@
             </div>
           </template>
           <template #cell-schedulable="{ row }">
-            <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
-              <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
-            </button>
+            <div class="flex flex-wrap items-center gap-2">
+              <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+                <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
+              </button>
+              <AccountScheduleTimer :account="row" :busy="pendingScheduleTimers.has(row.id)" :disabled="togglingSchedulable === row.id" @start="handleStartScheduleTimer(row, $event)" />
+            </div>
           </template>
           <template #cell-cache_hit_rate="{ row }">
             <CacheHitRateCell :item="cacheHitRateByAccountId[row.id]" :loading="cacheHitRateLoading" :error="cacheHitRateError" />
@@ -530,6 +533,7 @@ import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
+import AccountScheduleTimer from '@/components/account/AccountScheduleTimer.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
@@ -626,6 +630,7 @@ const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
 const togglingSchedulable = ref<number | null>(null)
+const pendingScheduleTimers = reactive(new Set<number>())
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
@@ -1462,6 +1467,7 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.current_window_cost !== next.current_window_cost ||
     current.active_sessions !== next.active_sessions ||
     current.schedulable !== next.schedulable ||
+    current.schedule_resume_at !== next.schedule_resume_at ||
     current.status !== next.status ||
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
     current.overload_until !== next.overload_until ||
@@ -2523,6 +2529,29 @@ const confirmCreateSparkShadow = async () => {
 }
 const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
 const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
+const handleStartScheduleTimer = async (account: Account, hours: number) => {
+  if (pendingScheduleTimers.has(account.id)) return
+  pendingScheduleTimers.add(account.id)
+  try {
+    const result = await adminAPI.accounts.startScheduleTimer(account.id, hours)
+    const current = accounts.value.find(row => row.id === result.id)
+    if (current) patchAccountInList({ ...current, ...result })
+    enterAutoRefreshSilentWindow()
+    appStore.showSuccess(t('admin.accounts.scheduleTimer.saved', {
+      time: result.schedule_resume_at ? formatDateTime(result.schedule_resume_at) : ''
+    }))
+  } catch (error: unknown) {
+    const failure = error as { status?: number; reason?: string; message?: string } | null
+    const knownFailure = (failure?.status != null && failure.status >= 400 && failure.status < 500) ||
+      failure?.reason === 'ACCOUNT_SCHEDULE_TIMER_NOT_SAVED'
+    appStore.showError(knownFailure
+      ? failure?.message || t('admin.accounts.scheduleTimer.failed')
+      : t('admin.accounts.scheduleTimer.unknown'))
+    await load()
+  } finally {
+    pendingScheduleTimers.delete(account.id)
+  }
+}
 const handleToggleSchedulable = async (a: Account) => {
   const nextSchedulable = !a.schedulable
   togglingSchedulable.value = a.id

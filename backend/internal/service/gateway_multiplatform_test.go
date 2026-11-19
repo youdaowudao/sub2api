@@ -3593,3 +3593,11 @@ func TestGatewayService_SelectAccountForModelWithPlatform_RoutedOpenAIGroup(t *t
 	require.NotNil(t, acc)
 	require.Equal(t, int64(2), acc.ID, "routed account must win over the higher-priority unrouted one")
 }
+
+func (m *mockAccountRepoForPlatform) StartAccountScheduleTimer(context.Context, int64, int) (*AccountScheduleTimerResult, error) {
+	panic("unexpected StartAccountScheduleTimer call")
+}
+
+func (m *mockAccountRepoForPlatform) ResumeDueScheduleTimers(context.Context) (int64, error) {
+	return 0, nil
+}

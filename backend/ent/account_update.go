@@ -370,6 +370,26 @@ func (_u *AccountUpdate) SetNillableSchedulable(v *bool) *AccountUpdate {
 	return _u
 }
 
+// SetScheduleResumeAt sets the "schedule_resume_at" field.
+func (_u *AccountUpdate) SetScheduleResumeAt(v time.Time) *AccountUpdate {
+	_u.mutation.SetScheduleResumeAt(v)
+	return _u
+}
+
+// SetNillableScheduleResumeAt sets the "schedule_resume_at" field if the given value is not nil.
+func (_u *AccountUpdate) SetNillableScheduleResumeAt(v *time.Time) *AccountUpdate {
+	if v != nil {
+		_u.SetScheduleResumeAt(*v)
+	}
+	return _u
+}
+
+// ClearScheduleResumeAt clears the value of the "schedule_resume_at" field.
+func (_u *AccountUpdate) ClearScheduleResumeAt() *AccountUpdate {
+	_u.mutation.ClearScheduleResumeAt()
+	return _u
+}
+
 // SetRateLimitedAt sets the "rate_limited_at" field.
 func (_u *AccountUpdate) SetRateLimitedAt(v time.Time) *AccountUpdate {
 	_u.mutation.SetRateLimitedAt(v)
@@ -894,6 +914,12 @@ func (_u *AccountUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.ScheduleResumeAt(); ok {
+		_spec.SetField(account.FieldScheduleResumeAt, field.TypeTime, value)
+	}
+	if _u.mutation.ScheduleResumeAtCleared() {
+		_spec.ClearField(account.FieldScheduleResumeAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.RateLimitedAt(); ok {
 		_spec.SetField(account.FieldRateLimitedAt, field.TypeTime, value)
@@ -1510,6 +1536,26 @@ func (_u *AccountUpdateOne) SetNillableSchedulable(v *bool) *AccountUpdateOne {
 	return _u
 }
 
+// SetScheduleResumeAt sets the "schedule_resume_at" field.
+func (_u *AccountUpdateOne) SetScheduleResumeAt(v time.Time) *AccountUpdateOne {
+	_u.mutation.SetScheduleResumeAt(v)
+	return _u
+}
+
+// SetNillableScheduleResumeAt sets the "schedule_resume_at" field if the given value is not nil.
+func (_u *AccountUpdateOne) SetNillableScheduleResumeAt(v *time.Time) *AccountUpdateOne {
+	if v != nil {
+		_u.SetScheduleResumeAt(*v)
+	}
+	return _u
+}
+
+// ClearScheduleResumeAt clears the value of the "schedule_resume_at" field.
+func (_u *AccountUpdateOne) ClearScheduleResumeAt() *AccountUpdateOne {
+	_u.mutation.ClearScheduleResumeAt()
+	return _u
+}
+
 // SetRateLimitedAt sets the "rate_limited_at" field.
 func (_u *AccountUpdateOne) SetRateLimitedAt(v time.Time) *AccountUpdateOne {
 	_u.mutation.SetRateLimitedAt(v)
@@ -2064,6 +2110,12 @@ func (_u *AccountUpdateOne) sqlSave(ctx context.Context) (_node *Account, err er
 	}
 	if value, ok := _u.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.ScheduleResumeAt(); ok {
+		_spec.SetField(account.FieldScheduleResumeAt, field.TypeTime, value)
+	}
+	if _u.mutation.ScheduleResumeAtCleared() {
+		_spec.ClearField(account.FieldScheduleResumeAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.RateLimitedAt(); ok {
 		_spec.SetField(account.FieldRateLimitedAt, field.TypeTime, value)

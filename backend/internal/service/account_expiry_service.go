@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// AccountExpiryService periodically pauses expired accounts when auto-pause is enabled.
+// AccountExpiryService handles expiry and pending actions on the scheduling switch.
 type AccountExpiryService struct {
 	accountRepo AccountRepository
 	interval    time.Duration
@@ -57,6 +57,11 @@ func (s *AccountExpiryService) Stop() {
 }
 
 func (s *AccountExpiryService) runOnce() {
+	s.pauseExpiredAccounts()
+	s.resumeDueScheduleTimers()
+}
+
+func (s *AccountExpiryService) pauseExpiredAccounts() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -67,5 +72,17 @@ func (s *AccountExpiryService) runOnce() {
 	}
 	if updated > 0 {
 		log.Printf("[AccountExpiry] Auto paused %d expired accounts", updated)
+	}
+}
+
+func (s *AccountExpiryService) resumeDueScheduleTimers() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	updated, err := s.accountRepo.ResumeDueScheduleTimers(ctx)
+	if err != nil {
+		log.Printf("[AccountExpiry] Enable scheduled accounts failed: %v", err)
+	}
+	if updated > 0 {
+		log.Printf("[AccountExpiry] Automatically enabled %d scheduled accounts", updated)
 	}
 }

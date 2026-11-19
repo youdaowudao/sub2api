@@ -3776,6 +3776,7 @@ func accountEntityToService(m *dbent.Account) *service.Account {
 		CreatedAt:               m.CreatedAt,
 		UpdatedAt:               m.UpdatedAt,
 		Schedulable:             m.Schedulable,
+		ScheduleResumeAt:        m.ScheduleResumeAt,
 		RateLimitedAt:           m.RateLimitedAt,
 		RateLimitResetAt:        m.RateLimitResetAt,
 		OverloadUntil:           m.OverloadUntil,

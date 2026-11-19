@@ -1358,6 +1358,10 @@ func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, 
 	return updated, nil
 }
 
+func (s *adminServiceImpl) StartAccountScheduleTimer(ctx context.Context, id int64, hours int) (*AccountScheduleTimerResult, error) {
+	return s.accountRepo.StartAccountScheduleTimer(ctx, id, hours)
+}
+
 func (s *adminServiceImpl) RevertAccountProxyFallback(ctx context.Context, id int64) error {
 	if err := s.accountRepo.RevertProxyFallback(ctx, id); err != nil {
 		return err

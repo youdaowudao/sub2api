@@ -293,3 +293,11 @@ func TestAccountService_Delete_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []int64{55}, repo.deletedIDs) // 验证正确的 ID 被删除
 }
+
+func (s *accountRepoStub) StartAccountScheduleTimer(context.Context, int64, int) (*AccountScheduleTimerResult, error) {
+	panic("unexpected StartAccountScheduleTimer call")
+}
+
+func (s *accountRepoStub) ResumeDueScheduleTimers(context.Context) (int64, error) {
+	panic("unexpected ResumeDueScheduleTimers call")
+}

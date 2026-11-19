@@ -841,3 +841,7 @@ func (s *stubAdminService) CreateShadow(ctx context.Context, parentID int64, opt
 
 // Ensure stub implements interface.
 var _ service.AdminService = (*stubAdminService)(nil)
+
+func (s *stubAdminService) StartAccountScheduleTimer(context.Context, int64, int) (*service.AccountScheduleTimerResult, error) {
+	panic("unexpected StartAccountScheduleTimer call")
+}

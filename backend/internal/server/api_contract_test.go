@@ -2982,3 +2982,11 @@ var (
 	_ service.UsageLogRepository         = (*stubUsageLogRepo)(nil)
 	_ service.SettingRepository          = (*stubSettingRepo)(nil)
 )
+
+func (s *stubAccountRepo) StartAccountScheduleTimer(context.Context, int64, int) (*service.AccountScheduleTimerResult, error) {
+	panic("unexpected StartAccountScheduleTimer call")
+}
+
+func (s *stubAccountRepo) ResumeDueScheduleTimers(context.Context) (int64, error) {
+	return 0, errors.New("not implemented")
+}
