@@ -15,6 +15,7 @@
         :overview="overview"
         :platform="platform"
         :group-id="groupId"
+        :group-options="groupOptions"
         :time-range="timeRange"
         :query-mode="queryMode"
         :loading="loading"
@@ -72,6 +73,8 @@
         ref="errorRecordsPanel"
         :time-range="timeRange" :custom-start-time="customStartTime" :custom-end-time="customEndTime"
         :platform="platform" :group-id="groupId" :refresh-token="errorListRefreshToken"
+        :group-options="groupOptions" :group-options-failed="groupOptionsFailed"
+        @update:group="onGroupChange" @retry-groups="loadGroupOptions"
       />
 
       <!-- Row: Visual Analysis (baseline 3-up grid) -->
@@ -151,6 +154,8 @@ import {
   type OpsMetricThresholds
 } from '@/api/admin/ops'
 import { useAdminSettingsStore, useAppStore } from '@/stores'
+import { adminAPI } from '@/api'
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 import OpsDashboardHeader from './components/OpsDashboardHeader.vue'
 import OpsDashboardSkeleton from './components/OpsDashboardSkeleton.vue'
 import OpsConcurrencyCard from './components/OpsConcurrencyCard.vue'
@@ -191,6 +196,20 @@ const lastUpdated = ref<Date | null>(new Date())
 const timeRange = ref<TimeRange>('1h')
 const platform = ref<string>('')
 const groupId = ref<number | null>(null)
+const groups = ref<Array<{ id: number; name: string; platform: string }>>([])
+const groupOptionsFailed = ref(false)
+const groupOptions = computed(() => {
+  const available = groups.value.filter(group => !platform.value || group.platform === platform.value)
+  const options: Array<{ value: number | null; label: string }> = [
+    { value: null, label: t('common.all') },
+    ...available.map(group => ({ value: group.id, label: group.name })),
+  ]
+  const selected = groupId.value
+  if (selected !== null && !options.some(option => option.value === selected)) {
+    options.push({ value: selected, label: t('admin.ops.records.groupFallback', { id: selected }) })
+  }
+  return options
+})
 const queryMode = ref<QueryMode>('auto')
 const customStartTime = ref<string | null>(null)
 const customEndTime = ref<string | null>(null)
@@ -513,6 +532,23 @@ function onPlatformChange(v: string | number | boolean | null) {
   platform.value = typeof v === 'string' ? v : ''
 }
 
+async function loadGroupOptions() {
+  groupOptionsFailed.value = false
+  try {
+    groups.value = sortGroupsForDisplay(await adminAPI.groups.getAll())
+  } catch {
+    groupOptionsFailed.value = true
+  }
+}
+
+watch(platform, (currentPlatform) => {
+  const selected = groups.value.find(group => group.id === groupId.value)
+  if (currentPlatform && selected && selected.platform !== currentPlatform) {
+    groupId.value = null
+    syncQueryToRoute()
+  }
+})
+
 function onGroupChange(v: string | number | boolean | null) {
   if (v === null) groupId.value = null
   else if (typeof v === 'number') groupId.value = v > 0 ? v : null
@@ -815,6 +851,8 @@ onMounted(async () => {
     await router.replace('/admin/settings')
     return
   }
+
+  void loadGroupOptions()
 
   // Load thresholds configuration
   loadThresholds()

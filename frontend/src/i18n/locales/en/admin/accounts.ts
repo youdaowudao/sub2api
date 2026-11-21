@@ -95,6 +95,15 @@ export default {
       schedulableHint: 'Enable to include this account in API request scheduling',
       schedulableEnabled: 'Scheduling enabled',
       schedulableDisabled: 'Scheduling disabled',
+      scheduleTimer: {
+        button: 'Pause for…',
+        hours: 'Pause for {hours} hours',
+        alreadyClosed: 'Scheduling is already disabled',
+        resumeAt: 'Scheduling will be enabled at {time}',
+        saved: 'Scheduling disabled; it will be enabled at {time}',
+        failed: 'Could not save the timer. Refresh and try again.',
+        unknown: 'Could not confirm whether the timer was saved. Refresh before trying again.'
+      },
       failedToToggleSchedulable: 'Failed to toggle scheduling status',
       priorityQuick: {
         raise: 'Raise priority (value -1)',
@@ -505,6 +514,8 @@ export default {
       testConnection: 'Test Connection',
       reAuthorize: 'Re-Authorize',
       refreshToken: 'Refresh Token',
+      refreshTokenHint: 'Tokens are refreshed automatically in the background. Frequent manual refreshes can race the automatic refresh and invalidate the token, pausing the account.',
+      refreshTokenFrequentWarning: 'Less than a minute since the last manual refresh: frequent refreshes can race the background auto-refresh and invalidate the token. Only retry when necessary.',
       noAccountsYet: 'No accounts yet',
       createFirstAccount: 'Create your first account to start using AI services.',
       tokenRefreshed: 'Token refreshed successfully',

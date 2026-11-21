@@ -142,6 +142,9 @@ type simpleModeGroupResponse struct {
 	Platform    string `json:"platform"`
 	Status      string `json:"status"`
 
+	DisplayIcon     string `json:"display_icon"`
+	DisplayCategory string `json:"display_category"`
+
 	I18n service.GroupI18n `json:"i18n,omitempty"`
 
 	AccountCount            int64     `json:"account_count,omitempty"`
@@ -158,6 +161,8 @@ func groupForSimpleMode(group *service.Group) *simpleModeGroupResponse {
 	}
 	return &simpleModeGroupResponse{
 		ID: group.ID, Name: group.Name, Description: group.Description, Platform: group.Platform,
+		DisplayIcon:        group.DisplayIcon,
+		DisplayCategory:    group.DisplayCategory,
 		Status:             group.Status,
 		I18n:               group.I18n,
 		AccountCount:       group.AccountCount,
@@ -170,7 +175,10 @@ func sanitizeCreateGroupRequestForSimpleMode(req *CreateGroupRequest) {
 	if req == nil {
 		return
 	}
-	allowed := CreateGroupRequest{Name: req.Name, Description: req.Description, I18n: req.I18n, Platform: req.Platform}
+	allowed := CreateGroupRequest{
+		Name: req.Name, Description: req.Description, I18n: req.I18n, Platform: req.Platform,
+		DisplayIcon: req.DisplayIcon, DisplayCategory: req.DisplayCategory,
+	}
 	allowed.RateMultiplier = 1
 	allowed.SubscriptionType = service.SubscriptionTypeStandard
 	*req = allowed
@@ -180,7 +188,10 @@ func sanitizeUpdateGroupRequestForSimpleMode(req *UpdateGroupRequest) {
 	if req == nil {
 		return
 	}
-	*req = UpdateGroupRequest{Name: req.Name, Description: req.Description, I18n: req.I18n}
+	*req = UpdateGroupRequest{
+		Name: req.Name, Description: req.Description, I18n: req.I18n,
+		DisplayIcon: req.DisplayIcon, DisplayCategory: req.DisplayCategory,
+	}
 }
 
 // CreateGroupRequest represents create group request
@@ -189,6 +200,8 @@ type CreateGroupRequest struct {
 	Description               string                        `json:"description"`
 	I18n                      service.GroupI18n             `json:"i18n"` // 名称与描述的界面语言译文
 	Platform                  string                        `json:"platform" binding:"omitempty,group_platform"`
+	DisplayIcon               string                        `json:"display_icon"`
+	DisplayCategory           string                        `json:"display_category"`
 	RateMultiplier            float64                       `json:"rate_multiplier"`
 	IsExclusive               bool                          `json:"is_exclusive"`
 	SubscriptionType          string                        `json:"subscription_type" binding:"omitempty,oneof=standard subscription"`
@@ -266,6 +279,8 @@ type UpdateGroupRequest struct {
 	Description               *string                        `json:"description"`
 	I18n                      *service.GroupI18n             `json:"i18n"` // 缺省不修改，传入则整体替换
 	Platform                  string                         `json:"platform" binding:"omitempty,group_platform"`
+	DisplayIcon               *string                        `json:"display_icon"`
+	DisplayCategory           *string                        `json:"display_category"`
 	RateMultiplier            *float64                       `json:"rate_multiplier"`
 	IsExclusive               *bool                          `json:"is_exclusive"`
 	Status                    string                         `json:"status" binding:"omitempty,oneof=active inactive"`
@@ -675,6 +690,8 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		Description:                     req.Description,
 		I18n:                            req.I18n,
 		Platform:                        req.Platform,
+		DisplayIcon:                     req.DisplayIcon,
+		DisplayCategory:                 req.DisplayCategory,
 		RateMultiplier:                  req.RateMultiplier,
 		IsExclusive:                     req.IsExclusive,
 		SubscriptionType:                req.SubscriptionType,
@@ -823,6 +840,8 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		Description:                     req.Description,
 		I18n:                            req.I18n,
 		Platform:                        req.Platform,
+		DisplayIcon:                     req.DisplayIcon,
+		DisplayCategory:                 req.DisplayCategory,
 		RateMultiplier:                  req.RateMultiplier,
 		IsExclusive:                     req.IsExclusive,
 		Status:                          req.Status,

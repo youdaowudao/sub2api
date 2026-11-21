@@ -109,6 +109,7 @@ type AdminService interface {
 	// ForceAntigravityPrivacy 强制重新设置 Antigravity OAuth 账号隐私，无论当前状态。
 	ForceAntigravityPrivacy(ctx context.Context, account *Account) string
 	SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error)
+	StartAccountScheduleTimer(ctx context.Context, id int64, hours int) (*AccountScheduleTimerResult, error)
 	BulkUpdateAccounts(ctx context.Context, input *BulkUpdateAccountsInput) (*BulkUpdateAccountsResult, error)
 	CheckMixedChannelRisk(ctx context.Context, currentAccountID int64, currentAccountPlatform string, groupIDs []int64) error
 	// RevertAccountProxyFallback 将账号的 proxy_id 切回 proxy_fallback_origin_id，并清空 origin 字段。
@@ -241,6 +242,8 @@ type CreateGroupInput struct {
 	Description               string
 	I18n                      GroupI18n // 名称与描述的界面语言译文
 	Platform                  string
+	DisplayIcon               string
+	DisplayCategory           string
 	RateMultiplier            float64
 	IsExclusive               bool
 	SubscriptionType          string   // standard/subscription
@@ -324,6 +327,8 @@ type UpdateGroupInput struct {
 	Description               *string
 	I18n                      *GroupI18n // nil 表示不修改；非 nil 整体替换
 	Platform                  string
+	DisplayIcon               *string
+	DisplayCategory           *string
 	RateMultiplier            *float64 // 使用指针以支持设置为0
 	IsExclusive               *bool
 	Status                    string
@@ -721,6 +726,8 @@ type adminServiceImpl struct {
 	affiliateService     adminRechargeAffiliateAccruer
 	compositeRouteRepo   CompositeModelRouteRepository
 	compositeResolver    *CompositeRouteResolver
+
+	userPlatformQuotaRepo UserPlatformQuotaRepository
 	// 分组平台变更后用来失效渠道缓存；可为 nil（缓存会在 TTL 到期后自然重建）
 	channelCacheInvalidator ChannelCacheInvalidator
 }
@@ -764,6 +771,7 @@ func NewAdminService(
 	compositeRouteRepo CompositeModelRouteRepository,
 	compositeResolver *CompositeRouteResolver,
 	channelCacheInvalidator ChannelCacheInvalidator,
+	userPlatformQuotaRepo UserPlatformQuotaRepository,
 ) AdminService {
 	return &adminServiceImpl{
 		cfg:                  cfg,
@@ -794,5 +802,6 @@ func NewAdminService(
 		compositeResolver:    compositeResolver,
 
 		channelCacheInvalidator: channelCacheInvalidator,
+		userPlatformQuotaRepo:   userPlatformQuotaRepo,
 	}
 }

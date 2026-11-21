@@ -11,9 +11,11 @@ import (
 )
 
 var (
-	ErrAccountNotFound      = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
-	ErrAccountNilInput      = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
-	ErrAccountNotInFallback = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
+	ErrAccountNotFound       = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
+	ErrAccountNilInput       = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
+	ErrAccountNotInFallback  = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
+	ErrScheduleTimerDuration = infraerrors.BadRequest("ACCOUNT_SCHEDULE_TIMER_DURATION", "请选择 6、12 或 24 小时；本次没有更改调度")
+	ErrScheduleTimerDisabled = infraerrors.Conflict("ACCOUNT_SCHEDULE_TIMER_DISABLED", "账号已关闭调度；本次没有设置计时，可开启后重新操作")
 )
 
 const AccountListGroupUngrouped int64 = -1
@@ -81,6 +83,8 @@ type AccountRepository interface {
 	SetError(ctx context.Context, id int64, errorMsg string) error
 	ClearError(ctx context.Context, id int64) error
 	SetSchedulable(ctx context.Context, id int64, schedulable bool) error
+	StartAccountScheduleTimer(ctx context.Context, id int64, hours int) (*AccountScheduleTimerResult, error)
+	ResumeDueScheduleTimers(ctx context.Context) (int64, error)
 	AutoPauseExpiredAccounts(ctx context.Context, now time.Time) (int64, error)
 	BindGroups(ctx context.Context, accountID int64, groupIDs []int64) error
 

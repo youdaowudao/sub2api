@@ -76,4 +76,30 @@ describe('OpsErrorDetailModal', () => {
     expect(wrapper.findAll('pre')).toHaveLength(2)
     expect(wrapper.text()).not.toContain('admin.ops.errorDetail.payloads.upstream_detail')
   })
+
+  it('keeps the selected detail and correlated errors when older responses arrive late', async () => {
+    let resolveDetail!: (value: unknown) => void
+    let resolveCorrelated!: (value: unknown) => void
+    mocks.getRequestErrorDetail
+      .mockImplementationOnce(() => new Promise(resolve => { resolveDetail = resolve }))
+      .mockResolvedValueOnce({ id: 2, message: 'current detail' })
+    mocks.listRequestErrorUpstreamErrors
+      .mockImplementationOnce(() => new Promise(resolve => { resolveCorrelated = resolve }))
+      .mockResolvedValueOnce({ items: [{ id: 22, type: 'current correlation' }] })
+    const wrapper = shallowMount(OpsErrorDetailModal, {
+      props: { show: true, errorId: 1, errorType: 'request' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, Icon: true } }
+    })
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true, errorId: 2 })
+    await flushPromises()
+    resolveDetail({ id: 1, message: 'stale detail' })
+    resolveCorrelated({ items: [{ id: 11, type: 'stale correlation' }] })
+    await flushPromises()
+    expect(wrapper.text()).toContain('current detail')
+    expect(wrapper.text()).toContain('current correlation')
+    expect(wrapper.text()).not.toContain('stale detail')
+    expect(wrapper.text()).not.toContain('stale correlation')
+    wrapper.unmount()
+  })
 })

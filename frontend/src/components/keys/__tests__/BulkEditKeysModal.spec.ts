@@ -87,6 +87,34 @@ describe('BulkEditKeysModal', () => {
     expect(bulkUpdate).toHaveBeenCalledWith([1, 2], { group_id: 7 })
   })
 
+  it('uses plain text categories and updates them when display settings change', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-test="enable-group"]').setValue(true)
+    const image = { id: 7, name: 'Image group', platform: 'openai', allow_image_generation: true } as Group
+    const grok = { id: 8, name: 'Grok group', platform: 'grok' } as Group
+    const options = () => wrapper.getComponent('[data-test="group-input"]').props('options')
+    const heading = (category: string) => ({
+      value: `__group_category:${category}`, label: `keys.providers.${category} {}`, kind: 'group', disabled: true,
+    })
+    await wrapper.setProps({ groups: [{ ...image, display_icon: 'gemini', display_category: 'gemini' }, grok] })
+    expect(options()).toEqual([
+      heading('gemini'), { value: 7, label: 'Image group' },
+      heading('other'), { value: 8, label: 'Grok group' },
+    ])
+    await wrapper.setProps({ groups: [{ ...image, display_icon: '', display_category: '' }, grok] })
+    expect(options()).toEqual([
+      heading('openai'), { value: 7, label: 'Image group' },
+      heading('other'), { value: 8, label: 'Grok group' },
+    ])
+    await wrapper.setProps({ groups: [
+      { ...image, display_category: 'domestic' }, { ...grok, display_category: 'domestic' },
+    ] })
+    expect(options()).toEqual([
+      heading('domestic'), { value: 7, label: 'Image group' }, { value: 8, label: 'Grok group' },
+    ])
+    wrapper.unmount()
+  })
+
   it('clears only an explicitly selected IP list and expiration', async () => {
     const wrapper = mountModal()
     await wrapper.get('[data-test="enable-ip_whitelist"]').setValue(true)

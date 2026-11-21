@@ -217,14 +217,16 @@ export default {
     providers: {
       anthropic: 'Anthropic',
       openai: 'OpenAI',
+      gemini: 'Gemini',
       domestic: 'Chinese AI',
       other: 'Other'
     },
     providerHints: {
       anthropic: 'Choose an available Anthropic / Claude group',
       openai: 'Choose an available OpenAI / GPT group',
+      gemini: 'Choose an available Gemini group',
       domestic: 'Includes DeepSeek, Kimi, Zhipu GLM and MiniMax',
-      other: 'Includes Gemini, Grok, Antigravity, OpenCode and mixed groups'
+      other: 'Groups from other platforms'
     },
     selectGroup: 'Select a group',
     statusLabel: 'Status',
@@ -588,6 +590,8 @@ export default {
       keyName: 'Key Name', keyDeleted: 'Deleted', allKeys: 'All keys',
       modelPlaceholder: 'Search model', allCategories: 'All categories', allStatuses: 'All status codes',
       empty: 'No error requests', failedToLoad: 'Failed to load error requests',
+      retryLoad: 'Could not load failed requests. Please try again.',
+      queryTimeout: 'The failed requests query timed out. Narrow the date range or filter by account, then try again.',
       categories: {
         auth: 'Auth failed', rate_limit: 'Rate limited', quota: 'Balance/Subscription',
         invalid_request: 'Invalid request', service_unavailable: 'Service unavailable',
@@ -786,6 +790,7 @@ export default {
     },
     table: {
       model: 'Model',
+      copyModelId: 'Copy model ID {model}',
       input: 'Input',
       output: 'Output',
       cache: 'Cache',

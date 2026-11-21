@@ -322,6 +322,8 @@ func TestAPIContracts(t *testing.T) {
 						Name:                 "Group One",
 						Description:          "desc",
 						Platform:             service.PlatformAnthropic,
+						DisplayIcon:          "gemini",
+						DisplayCategory:      "domestic",
 						RateMultiplier:       1.5,
 						PeakRateMultiplier:   1.0,
 						IsExclusive:          false,
@@ -354,6 +356,8 @@ func TestAPIContracts(t *testing.T) {
 						"name": "Group One",
 						"description": "desc",
 						"platform": "anthropic",
+						"display_icon": "gemini",
+						"display_category": "domestic",
 						"rate_multiplier": 1.5,
 						"peak_rate_enabled": false,
 						"peak_start": "",
@@ -1504,7 +1508,7 @@ func newContractDeps(t *testing.T) *contractDeps {
 	settingRepo := newStubSettingRepo()
 	settingService := service.NewSettingService(settingRepo, cfg)
 
-	adminService := service.NewAdminService(nil, userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	adminService := service.NewAdminService(nil, userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
@@ -2982,3 +2986,11 @@ var (
 	_ service.UsageLogRepository         = (*stubUsageLogRepo)(nil)
 	_ service.SettingRepository          = (*stubSettingRepo)(nil)
 )
+
+func (s *stubAccountRepo) StartAccountScheduleTimer(context.Context, int64, int) (*service.AccountScheduleTimerResult, error) {
+	panic("unexpected StartAccountScheduleTimer call")
+}
+
+func (s *stubAccountRepo) ResumeDueScheduleTimers(context.Context) (int64, error) {
+	return 0, errors.New("not implemented")
+}

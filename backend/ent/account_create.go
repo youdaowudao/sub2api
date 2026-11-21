@@ -279,6 +279,20 @@ func (_c *AccountCreate) SetNillableSchedulable(v *bool) *AccountCreate {
 	return _c
 }
 
+// SetScheduleResumeAt sets the "schedule_resume_at" field.
+func (_c *AccountCreate) SetScheduleResumeAt(v time.Time) *AccountCreate {
+	_c.mutation.SetScheduleResumeAt(v)
+	return _c
+}
+
+// SetNillableScheduleResumeAt sets the "schedule_resume_at" field if the given value is not nil.
+func (_c *AccountCreate) SetNillableScheduleResumeAt(v *time.Time) *AccountCreate {
+	if v != nil {
+		_c.SetScheduleResumeAt(*v)
+	}
+	return _c
+}
+
 // SetRateLimitedAt sets the "rate_limited_at" field.
 func (_c *AccountCreate) SetRateLimitedAt(v time.Time) *AccountCreate {
 	_c.mutation.SetRateLimitedAt(v)
@@ -764,6 +778,10 @@ func (_c *AccountCreate) createSpec() (*Account, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Schedulable(); ok {
 		_spec.SetField(account.FieldSchedulable, field.TypeBool, value)
 		_node.Schedulable = value
+	}
+	if value, ok := _c.mutation.ScheduleResumeAt(); ok {
+		_spec.SetField(account.FieldScheduleResumeAt, field.TypeTime, value)
+		_node.ScheduleResumeAt = &value
 	}
 	if value, ok := _c.mutation.RateLimitedAt(); ok {
 		_spec.SetField(account.FieldRateLimitedAt, field.TypeTime, value)
@@ -1254,6 +1272,24 @@ func (u *AccountUpsert) SetSchedulable(v bool) *AccountUpsert {
 // UpdateSchedulable sets the "schedulable" field to the value that was provided on create.
 func (u *AccountUpsert) UpdateSchedulable() *AccountUpsert {
 	u.SetExcluded(account.FieldSchedulable)
+	return u
+}
+
+// SetScheduleResumeAt sets the "schedule_resume_at" field.
+func (u *AccountUpsert) SetScheduleResumeAt(v time.Time) *AccountUpsert {
+	u.Set(account.FieldScheduleResumeAt, v)
+	return u
+}
+
+// UpdateScheduleResumeAt sets the "schedule_resume_at" field to the value that was provided on create.
+func (u *AccountUpsert) UpdateScheduleResumeAt() *AccountUpsert {
+	u.SetExcluded(account.FieldScheduleResumeAt)
+	return u
+}
+
+// ClearScheduleResumeAt clears the value of the "schedule_resume_at" field.
+func (u *AccountUpsert) ClearScheduleResumeAt() *AccountUpsert {
+	u.SetNull(account.FieldScheduleResumeAt)
 	return u
 }
 
@@ -1844,6 +1880,27 @@ func (u *AccountUpsertOne) SetSchedulable(v bool) *AccountUpsertOne {
 func (u *AccountUpsertOne) UpdateSchedulable() *AccountUpsertOne {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateSchedulable()
+	})
+}
+
+// SetScheduleResumeAt sets the "schedule_resume_at" field.
+func (u *AccountUpsertOne) SetScheduleResumeAt(v time.Time) *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetScheduleResumeAt(v)
+	})
+}
+
+// UpdateScheduleResumeAt sets the "schedule_resume_at" field to the value that was provided on create.
+func (u *AccountUpsertOne) UpdateScheduleResumeAt() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateScheduleResumeAt()
+	})
+}
+
+// ClearScheduleResumeAt clears the value of the "schedule_resume_at" field.
+func (u *AccountUpsertOne) ClearScheduleResumeAt() *AccountUpsertOne {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearScheduleResumeAt()
 	})
 }
 
@@ -2629,6 +2686,27 @@ func (u *AccountUpsertBulk) SetSchedulable(v bool) *AccountUpsertBulk {
 func (u *AccountUpsertBulk) UpdateSchedulable() *AccountUpsertBulk {
 	return u.Update(func(s *AccountUpsert) {
 		s.UpdateSchedulable()
+	})
+}
+
+// SetScheduleResumeAt sets the "schedule_resume_at" field.
+func (u *AccountUpsertBulk) SetScheduleResumeAt(v time.Time) *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.SetScheduleResumeAt(v)
+	})
+}
+
+// UpdateScheduleResumeAt sets the "schedule_resume_at" field to the value that was provided on create.
+func (u *AccountUpsertBulk) UpdateScheduleResumeAt() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.UpdateScheduleResumeAt()
+	})
+}
+
+// ClearScheduleResumeAt clears the value of the "schedule_resume_at" field.
+func (u *AccountUpsertBulk) ClearScheduleResumeAt() *AccountUpsertBulk {
+	return u.Update(func(s *AccountUpsert) {
+		s.ClearScheduleResumeAt()
 	})
 }
 

@@ -99,6 +99,8 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
+		SetDisplayIcon(groupIn.DisplayIcon).
+		SetDisplayCategory(groupIn.DisplayCategory).
 		SetRateMultiplier(groupIn.RateMultiplier).
 		SetSortOrder(groupIn.SortOrder).
 		SetIsExclusive(groupIn.IsExclusive).
@@ -293,6 +295,8 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetName(groupIn.Name).
 		SetDescription(groupIn.Description).
 		SetPlatform(groupIn.Platform).
+		SetDisplayIcon(groupIn.DisplayIcon).
+		SetDisplayCategory(groupIn.DisplayCategory).
 		SetRateMultiplier(groupIn.RateMultiplier).
 		SetIsExclusive(groupIn.IsExclusive).
 		SetStatus(groupIn.Status).

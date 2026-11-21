@@ -4,7 +4,7 @@ import { defineComponent, ref } from 'vue'
 
 import UsageView from '../UsageView.vue'
 
-const { list, exportList, getCacheHitRate, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routerPush, routerReplace, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
+const { list, exportList, getCacheHitRate, getStats, getSnapshotV2, getById, getModelStats, listErrorRecords, routerPush, routerReplace, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -19,7 +19,7 @@ const { list, exportList, getCacheHitRate, getStats, getSnapshotV2, getById, get
     getSnapshotV2: vi.fn(),
     getById: vi.fn(),
     getModelStats: vi.fn(),
-    listErrorLogs: vi.fn(),
+    listErrorRecords: vi.fn(),
     routerPush: vi.fn().mockResolvedValue(undefined),
     routerReplace: vi.fn().mockResolvedValue(undefined),
     routeQuery: {} as Record<string, string>,
@@ -88,7 +88,7 @@ vi.mock('xlsx', () => ({
 }))
 
 vi.mock('@/api/admin/ops', () => ({
-  listErrorLogs,
+  opsAPI: { listErrorRecords },
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -686,7 +686,11 @@ describe('admin UsageView errors tab filter forwarding', () => {
     getStats.mockReset()
     getSnapshotV2.mockReset()
     getModelStats.mockReset()
-    listErrorLogs.mockReset()
+    listErrorRecords.mockReset()
+    routerPush.mockClear()
+    routerReplace.mockClear()
+    vi.mocked(localStorage.getItem).mockReturnValue(null)
+    Object.keys(routeQuery).forEach(key => delete routeQuery[key])
 
     list.mockResolvedValue({ items: [], total: 0, pages: 0 })
     getStats.mockResolvedValue({
@@ -695,15 +699,16 @@ describe('admin UsageView errors tab filter forwarding', () => {
     })
     getSnapshotV2.mockResolvedValue({ trend: [], models: [], groups: [] })
     getModelStats.mockResolvedValue({ models: [] })
-    listErrorLogs.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    listErrorRecords.mockResolvedValue({ items: [], total: 0, pages: 0 })
   })
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.mocked(localStorage.getItem).mockReturnValue(null)
+    Object.keys(routeQuery).forEach(key => delete routeQuery[key])
   })
 
-  it('moves the error entry to Ops with request scope and preserves filters', async () => {
-    const wrapper = mount(UsageView, {
+  const mountErrorView = () => mount(UsageView, {
       global: { stubs: {
         AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
         UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
@@ -713,6 +718,10 @@ describe('admin UsageView errors tab filter forwarding', () => {
         UserTokenRanking: true, OpsErrorLogTable: true, OpsErrorDetailModal: true,
       } },
     })
+
+  it('shows the filtered error requests inline without navigating to Ops', async () => {
+    Object.assign(routeQuery, { start_date: '2026-08-01', end_date: '2026-09-15', user_id: '42', api_key_id: '43', error_phase: 'upstream', error_category: 'quota', status_code: '0' })
+    const wrapper = mountErrorView()
     vi.advanceTimersByTime(120)
     await flushPromises()
 
@@ -723,14 +732,137 @@ describe('admin UsageView errors tab filter forwarding', () => {
     vm.filters.group_id = 3
     await flushPromises()
 
-    // 已授权替换旧内嵌错误页签：带筛选跳转到同一个运维列表。
+    expect(listErrorRecords).not.toHaveBeenCalled()
+    listErrorRecords.mockResolvedValueOnce({ items: [{ id: 81, message: 'inline witness' }], total: 1 })
     const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
     await tabs[1].trigger('click')
     await flushPromises()
 
-    expect(routerPush).toHaveBeenCalledWith({ path: '/admin/ops', query: expect.objectContaining({ errors_scope: 'request', errors_view: 'all', errors_model: 'gpt-5.3-codex', errors_account_id: '7', group_id: '3', tr: 'custom' }) })
-    expect(routerReplace).toHaveBeenCalledWith({ query: expect.objectContaining({ model: 'gpt-5.3-codex', account_id: '7', group_id: '3' }) })
-    expect(listErrorLogs).not.toHaveBeenCalled()
+    expect(routerPush).not.toHaveBeenCalled()
+    expect(routerReplace).not.toHaveBeenCalled()
+    expect(listErrorRecords).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'request', view: 'all', display: 'raw', finance: 'include',
+      model: 'gpt-5.3-codex', account_id: 7, group_id: 3,
+      user_id: 42, api_key_id: 43, phase: 'upstream', category: 'quota', status_codes: '0',
+      start_time: new Date('2026-08-01T00:00:00').toISOString(),
+      end_time: new Date('2026-09-16T00:00:00').toISOString(),
+    }), expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(wrapper.findComponent({ name: 'OpsErrorLogTable' }).props('rows')).toEqual([
+      expect.objectContaining({ id: 81, message: 'inline witness' }),
+    ])
+    const table = wrapper.findComponent({ name: 'OpsErrorLogTable' })
+    table.vm.$emit('openErrorDetail', 81)
+    await flushPromises()
+    const detail = wrapper.findComponent({ name: 'OpsErrorDetailModal' })
+    expect(detail.props()).toMatchObject({ show: true, errorId: 81, errorType: 'request' })
+    detail.vm.$emit('update:show', false)
+    await flushPromises()
+    expect(detail.props('show')).toBe(false)
+    expect(table.props('rows')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it.each([
+    [{ code: 'OPS_DISABLED' }, 'admin.ops.records.disabled'],
+    [{ reason: 'OPS_ERROR_RECORDS_QUERY_TIMEOUT' }, 'usage.errors.queryTimeout'],
+    [{}, 'usage.errors.retryLoad'],
+  ])('shows a safe failure and can retry the same list', async (error, message) => {
+    listErrorRecords.mockRejectedValueOnce({ ...error, message: 'internal diagnostic witness' })
+    const wrapper = mountErrorView()
+    await wrapper.findAll('[data-testid="usage-detail-tab"]')[1].trigger('click')
+    await flushPromises()
+    const alert = wrapper.get('[role="alert"]')
+    expect(alert.text()).toContain(message)
+    expect(wrapper.text()).not.toContain('internal diagnostic witness')
+    expect(wrapper.findComponent({ name: 'OpsErrorLogTable' }).exists()).toBe(false)
+    await alert.get('button').trigger('click')
+    await flushPromises()
+    expect(listErrorRecords).toHaveBeenCalledTimes(2)
+    expect(wrapper.findComponent({ name: 'OpsErrorLogTable' }).props('rows')).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('ends at independent next midnight when local midnight is skipped', async () => {
+    vi.stubEnv('TZ', 'America/Santiago')
+    Object.assign(routeQuery, { start_date: '2026-09-06', end_date: '2026-09-06' })
+    const wrapper = mountErrorView()
+    try {
+      await wrapper.findAll('[data-testid="usage-detail-tab"]')[1].trigger('click')
+      await flushPromises()
+      expect(listErrorRecords).toHaveBeenLastCalledWith(expect.objectContaining({
+        start_time: '2026-09-06T04:00:00.000Z',
+        end_time: '2026-09-07T03:00:00.000Z',
+      }), expect.anything())
+    } finally {
+      wrapper.unmount()
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('rejects a normalized calendar date without requesting errors', async () => {
+    Object.assign(routeQuery, { start_date: '2026-02-30', end_date: '2026-03-15' })
+    const wrapper = mountErrorView()
+    await wrapper.findAll('[data-testid="usage-detail-tab"]')[1].trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('admin.ops.records.invalid')
+    expect(listErrorRecords).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('preserves the error paging and sorting contract and recovers corrupt column preferences', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation(key => key === 'usage-error-hidden-columns' ? '{"bad":true}' : null)
+    const existingConfig = window.__APP_CONFIG__
+    window.__APP_CONFIG__ = { ...existingConfig, table_page_size_options: [10, 50, 1000] } as typeof existingConfig
+    const wrapper = mountErrorView()
+    window.__APP_CONFIG__ = existingConfig
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[1].trigger('click')
+    await flushPromises()
+    const table = wrapper.findComponent({ name: 'OpsErrorLogTable' })
+    expect(table.props('pageSizeOptions')).toEqual([10, 20, 50])
+    expect(table.props('visibleColumnKeys')).not.toContain('user_agent')
+    table.vm.$emit('update:pageSize', 50)
+    table.vm.$emit('update:page', 2)
+    await flushPromises()
+    expect(listErrorRecords).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, page_size: 50 }), expect.anything())
+    table.vm.$emit('sort', 'model', 'asc')
+    await flushPromises()
+    expect(table.props()).toMatchObject({ page: 1, sortBy: 'model', sortOrder: 'asc' })
+    expect(listErrorRecords).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, sort_by: 'model', sort_order: 'asc' }), expect.anything())
+    table.vm.$emit('update:page', 2)
+    wrapper.findComponent(UsageFiltersStub).vm.$emit('change')
+    await flushPromises()
+    expect(listErrorRecords).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, sort_by: 'model' }), expect.anything())
+    await wrapper.get('[data-testid="usage-column-settings"]').trigger('click')
+    await wrapper.get('[data-testid="usage-column-toggle-model"]').trigger('click')
+    await flushPromises()
+    expect(table.props('visibleColumnKeys')).not.toContain('model')
+    expect(listErrorRecords).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, sort_by: 'created_at', sort_order: 'desc' }), expect.anything()
+    )
+    wrapper.unmount()
+  })
+
+  it('retains historical error columns and ignores a late request after a tab switch', async () => {
+    vi.mocked(localStorage.getItem).mockImplementation(key => key === 'usage-error-hidden-columns' ? '["model","user"]' : null)
+    let resolveFirst!: (value: unknown) => void
+    listErrorRecords.mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+    const wrapper = mountErrorView()
+    const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
+    await tabs[1].trigger('click')
+    const firstSignal = listErrorRecords.mock.calls[0][1].signal
+    const table = () => wrapper.findComponent({ name: 'OpsErrorLogTable' })
+    expect(table().props('visibleColumnKeys')).not.toContain('model')
+    expect(table().props('visibleColumnKeys')).toContain('user')
+    await tabs[0].trigger('click')
+    expect(firstSignal.aborted).toBe(true)
+    await tabs[1].trigger('click')
+    await flushPromises()
+    resolveFirst({ items: [{ id: 91 }], total: 1 })
+    await flushPromises()
+    expect(table().props('rows')).toEqual([])
+    wrapper.unmount()
+    vi.mocked(localStorage.getItem).mockReturnValue(null)
   })
 })
 

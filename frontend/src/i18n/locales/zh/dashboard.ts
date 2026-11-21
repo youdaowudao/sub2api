@@ -217,14 +217,16 @@ export default {
     providers: {
       anthropic: 'Anthropic',
       openai: 'OpenAI',
+      gemini: 'Gemini',
       domestic: '国产模型',
       other: '其他'
     },
     providerHints: {
       anthropic: '选择 Anthropic / Claude 的可用分组',
       openai: '选择 OpenAI / GPT 的可用分组',
+      gemini: '选择 Gemini 的可用分组',
       domestic: '包含 DeepSeek、Kimi、智谱 GLM、MiniMax',
-      other: '包含 Gemini、Grok、Antigravity、OpenCode 和混合分组'
+      other: '其他平台的可用分组'
     },
     selectGroup: '选择分组',
     statusLabel: '状态',
@@ -593,6 +595,8 @@ export default {
       keyName: 'Key 名称', keyDeleted: '已删除', allKeys: '全部 Key',
       modelPlaceholder: '搜索模型', allCategories: '全部分类', allStatuses: '全部状态码',
       empty: '暂无错误请求', failedToLoad: '加载错误请求失败',
+      retryLoad: '无法加载错误请求。请重试。',
+      queryTimeout: '查询错误请求超时。请缩短日期范围或筛选账号后重试。',
       categories: {
         auth: '认证失败', rate_limit: '限流', quota: '余额/订阅',
         invalid_request: '参数错误', service_unavailable: '服务暂时不可用',
@@ -791,6 +795,7 @@ export default {
     },
     table: {
       model: '模型',
+      copyModelId: '复制模型 ID {model}',
       input: '输入',
       output: '输出',
       cache: '缓存',

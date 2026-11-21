@@ -598,6 +598,15 @@ export async function setSchedulable(id: number, schedulable: boolean): Promise<
   return data
 }
 
+export type AccountScheduleTimerResult = Pick<Account, 'id' | 'schedulable' | 'schedule_resume_at'>
+
+export async function startScheduleTimer(id: number, durationHours: number): Promise<AccountScheduleTimerResult> {
+  const { data } = await apiClient.post<AccountScheduleTimerResult>(`/admin/accounts/${id}/scheduling-timer`, {
+    duration_hours: durationHours
+  })
+  return data
+}
+
 /**
  * Get available models for an account
  * @param id - Account ID
@@ -1162,6 +1171,7 @@ export const accountsAPI = {
   getTempUnschedulableStatus,
   resetTempUnschedulable,
   setSchedulable,
+  startScheduleTimer,
   getAvailableModels,
   syncUpstreamModels,
   syncUpstreamModelsPreview,

@@ -150,6 +150,11 @@ func Schedulable(v bool) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldSchedulable, v))
 }
 
+// ScheduleResumeAt applies equality check predicate on the "schedule_resume_at" field. It's identical to ScheduleResumeAtEQ.
+func ScheduleResumeAt(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldScheduleResumeAt, v))
+}
+
 // RateLimitedAt applies equality check predicate on the "rate_limited_at" field. It's identical to RateLimitedAtEQ.
 func RateLimitedAt(v time.Time) predicate.Account {
 	return predicate.Account(sql.FieldEQ(FieldRateLimitedAt, v))
@@ -1103,6 +1108,56 @@ func SchedulableEQ(v bool) predicate.Account {
 // SchedulableNEQ applies the NEQ predicate on the "schedulable" field.
 func SchedulableNEQ(v bool) predicate.Account {
 	return predicate.Account(sql.FieldNEQ(FieldSchedulable, v))
+}
+
+// ScheduleResumeAtEQ applies the EQ predicate on the "schedule_resume_at" field.
+func ScheduleResumeAtEQ(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldEQ(FieldScheduleResumeAt, v))
+}
+
+// ScheduleResumeAtNEQ applies the NEQ predicate on the "schedule_resume_at" field.
+func ScheduleResumeAtNEQ(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldNEQ(FieldScheduleResumeAt, v))
+}
+
+// ScheduleResumeAtIn applies the In predicate on the "schedule_resume_at" field.
+func ScheduleResumeAtIn(vs ...time.Time) predicate.Account {
+	return predicate.Account(sql.FieldIn(FieldScheduleResumeAt, vs...))
+}
+
+// ScheduleResumeAtNotIn applies the NotIn predicate on the "schedule_resume_at" field.
+func ScheduleResumeAtNotIn(vs ...time.Time) predicate.Account {
+	return predicate.Account(sql.FieldNotIn(FieldScheduleResumeAt, vs...))
+}
+
+// ScheduleResumeAtGT applies the GT predicate on the "schedule_resume_at" field.
+func ScheduleResumeAtGT(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldGT(FieldScheduleResumeAt, v))
+}
+
+// ScheduleResumeAtGTE applies the GTE predicate on the "schedule_resume_at" field.
+func ScheduleResumeAtGTE(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldGTE(FieldScheduleResumeAt, v))
+}
+
+// ScheduleResumeAtLT applies the LT predicate on the "schedule_resume_at" field.
+func ScheduleResumeAtLT(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldLT(FieldScheduleResumeAt, v))
+}
+
+// ScheduleResumeAtLTE applies the LTE predicate on the "schedule_resume_at" field.
+func ScheduleResumeAtLTE(v time.Time) predicate.Account {
+	return predicate.Account(sql.FieldLTE(FieldScheduleResumeAt, v))
+}
+
+// ScheduleResumeAtIsNil applies the IsNil predicate on the "schedule_resume_at" field.
+func ScheduleResumeAtIsNil() predicate.Account {
+	return predicate.Account(sql.FieldIsNull(FieldScheduleResumeAt))
+}
+
+// ScheduleResumeAtNotNil applies the NotNil predicate on the "schedule_resume_at" field.
+func ScheduleResumeAtNotNil() predicate.Account {
+	return predicate.Account(sql.FieldNotNull(FieldScheduleResumeAt))
 }
 
 // RateLimitedAtEQ applies the EQ predicate on the "rate_limited_at" field.

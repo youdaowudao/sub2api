@@ -355,7 +355,7 @@ function toggleUpstreamDetail(id: number) {
   expandedUpstreamDetailIds.value = next
 }
 
-async function fetchCorrelatedUpstreamErrors(requestErrorId: number) {
+async function fetchCorrelatedUpstreamErrors(requestErrorId: number, signal: AbortSignal) {
   correlatedUpstreamLoading.value = true
   try {
     const res = await opsAPI.listRequestErrorUpstreamErrors(
@@ -363,12 +363,13 @@ async function fetchCorrelatedUpstreamErrors(requestErrorId: number) {
       { page: 1, page_size: 100, view: 'all' },
       { include_detail: true }
     )
-    correlatedUpstream.value = res.items || []
+    if (!signal.aborted) correlatedUpstream.value = res.items || []
   } catch (err) {
+    if (signal.aborted) return
     console.error('[OpsErrorDetailModal] Failed to load correlated upstream errors', err)
     correlatedUpstream.value = []
   } finally {
-    correlatedUpstreamLoading.value = false
+    if (!signal.aborted) correlatedUpstreamLoading.value = false
   }
 }
 
@@ -390,36 +391,35 @@ function prettyJSON(raw?: string): string {
   }
 }
 
-async function fetchDetail(id: number) {
+async function fetchDetail(id: number, kind: 'request' | 'upstream', signal: AbortSignal) {
   loading.value = true
   try {
-    const kind = props.errorType || (detail.value?.phase === 'upstream' ? 'upstream' : 'request')
-    const d = kind === 'upstream' ? await opsAPI.getUpstreamErrorDetail(id) : await opsAPI.getRequestErrorDetail(id)
-    detail.value = d
+    const result = kind === 'upstream' ? await opsAPI.getUpstreamErrorDetail(id) : await opsAPI.getRequestErrorDetail(id)
+    if (!signal.aborted) detail.value = result
   } catch (err: any) {
+    if (signal.aborted) return
     detail.value = null
     appStore.showError(err?.message || t('admin.ops.failedToLoadErrorDetail'))
   } finally {
-    loading.value = false
+    if (!signal.aborted) loading.value = false
   }
 }
 
 watch(
-  () => [props.show, props.errorId] as const,
-  ([show, id]) => {
-    if (!show) {
-      detail.value = null
-      return
-    }
-    if (typeof id === 'number' && id > 0) {
-      expandedUpstreamDetailIds.value = new Set()
-      fetchDetail(id)
-      if (props.errorType === 'request') {
-        fetchCorrelatedUpstreamErrors(id)
-      } else {
-        correlatedUpstream.value = []
-      }
-    }
+  () => [props.show, props.errorId, props.errorType] as const,
+  ([show, id, errorType], _previous, onCleanup) => {
+    const kind = errorType || (detail.value?.phase === 'upstream' ? 'upstream' : 'request')
+    detail.value = null
+    loading.value = false
+    correlatedUpstream.value = []
+    correlatedUpstreamLoading.value = false
+    if (!show || typeof id !== 'number' || id <= 0) return
+
+    const controller = new AbortController()
+    onCleanup(() => controller.abort())
+    expandedUpstreamDetailIds.value = new Set()
+    void fetchDetail(id, kind, controller.signal)
+    if (errorType === 'request') void fetchCorrelatedUpstreamErrors(id, controller.signal)
   },
   { immediate: true }
 )

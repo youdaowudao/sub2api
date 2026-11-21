@@ -589,6 +589,8 @@ export interface Group {
   name: string
   description: string | null
   platform: GroupPlatform
+  display_icon?: string
+  display_category?: string
   rate_multiplier: number
   rpm_limit?: number // Group-level RPM cap (0 = unlimited); overrides user-level rpm_limit when set
   max_reasoning_effort?: string // Anthropic/OpenAI reasoning ceiling; empty means unlimited
@@ -819,6 +821,8 @@ export interface CreateGroupRequest {
   description?: string | null
   i18n?: GroupI18n
   platform?: GroupPlatform
+  display_icon?: string
+  display_category?: string
   rate_multiplier?: number
   is_exclusive?: boolean
   subscription_type?: SubscriptionType
@@ -887,6 +891,8 @@ export interface UpdateGroupRequest {
   description?: string | null
   i18n?: GroupI18n
   platform?: GroupPlatform
+  display_icon?: string
+  display_category?: string
   rate_multiplier?: number
   is_exclusive?: boolean
   status?: 'active' | 'inactive'
@@ -1343,6 +1349,7 @@ export interface Account {
 
   // Rate limit & scheduling fields
   schedulable: boolean
+  schedule_resume_at?: string | null
   rate_limited_at: string | null
   rate_limit_reset_at: string | null
   overload_until: string | null

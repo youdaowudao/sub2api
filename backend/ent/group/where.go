@@ -285,6 +285,16 @@ func SortOrder(v int) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldSortOrder, v))
 }
 
+// DisplayIcon applies equality check predicate on the "display_icon" field. It's identical to DisplayIconEQ.
+func DisplayIcon(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldDisplayIcon, v))
+}
+
+// DisplayCategory applies equality check predicate on the "display_category" field. It's identical to DisplayCategoryEQ.
+func DisplayCategory(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldDisplayCategory, v))
+}
+
 // AllowMessagesDispatch applies equality check predicate on the "allow_messages_dispatch" field. It's identical to AllowMessagesDispatchEQ.
 func AllowMessagesDispatch(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldAllowMessagesDispatch, v))
@@ -2283,6 +2293,136 @@ func SortOrderLT(v int) predicate.Group {
 // SortOrderLTE applies the LTE predicate on the "sort_order" field.
 func SortOrderLTE(v int) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldSortOrder, v))
+}
+
+// DisplayIconEQ applies the EQ predicate on the "display_icon" field.
+func DisplayIconEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldDisplayIcon, v))
+}
+
+// DisplayIconNEQ applies the NEQ predicate on the "display_icon" field.
+func DisplayIconNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldDisplayIcon, v))
+}
+
+// DisplayIconIn applies the In predicate on the "display_icon" field.
+func DisplayIconIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldDisplayIcon, vs...))
+}
+
+// DisplayIconNotIn applies the NotIn predicate on the "display_icon" field.
+func DisplayIconNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldDisplayIcon, vs...))
+}
+
+// DisplayIconGT applies the GT predicate on the "display_icon" field.
+func DisplayIconGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldDisplayIcon, v))
+}
+
+// DisplayIconGTE applies the GTE predicate on the "display_icon" field.
+func DisplayIconGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldDisplayIcon, v))
+}
+
+// DisplayIconLT applies the LT predicate on the "display_icon" field.
+func DisplayIconLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldDisplayIcon, v))
+}
+
+// DisplayIconLTE applies the LTE predicate on the "display_icon" field.
+func DisplayIconLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldDisplayIcon, v))
+}
+
+// DisplayIconContains applies the Contains predicate on the "display_icon" field.
+func DisplayIconContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldDisplayIcon, v))
+}
+
+// DisplayIconHasPrefix applies the HasPrefix predicate on the "display_icon" field.
+func DisplayIconHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldDisplayIcon, v))
+}
+
+// DisplayIconHasSuffix applies the HasSuffix predicate on the "display_icon" field.
+func DisplayIconHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldDisplayIcon, v))
+}
+
+// DisplayIconEqualFold applies the EqualFold predicate on the "display_icon" field.
+func DisplayIconEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldDisplayIcon, v))
+}
+
+// DisplayIconContainsFold applies the ContainsFold predicate on the "display_icon" field.
+func DisplayIconContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldDisplayIcon, v))
+}
+
+// DisplayCategoryEQ applies the EQ predicate on the "display_category" field.
+func DisplayCategoryEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldDisplayCategory, v))
+}
+
+// DisplayCategoryNEQ applies the NEQ predicate on the "display_category" field.
+func DisplayCategoryNEQ(v string) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldDisplayCategory, v))
+}
+
+// DisplayCategoryIn applies the In predicate on the "display_category" field.
+func DisplayCategoryIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldDisplayCategory, vs...))
+}
+
+// DisplayCategoryNotIn applies the NotIn predicate on the "display_category" field.
+func DisplayCategoryNotIn(vs ...string) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldDisplayCategory, vs...))
+}
+
+// DisplayCategoryGT applies the GT predicate on the "display_category" field.
+func DisplayCategoryGT(v string) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldDisplayCategory, v))
+}
+
+// DisplayCategoryGTE applies the GTE predicate on the "display_category" field.
+func DisplayCategoryGTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldDisplayCategory, v))
+}
+
+// DisplayCategoryLT applies the LT predicate on the "display_category" field.
+func DisplayCategoryLT(v string) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldDisplayCategory, v))
+}
+
+// DisplayCategoryLTE applies the LTE predicate on the "display_category" field.
+func DisplayCategoryLTE(v string) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldDisplayCategory, v))
+}
+
+// DisplayCategoryContains applies the Contains predicate on the "display_category" field.
+func DisplayCategoryContains(v string) predicate.Group {
+	return predicate.Group(sql.FieldContains(FieldDisplayCategory, v))
+}
+
+// DisplayCategoryHasPrefix applies the HasPrefix predicate on the "display_category" field.
+func DisplayCategoryHasPrefix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasPrefix(FieldDisplayCategory, v))
+}
+
+// DisplayCategoryHasSuffix applies the HasSuffix predicate on the "display_category" field.
+func DisplayCategoryHasSuffix(v string) predicate.Group {
+	return predicate.Group(sql.FieldHasSuffix(FieldDisplayCategory, v))
+}
+
+// DisplayCategoryEqualFold applies the EqualFold predicate on the "display_category" field.
+func DisplayCategoryEqualFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldEqualFold(FieldDisplayCategory, v))
+}
+
+// DisplayCategoryContainsFold applies the ContainsFold predicate on the "display_category" field.
+func DisplayCategoryContainsFold(v string) predicate.Group {
+	return predicate.Group(sql.FieldContainsFold(FieldDisplayCategory, v))
 }
 
 // AllowMessagesDispatchEQ applies the EQ predicate on the "allow_messages_dispatch" field.

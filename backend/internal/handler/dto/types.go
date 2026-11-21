@@ -100,6 +100,9 @@ type Group struct {
 	IsExclusive    bool    `json:"is_exclusive"`
 	Status         string  `json:"status"`
 
+	DisplayIcon     string `json:"display_icon"`
+	DisplayCategory string `json:"display_category"`
+
 	// I18n 名称与描述的各语言译文。只有管理端输出；用户侧接口经 Localized 把
 	// name/description 换成请求语言的版本后清空本字段。
 	I18n domain.GroupI18n `json:"i18n,omitempty"`
@@ -236,7 +239,8 @@ type Account struct {
 	CreatedAt               time.Time                      `json:"created_at"`
 	UpdatedAt               time.Time                      `json:"updated_at"`
 
-	Schedulable bool `json:"schedulable"`
+	Schedulable      bool       `json:"schedulable"`
+	ScheduleResumeAt *time.Time `json:"schedule_resume_at"`
 
 	RateLimitedAt    *time.Time `json:"rate_limited_at"`
 	RateLimitResetAt *time.Time `json:"rate_limit_reset_at"`
@@ -365,7 +369,8 @@ type AccountListItem struct {
 	CreatedAt               time.Time  `json:"created_at"`
 	UpdatedAt               time.Time  `json:"updated_at"`
 
-	Schedulable bool `json:"schedulable"`
+	Schedulable      bool       `json:"schedulable"`
+	ScheduleResumeAt *time.Time `json:"schedule_resume_at"`
 
 	RateLimitedAt    *time.Time `json:"rate_limited_at"`
 	RateLimitResetAt *time.Time `json:"rate_limit_reset_at"`

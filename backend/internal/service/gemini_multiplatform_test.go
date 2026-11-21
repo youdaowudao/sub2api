@@ -1011,3 +1011,11 @@ func TestGeminiMessagesCompatService_isModelSupportedByAccount(t *testing.T) {
 		})
 	}
 }
+
+func (m *mockAccountRepoForGemini) StartAccountScheduleTimer(context.Context, int64, int) (*AccountScheduleTimerResult, error) {
+	panic("unexpected StartAccountScheduleTimer call")
+}
+
+func (m *mockAccountRepoForGemini) ResumeDueScheduleTimers(context.Context) (int64, error) {
+	return 0, nil
+}

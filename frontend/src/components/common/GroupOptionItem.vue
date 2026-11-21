@@ -1,8 +1,9 @@
 <template>
-  <div class="flex min-w-0 flex-1 items-start justify-between gap-3">
+  <div class="flex min-w-0 flex-1 items-start justify-between gap-3" :class="wrapName && 'flex-wrap'">
     <!-- Left: name + description -->
     <div
       class="flex min-w-0 flex-1 flex-col items-start"
+      :class="wrapName && 'basis-32'"
       :title="description || undefined"
     >
       <!-- Row 1: platform badge (name bold) -->
@@ -11,7 +12,9 @@
         :platform="platform"
         :subscription-type="subscriptionType"
         :show-rate="false"
+        :truncate="!wrapName"
         class="groupOptionItemBadge"
+        :class="wrapName && 'max-w-full text-left'"
       />
       <!-- Row 2: description with top spacing -->
       <span
@@ -23,7 +26,7 @@
     </div>
 
     <!-- Right: rate pill + checkmark (vertically centered to first row) -->
-    <div class="flex shrink-0 items-center gap-2 pt-0.5">
+    <div class="flex shrink-0 items-center gap-2 pt-0.5" :class="wrapName && 'ml-auto'">
       <div class="flex shrink-0 flex-col items-end gap-1">
         <!-- Rate pill (platform color) -->
         <span v-if="rateMultiplier !== undefined" :class="['inline-flex items-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold', ratePillClass]">
@@ -81,6 +84,7 @@ interface Props {
   description?: string | null
   selected?: boolean
   showCheckmark?: boolean
+  wrapName?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -140,7 +144,8 @@ const ratePillClass = computed(() => {
 
 <style scoped>
 /* Bold the group name inside GroupBadge when used in dropdown option */
-.groupOptionItemBadge :deep(span.truncate) {
+.groupOptionItemBadge :deep(span.truncate),
+.groupOptionItemBadge :deep(span.whitespace-normal) {
   font-weight: 600;
 }
 </style>
