@@ -81,17 +81,17 @@ func TestListPluginAccounts_ScopeAndSchedulable(t *testing.T) {
 
 // TestAccountReadableSnapshot_DenylistTripwire fails whenever a new EXPORTED field
 // is added to Account without being classified as either safe-to-expose or
-// stripped by accountReadableSnapshotJSON. Because the snapshot is a denylist, a
+// omitted from the snapshot. Because the snapshot is a denylist, a
 // newly added secret-bearing field would otherwise silently ship to plugins. When
-// this test fails: add the field to `stripped` (and zero it in
-// accountReadableSnapshotJSON) if it can hold secrets/heavy data, otherwise add it
-// to `safeToExpose`.
+// this test fails: add the field to `stripped` after excluding it from JSON if it
+// must stay private or can hold heavy data. Otherwise add it to `safeToExpose`.
 func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 	// Fields the snapshot intentionally strips. Credentials = long-lived secret
 	// (refresh_token) not handed out by ResolveOutboundIdentity. Groups/AccountGroups
 	// = relational graphs with back-references that would cycle under encoding/json.
+	// ScheduleResumeAt is a management-only action omitted by its JSON tag.
 	stripped := map[string]struct{}{
-		"Credentials": {}, "Groups": {}, "AccountGroups": {},
+		"Credentials": {}, "Groups": {}, "AccountGroups": {}, "ScheduleResumeAt": {},
 	}
 	// Fields intentionally exposed as readable metadata (incl. Extra and Proxy —
 	// the proxy password is already handed out via ResolveOutboundIdentity's URL).
@@ -116,23 +116,26 @@ func TestAccountReadableSnapshot_DenylistTripwire(t *testing.T) {
 		_, isSafe := safeToExpose[f.Name]
 		if !isStripped && !isSafe {
 			t.Fatalf("Account.%s is a new exported field not classified for the plugin snapshot: "+
-				"add it to accountReadableSnapshotJSON's denylist (if it holds secrets or is a "+
-				"cyclic/heavy relation) or to safeToExpose (if it is non-secret readable metadata)", f.Name)
+				"classify it as stripped after excluding it from the JSON snapshot, "+
+				"or as safeToExpose if it is readable metadata", f.Name)
 		}
 	}
 
 	// The raw Credentials blob must never serialize; Extra and the proxy ARE released.
+	resumeAt := time.Date(2030, time.March, 17, 12, 0, 0, 0, time.UTC)
 	acct := &Account{
 		ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive,
-		Credentials: map[string]any{"access_token": "AT", "refresh_token": "LEAK-REFRESH"},
-		Extra:       map[string]any{"opaque": "extra-released"},
-		Proxy:       &Proxy{Host: "host", Port: 1, Username: "user", Password: "pw-released"},
+		Credentials:      map[string]any{"access_token": "AT", "refresh_token": "LEAK-REFRESH"},
+		Extra:            map[string]any{"opaque": "extra-released"},
+		Proxy:            &Proxy{Host: "host", Port: 1, Username: "user", Password: "pw-released"},
+		ScheduleResumeAt: &resumeAt,
 	}
 	snap := accountReadableSnapshotJSON(acct)
 	require.NotNil(t, snap)
 	var m map[string]any
 	require.NoError(t, json.Unmarshal(snap, &m))
 	assert.NotContains(t, string(snap), "LEAK-REFRESH", "raw Credentials must never appear in metadata")
+	assert.NotContains(t, string(snap), resumeAt.Format(time.RFC3339), "schedule resume time must stay out of plugin metadata")
 	assert.Contains(t, string(snap), "extra-released", "Extra is intentionally released")
 	assert.Contains(t, string(snap), "pw-released", "proxy is intentionally released (already exposed via 打票)")
 
