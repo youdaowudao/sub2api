@@ -696,6 +696,34 @@ func (_c *GroupCreate) SetNillableSortOrder(v *int) *GroupCreate {
 	return _c
 }
 
+// SetDisplayIcon sets the "display_icon" field.
+func (_c *GroupCreate) SetDisplayIcon(v string) *GroupCreate {
+	_c.mutation.SetDisplayIcon(v)
+	return _c
+}
+
+// SetNillableDisplayIcon sets the "display_icon" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableDisplayIcon(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetDisplayIcon(*v)
+	}
+	return _c
+}
+
+// SetDisplayCategory sets the "display_category" field.
+func (_c *GroupCreate) SetDisplayCategory(v string) *GroupCreate {
+	_c.mutation.SetDisplayCategory(v)
+	return _c
+}
+
+// SetNillableDisplayCategory sets the "display_category" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableDisplayCategory(v *string) *GroupCreate {
+	if v != nil {
+		_c.SetDisplayCategory(*v)
+	}
+	return _c
+}
+
 // SetAllowMessagesDispatch sets the "allow_messages_dispatch" field.
 func (_c *GroupCreate) SetAllowMessagesDispatch(v bool) *GroupCreate {
 	_c.mutation.SetAllowMessagesDispatch(v)
@@ -1185,6 +1213,14 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultSortOrder
 		_c.mutation.SetSortOrder(v)
 	}
+	if _, ok := _c.mutation.DisplayIcon(); !ok {
+		v := group.DefaultDisplayIcon
+		_c.mutation.SetDisplayIcon(v)
+	}
+	if _, ok := _c.mutation.DisplayCategory(); !ok {
+		v := group.DefaultDisplayCategory
+		_c.mutation.SetDisplayCategory(v)
+	}
 	if _, ok := _c.mutation.AllowMessagesDispatch(); !ok {
 		v := group.DefaultAllowMessagesDispatch
 		_c.mutation.SetAllowMessagesDispatch(v)
@@ -1403,6 +1439,22 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.SortOrder(); !ok {
 		return &ValidationError{Name: "sort_order", err: errors.New(`ent: missing required field "Group.sort_order"`)}
+	}
+	if _, ok := _c.mutation.DisplayIcon(); !ok {
+		return &ValidationError{Name: "display_icon", err: errors.New(`ent: missing required field "Group.display_icon"`)}
+	}
+	if v, ok := _c.mutation.DisplayIcon(); ok {
+		if err := group.DisplayIconValidator(v); err != nil {
+			return &ValidationError{Name: "display_icon", err: fmt.Errorf(`ent: validator failed for field "Group.display_icon": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.DisplayCategory(); !ok {
+		return &ValidationError{Name: "display_category", err: errors.New(`ent: missing required field "Group.display_category"`)}
+	}
+	if v, ok := _c.mutation.DisplayCategory(); ok {
+		if err := group.DisplayCategoryValidator(v); err != nil {
+			return &ValidationError{Name: "display_category", err: fmt.Errorf(`ent: validator failed for field "Group.display_category": %w`, err)}
+		}
 	}
 	if _, ok := _c.mutation.AllowMessagesDispatch(); !ok {
 		return &ValidationError{Name: "allow_messages_dispatch", err: errors.New(`ent: missing required field "Group.allow_messages_dispatch"`)}
@@ -1703,6 +1755,14 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.SortOrder(); ok {
 		_spec.SetField(group.FieldSortOrder, field.TypeInt, value)
 		_node.SortOrder = value
+	}
+	if value, ok := _c.mutation.DisplayIcon(); ok {
+		_spec.SetField(group.FieldDisplayIcon, field.TypeString, value)
+		_node.DisplayIcon = value
+	}
+	if value, ok := _c.mutation.DisplayCategory(); ok {
+		_spec.SetField(group.FieldDisplayCategory, field.TypeString, value)
+		_node.DisplayCategory = value
 	}
 	if value, ok := _c.mutation.AllowMessagesDispatch(); ok {
 		_spec.SetField(group.FieldAllowMessagesDispatch, field.TypeBool, value)
@@ -2787,6 +2847,30 @@ func (u *GroupUpsert) UpdateSortOrder() *GroupUpsert {
 // AddSortOrder adds v to the "sort_order" field.
 func (u *GroupUpsert) AddSortOrder(v int) *GroupUpsert {
 	u.Add(group.FieldSortOrder, v)
+	return u
+}
+
+// SetDisplayIcon sets the "display_icon" field.
+func (u *GroupUpsert) SetDisplayIcon(v string) *GroupUpsert {
+	u.Set(group.FieldDisplayIcon, v)
+	return u
+}
+
+// UpdateDisplayIcon sets the "display_icon" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateDisplayIcon() *GroupUpsert {
+	u.SetExcluded(group.FieldDisplayIcon)
+	return u
+}
+
+// SetDisplayCategory sets the "display_category" field.
+func (u *GroupUpsert) SetDisplayCategory(v string) *GroupUpsert {
+	u.Set(group.FieldDisplayCategory, v)
+	return u
+}
+
+// UpdateDisplayCategory sets the "display_category" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateDisplayCategory() *GroupUpsert {
+	u.SetExcluded(group.FieldDisplayCategory)
 	return u
 }
 
@@ -4070,6 +4154,34 @@ func (u *GroupUpsertOne) AddSortOrder(v int) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateSortOrder() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateSortOrder()
+	})
+}
+
+// SetDisplayIcon sets the "display_icon" field.
+func (u *GroupUpsertOne) SetDisplayIcon(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetDisplayIcon(v)
+	})
+}
+
+// UpdateDisplayIcon sets the "display_icon" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateDisplayIcon() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateDisplayIcon()
+	})
+}
+
+// SetDisplayCategory sets the "display_category" field.
+func (u *GroupUpsertOne) SetDisplayCategory(v string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetDisplayCategory(v)
+	})
+}
+
+// UpdateDisplayCategory sets the "display_category" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateDisplayCategory() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateDisplayCategory()
 	})
 }
 
@@ -5558,6 +5670,34 @@ func (u *GroupUpsertBulk) AddSortOrder(v int) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateSortOrder() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateSortOrder()
+	})
+}
+
+// SetDisplayIcon sets the "display_icon" field.
+func (u *GroupUpsertBulk) SetDisplayIcon(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetDisplayIcon(v)
+	})
+}
+
+// UpdateDisplayIcon sets the "display_icon" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateDisplayIcon() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateDisplayIcon()
+	})
+}
+
+// SetDisplayCategory sets the "display_category" field.
+func (u *GroupUpsertBulk) SetDisplayCategory(v string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetDisplayCategory(v)
+	})
+}
+
+// UpdateDisplayCategory sets the "display_category" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateDisplayCategory() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateDisplayCategory()
 	})
 }
 

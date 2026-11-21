@@ -242,6 +242,14 @@ func (Group) Fields() []ent.Field {
 		field.Int("sort_order").
 			Default(0).
 			Comment("分组显示排序，数值越小越靠前"),
+		field.String("display_icon").
+			MaxRuneLen(32).
+			Default("").
+			Comment("密钥页显示的分组图标，空值跟随平台"),
+		field.String("display_category").
+			MaxRuneLen(32).
+			Default("").
+			Comment("密钥页显示的分组分类，空值按平台归类"),
 
 		// OpenAI Messages 调度配置 (added by migration 069)
 		field.Bool("allow_messages_dispatch").

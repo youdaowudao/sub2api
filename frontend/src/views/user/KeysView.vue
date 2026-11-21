@@ -155,13 +155,14 @@
                 data-tour="key-group"
                 :ref="(el) => setGroupButtonRef(row.id, el)"
                 @click="openGroupSelector(row)"
-                class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
+                class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 max-md:max-w-full max-md:flex-wrap max-md:justify-end dark:hover:bg-dark-700"
                 :title="t('keys.clickToChangeGroup')"
               >
                 <GroupBadge
                   v-if="row.group"
+                  class="max-md:max-w-full max-md:flex-wrap"
                   :name="row.group.name"
-                  :platform="row.group.platform"
+                  :platform="groupIconPlatform(row.group)"
                   :subscription-type="row.group.subscription_type"
                   :rate-multiplier="row.group.rate_multiplier"
                   :user-rate-multiplier="userGroupRates[row.group.id]"
@@ -490,7 +491,10 @@
 
         <fieldset v-if="!showEditModal" data-tour="key-form-provider">
           <legend class="input-label">{{ t('keys.providerLabel') }}</legend>
-          <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div
+            class="grid gap-2"
+            :class="createProviderOptions.length === 5 ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'"
+          >
             <label
               v-for="provider in createProviderOptions"
               :key="provider.value"
@@ -1164,16 +1168,17 @@
         v-if="groupSelectorKeyId !== null && dropdownPosition"
         ref="dropdownRef"
         data-tour="key-group-dropdown"
-        class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-max max-w-[calc(100vw-16px)] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 sm:min-w-[380px] dark:bg-dark-800 dark:ring-white/10"
+        class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] flex w-max min-w-[min(380px,calc(100vw-16px))] max-w-[calc(100vw-16px)] flex-col overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 dark:bg-dark-800 dark:ring-white/10"
         style="pointer-events: auto !important;"
         :style="{
           top: dropdownPosition.top !== undefined ? dropdownPosition.top + 'px' : undefined,
           bottom: dropdownPosition.bottom !== undefined ? dropdownPosition.bottom + 'px' : undefined,
-          left: dropdownPosition.left + 'px'
+          left: dropdownPosition.left + 'px',
+          maxHeight: `calc(100dvh - ${(dropdownPosition.top ?? dropdownPosition.bottom ?? 0) + 8}px)`
         }"
       >
         <!-- Search box -->
-        <div class="border-b border-gray-100 p-2 dark:border-dark-700">
+        <div class="shrink-0 border-b border-gray-100 p-2 [contain:inline-size] dark:border-dark-700">
           <div class="relative">
             <svg class="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1187,14 +1192,47 @@
             />
           </div>
         </div>
-        <!-- Group list -->
-        <div class="max-h-80 overflow-y-auto p-1.5">
-          <template v-for="section in filteredGroupSections" :key="section.platform">
-          <div role="presentation" class="px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">{{ section.label }}</div>
+        <div
+          v-if="groupPickerCategories.length"
+          class="flex shrink-0 flex-wrap items-center gap-1 border-b border-gray-100 px-2 py-2 dark:border-dark-700"
+        >
           <button
-            v-for="option in section.groups"
+            v-for="section in groupPickerCategories"
+            :key="section.category"
+            type="button"
+            class="inline-flex flex-none items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1.5 text-xs font-semibold ring-inset"
+            :class="[
+              platformBadgeLightClass(GROUP_DISPLAY_CATEGORY_ICONS[section.category][0]),
+              activeGroupCategory === section.category && 'ring-1 ring-current',
+              searchingGroupPicker && 'opacity-50',
+            ]"
+            :aria-pressed="activeGroupCategory === section.category"
+            :disabled="searchingGroupPicker"
+            @pointerenter="scheduleGroupCategory(section.category, $event)"
+            @pointerleave="cancelGroupCategoryHover"
+            @click="selectGroupCategory(section.category)"
+          >
+            <PlatformIcon
+              v-for="platform in GROUP_DISPLAY_CATEGORY_ICONS[section.category]"
+              :key="platform"
+              :platform="platform"
+              size="xs"
+              aria-hidden="true"
+            />
+            {{ groupCategoryLabel(section.category) }} {{ section.groups.length }}
+          </button>
+        </div>
+        <!-- Group list -->
+        <div
+          ref="groupPickerListRef"
+          class="min-h-0 max-h-80 overflow-y-auto p-1.5 [contain:inline-size]"
+          :class="groupPickerCategories.length > 1 && 'h-80'"
+        >
+          <button
+            v-for="option in visibleGroupPickerOptions"
+            :key="option.value"
+            type="button"
             data-tour="key-group-option"
-            :key="option.value ?? 'null'"
             @click="changeGroup(selectedKeyForGroup!, option.value)"
             :class="[
               'flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors',
@@ -1204,7 +1242,7 @@
                 ? 'bg-primary-50 dark:bg-primary-900/20'
                 : 'hover:bg-gray-100 dark:hover:bg-dark-700'
             ]"
-            :title="option.description || undefined"
+            :title="option.description || option.label"
           >
             <GroupOptionItem
               :name="option.label"
@@ -1217,15 +1255,15 @@
               :peak-end="option.peakEnd"
               :peak-rate-multiplier="option.peakRateMultiplier"
               :description="option.description"
+              wrap-name
               :selected="
                 selectedKeyForGroup?.group_id === option.value ||
                 (!selectedKeyForGroup?.group_id && option.value === null)
               "
             />
           </button>
-          </template>
           <!-- Empty state when search has no results -->
-          <div v-if="filteredGroupOptions.length === 0" class="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
+          <div v-if="visibleGroupPickerOptions.length === 0" class="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
             {{ t('keys.noGroupFound') }}
           </div>
         </div>
@@ -1235,7 +1273,10 @@
 </template>
 
 <script setup lang="ts">
-import { buildGroupSelectOptions, groupByPlatformForDisplay, sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+import {
+  buildGroupSelectOptionsByCategory, GROUP_DISPLAY_CATEGORY_ICONS, groupCategory, groupGroupsByCategory, groupIconPlatform,
+} from '@/utils/groupDisplay'
 	import { beginGuideAction, completeGuideAction } from '@/features/guide/businessEvents'
 import { ref, reactive, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
 	import { useI18n } from 'vue-i18n'
@@ -1457,7 +1498,7 @@ const groupSelectorKeyId = ref<number | null>(null)
 const publicSettings = ref<PublicSettings | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
 const columnDropdownRef = ref<HTMLElement | null>(null)
-const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
+const dropdownPosition = ref<{ top?: number; bottom?: number; left: number; anchorLeft: number } | null>(null)
 const groupButtonRefs = ref<Map<number, HTMLElement>>(new Map())
 let abortController: AbortController | null = null
 
@@ -1526,10 +1567,11 @@ const shouldSubmitEditStatus = (key: ApiKey, status: 'active' | 'inactive') => {
 }
 
 // Filter dropdown options
+const groupCategoryLabel = (category: KeyGroupProvider) => t(`keys.providers.${category}`)
 const groupFilterOptions = computed(() => [
   { value: '', label: t('keys.allGroups') },
   { value: 0, label: t('keys.noGroup') },
-  ...buildGroupSelectOptions(groups.value, (g) => ({ value: g.id, label: g.name }), t('common.unknownPlatform'))
+  ...buildGroupSelectOptionsByCategory(groups.value, (group) => ({ value: group.id, label: group.name }), groupCategoryLabel)
 ])
 
 const statusFilterOptions = computed(() => [
@@ -1569,21 +1611,21 @@ const groupOptions = computed(() =>
     peakEnd: group.peak_end,
     peakRateMultiplier: group.peak_rate_multiplier,
     subscriptionType: group.subscription_type,
-    platform: group.platform
+    platform: groupIconPlatform(group)
   }))
 )
 
 const createProvider = ref<KeyGroupProvider>('anthropic')
 const createProviderOptions = computed(() => KEY_GROUP_PROVIDERS.map((value) => ({
   value,
-  label: t(`keys.providers.${value}`),
-  count: groups.value.filter((group) => getKeyGroupProvider(group.platform) === value).length
-})))
+  label: groupCategoryLabel(value),
+  count: groups.value.filter((group) => getKeyGroupProvider(group) === value).length
+})).filter(provider => provider.value !== 'other' || provider.count > 0))
 
 const formGroupOptions = computed(() => {
-  const eligible = showEditModal.value ? groups.value : groups.value.filter(group => getKeyGroupProvider(group.platform) === createProvider.value)
+  const eligible = showEditModal.value ? groups.value : groups.value.filter(group => getKeyGroupProvider(group) === createProvider.value)
   const optionsByID = new Map(groupOptions.value.map(option => [option.value, option]))
-  return buildGroupSelectOptions(eligible, group => optionsByID.get(group.id)!, t('common.unknownPlatform'))
+  return buildGroupSelectOptionsByCategory(eligible, group => optionsByID.get(group.id)!, groupCategoryLabel)
 })
 
 const selectCreateProvider = (provider: KeyGroupProvider) => {
@@ -1623,12 +1665,56 @@ watch([showCreateModal, groups, publicSettings], () => {
   if (formData.value.group_id !== null) return
   const group = pickFirstGptGroup(groups.value, publicSettings.value.quick_import_image_group_id)
   if (!group) return
-  selectCreateProvider('openai')
+  selectCreateProvider(groupCategory(group))
   formData.value.group_id = group.id
 })
 
 // Group dropdown search
 const groupSearchQuery = ref('')
+const searchingGroupPicker = computed(() => groupSearchQuery.value.trim() !== '')
+const groupPickerListRef = ref<HTMLElement | null>(null)
+const activeGroupCategory = ref<KeyGroupProvider | null>(null)
+const groupPickerCategories = computed(() => groupGroupsByCategory(groups.value))
+let groupCategoryHoverTimer: ReturnType<typeof setTimeout> | undefined
+
+function cancelGroupCategoryHover() {
+  clearTimeout(groupCategoryHoverTimer)
+  groupCategoryHoverTimer = undefined
+}
+
+function selectGroupCategory(category: KeyGroupProvider) {
+  cancelGroupCategoryHover()
+  if (!searchingGroupPicker.value) activeGroupCategory.value = category
+}
+
+function scheduleGroupCategory(category: KeyGroupProvider, event: PointerEvent) {
+  cancelGroupCategoryHover()
+  if (event.pointerType === 'touch' || searchingGroupPicker.value || category === activeGroupCategory.value) return
+  groupCategoryHoverTimer = setTimeout(() => selectGroupCategory(category), 150)
+}
+
+watch([groupSelectorKeyId, groupPickerCategories], ([keyID, categories], [previousKeyID]) => {
+  cancelGroupCategoryHover()
+  if (keyID === null) {
+    activeGroupCategory.value = null
+  } else if (keyID !== previousKeyID || !categories.some(section => section.category === activeGroupCategory.value)) {
+    const current = categories.find(section => section.groups.some(group => group.id === selectedKeyForGroup.value?.group_id))
+    activeGroupCategory.value = current?.category ?? categories[0]?.category ?? null
+  }
+})
+
+watch(searchingGroupPicker, cancelGroupCategoryHover)
+watch([activeGroupCategory, searchingGroupPicker], () => {
+  if (groupPickerListRef.value) groupPickerListRef.value.scrollTop = 0
+})
+
+watch([dropdownRef, groupPickerCategories], () => {
+  const panel = dropdownRef.value
+  const position = dropdownPosition.value
+  if (!panel || !position) return
+  position.left = Math.max(8, Math.min(position.anchorLeft, window.innerWidth - panel.offsetWidth - 8))
+}, { flush: 'post' })
+
 const filteredGroupOptions = computed(() => {
   const query = groupSearchQuery.value.trim().toLowerCase()
   if (!query) return groupOptions.value
@@ -1638,8 +1724,13 @@ const filteredGroupOptions = computed(() => {
   })
 })
 
-const filteredGroupSections = computed(() => groupByPlatformForDisplay(
-  filteredGroupOptions.value.map(option => ({ ...option, id: option.value })), t('common.unknownPlatform')))
+const visibleGroupPickerOptions = computed(() => {
+  const optionsByID = new Map(filteredGroupOptions.value.map(option => [option.value, option]))
+  const sections = searchingGroupPicker.value
+    ? groupPickerCategories.value
+    : groupPickerCategories.value.filter(section => section.category === activeGroupCategory.value)
+  return sections.flatMap(section => section.groups.flatMap(group => optionsByID.get(group.id) ?? []))
+})
 
 const copyToClipboard = async (text: string, keyId: number) => {
   const guideTicket = beginGuideAction('key-copy', keyId)
@@ -1823,13 +1914,15 @@ const openGroupSelector = (key: ApiKey) => {
         // Not enough space below, pop upward
         dropdownPosition.value = {
           bottom: window.innerHeight - rect.top + 4,
-          left
+          left,
+          anchorLeft: rect.left
         }
       } else {
         // Default: pop downward
         dropdownPosition.value = {
           top: rect.bottom + 4,
-          left
+          left,
+          anchorLeft: rect.left
         }
       }
     }
@@ -2179,6 +2272,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', closeGroupSelector)
+  cancelGroupCategoryHover()
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>

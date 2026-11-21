@@ -376,4 +376,125 @@ describe('group order editor and isolated candidates', () => {
   })
 })
 
+describe('group display settings', () => {
+  const createRequest = vi.mocked(adminAPI.groups.create)
+  const updateRequest = vi.mocked(adminAPI.groups.update)
+  const icon = (form: 'create' | 'edit') => wrapper.get<HTMLSelectElement>(`#${form}-group-display-icon`)
+  const category = (form: 'create' | 'edit') => wrapper.get<HTMLSelectElement>(`#${form}-group-display-category`)
+  const showList = (group: AdminGroup) =>
+    listGroups.mockResolvedValue({ items: [group], total: 1, page: 1, page_size: 20, pages: 1 })
+  const openEditor = async () => {
+    const edit = wrapper.findAll('button').find(button => button.text().includes('common.edit'))
+    expect(edit).toBeDefined()
+    await edit!.trigger('click')
+    await flushPromises()
+  }
+  const submit = async (form: 'create' | 'edit') => {
+    await wrapper.get(`#${form}-group-form`).trigger('submit')
+    await flushPromises()
+  }
+
+  it.each([false, true])('creates display settings and edits persisted values (simple mode %s)', async (simple) => {
+    authState.isSimpleMode = simple
+    const group = createGroup({ platform: 'openai', display_icon: 'gemini', display_category: 'gemini' })
+    showList(group)
+    createRequest.mockResolvedValueOnce(group)
+    updateRequest.mockResolvedValueOnce(group)
+    wrapper = await mountView()
+
+    await wrapper.get('[data-tour="groups-create-btn"]').trigger('click')
+    await flushPromises()
+    expect(Array.from(icon('create').element.options, option => option.value)).toEqual([
+      '', 'anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu',
+      'minimax', 'deepseek', 'opencode_go', 'command_code', 'cline',
+    ])
+    expect(Array.from(category('create').element.options, option => option.value))
+      .toEqual(['', 'openai', 'anthropic', 'gemini', 'domestic'])
+    expect(icon('create').element.value).toBe('')
+    expect(category('create').element.value).toBe('')
+    await wrapper.get('[data-tour="group-form-name"]').setValue('Compatible group')
+    await icon('create').setValue('gemini')
+    await category('create').setValue('gemini')
+    await submit('create')
+    expect(createRequest).toHaveBeenCalledTimes(1)
+    expect(createRequest).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Compatible group', display_icon: 'gemini', display_category: 'gemini',
+    }))
+    expect(wrapper.find('#create-group-form').exists()).toBe(false)
+
+    await openEditor()
+    expect(icon('edit').element.value).toBe('gemini')
+    expect(category('edit').element.value).toBe('gemini')
+    await icon('edit').setValue('deepseek')
+    await category('edit').setValue('domestic')
+    await submit('edit')
+    expect(updateRequest).toHaveBeenCalledTimes(1)
+    expect(updateRequest).toHaveBeenCalledWith(group.id, expect.objectContaining({
+      display_icon: 'deepseek', display_category: 'domestic',
+    }))
+    expect(wrapper.find('#edit-group-form').exists()).toBe(false)
+  })
+
+  it('round-trips simple-mode updates and explicit follow-platform selections through reloads', async () => {
+    authState.isSimpleMode = true
+    const group = createGroup({ platform: 'openai', display_icon: '  gemini  ', display_category: ' gemini ' })
+    showList(group)
+    updateRequest.mockImplementation(async (_id, data) => {
+      const saved = { ...group, display_icon: data.display_icon, display_category: data.display_category }
+      showList(saved)
+      return saved
+    })
+    try {
+      wrapper = await mountView()
+      await openEditor()
+      expect(icon('edit').element.value).toBe('gemini')
+      expect(category('edit').element.value).toBe('gemini')
+      await icon('edit').setValue('deepseek')
+      await category('edit').setValue('domestic')
+      await submit('edit')
+      expect(listGroups).toHaveBeenCalledTimes(2)
+      await openEditor()
+      expect(icon('edit').element.value).toBe('deepseek')
+      expect(category('edit').element.value).toBe('domestic')
+      await icon('edit').setValue('')
+      await category('edit').setValue('')
+      await submit('edit')
+      expect(updateRequest).toHaveBeenLastCalledWith(group.id, expect.objectContaining({ display_icon: '', display_category: '' }))
+      expect(listGroups).toHaveBeenCalledTimes(3)
+      await openEditor()
+      expect(icon('edit').element.value).toBe('')
+      expect(category('edit').element.value).toBe('')
+    } finally {
+      updateRequest.mockReset()
+    }
+  })
+
+  it.each([false, true])('shows follow platform for invalid stored strings and keeps values after failure (simple mode %s)', async (simple) => {
+    authState.isSimpleMode = simple
+    const group = createGroup({ platform: 'openai', display_icon: 'typesafe', display_category: 'xyz' })
+    showList(group)
+    updateRequest.mockRejectedValueOnce(new Error('Save failed')).mockResolvedValueOnce(group)
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      wrapper = await mountView()
+      await openEditor()
+      expect(icon('edit').element.selectedOptions[0].textContent).toBe('admin.groups.form.followPlatform')
+      expect(category('edit').element.selectedOptions[0].textContent).toBe('admin.groups.form.followPlatform')
+      await wrapper.get('[data-tour="edit-group-form-name"]').setValue('Renamed group')
+      await submit('edit')
+      expect(showError).toHaveBeenCalled()
+      expect(wrapper.get<HTMLInputElement>('[data-tour="edit-group-form-name"]').element.value).toBe('Renamed group')
+      expect(icon('edit').element.value).toBe('')
+      expect(category('edit').element.value).toBe('')
+      await submit('edit')
+      expect(updateRequest).toHaveBeenLastCalledWith(group.id, expect.objectContaining({
+        name: 'Renamed group', display_icon: '', display_category: '',
+      }))
+      expect(wrapper.find('#edit-group-form').exists()).toBe(false)
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+})
+
 vi.mock('@/composables/useCacheHitRateDefaultRange', () => ({ useCacheHitRateDefaultRange: () => ({ dates: { value: { start: '2026-10-26', end: '2026-10-26' } } }) }))

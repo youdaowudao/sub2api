@@ -529,6 +529,36 @@
           />
           <p class="input-hint">{{ t("admin.groups.platformHint") }}</p>
         </div>
+        <div>
+          <label class="input-label" for="create-group-display-icon">{{ t("admin.groups.form.displayIcon") }}</label>
+          <Select
+            id="create-group-display-icon"
+            v-model="createForm.display_icon"
+            :aria-label="t('admin.groups.form.displayIcon')"
+            :options="displayIconOptions"
+          >
+            <template #selected="{ option }">
+              <span v-if="option" class="inline-flex items-center gap-2">
+                <PlatformIcon :platform="createForm.display_icon || createForm.platform" size="sm" aria-hidden="true" />
+                {{ option.label }}
+              </span>
+            </template>
+            <template #option="{ option }">
+              <PlatformIcon :platform="(option.value as GroupPlatform) || createForm.platform" size="sm" aria-hidden="true" />
+              <span>{{ option.label }}</span>
+            </template>
+          </Select>
+        </div>
+        <div>
+          <label class="input-label" for="create-group-display-category">{{ t("admin.groups.form.displayCategory") }}</label>
+          <Select
+            id="create-group-display-category"
+            v-model="createForm.display_category"
+            :aria-label="t('admin.groups.form.displayCategory')"
+            :options="displayCategoryOptions"
+          />
+          <p class="input-hint">{{ t('admin.groups.form.displayHint') }}</p>
+        </div>
         <!-- 从分组复制账号 -->
         <div v-if="!authStore.isSimpleMode && copyAccountsGroupOptions.length > 0">
           <div class="mb-1.5 flex items-center gap-1">
@@ -2197,6 +2227,36 @@
             data-tour="group-form-platform"
           />
           <p class="input-hint">{{ t("admin.groups.platformNotEditable") }}</p>
+        </div>
+        <div>
+          <label class="input-label" for="edit-group-display-icon">{{ t("admin.groups.form.displayIcon") }}</label>
+          <Select
+            id="edit-group-display-icon"
+            v-model="editForm.display_icon"
+            :aria-label="t('admin.groups.form.displayIcon')"
+            :options="displayIconOptions"
+          >
+            <template #selected="{ option }">
+              <span v-if="option" class="inline-flex items-center gap-2">
+                <PlatformIcon :platform="editForm.display_icon || editForm.platform" size="sm" aria-hidden="true" />
+                {{ option.label }}
+              </span>
+            </template>
+            <template #option="{ option }">
+              <PlatformIcon :platform="(option.value as GroupPlatform) || editForm.platform" size="sm" aria-hidden="true" />
+              <span>{{ option.label }}</span>
+            </template>
+          </Select>
+        </div>
+        <div>
+          <label class="input-label" for="edit-group-display-category">{{ t("admin.groups.form.displayCategory") }}</label>
+          <Select
+            id="edit-group-display-category"
+            v-model="editForm.display_category"
+            :aria-label="t('admin.groups.form.displayCategory')"
+            :options="displayCategoryOptions"
+          />
+          <p class="input-hint">{{ t('admin.groups.form.displayHint') }}</p>
         </div>
         <template v-if="!authStore.isSimpleMode">
         <!-- 从分组复制账号（编辑时） -->
@@ -4316,6 +4376,7 @@
 
 <script setup lang="ts">
 import { groupByPlatformForDisplay, sortGroupsForDisplay, sortGroupIdsForDisplay } from '@/utils/groupDisplayOrder';
+import { GROUP_DISPLAY_CATEGORIES, GROUP_DISPLAY_ICON_PLATFORMS } from "@/utils/groupDisplay";
 import { GroupListChangedError } from '@/api/admin/groups';
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -4702,6 +4763,27 @@ const platformOptions = computed(() =>
   ),
 );
 
+const followPlatformOption = computed(() => ({
+  value: "",
+  label: t("admin.groups.form.followPlatform"),
+}));
+
+const displayIconOptions = computed(() => [
+  followPlatformOption.value,
+  ...GROUP_DISPLAY_ICON_PLATFORMS.map((value) => ({
+    value,
+    label: CONCRETE_PLATFORM_OPTIONS.find((option) => option.value === value)?.label ?? value,
+  })),
+]);
+
+const displayCategoryOptions = computed(() => [
+  followPlatformOption.value,
+  ...GROUP_DISPLAY_CATEGORIES.filter((value) => value !== "other").map((value) => ({
+    value,
+    label: t(`keys.providers.${value}`),
+  })),
+]);
+
 const platformFilterOptions = computed(() => [
   { value: "", label: t("admin.groups.allPlatforms") },
   ...GROUP_PLATFORM_OPTIONS,
@@ -5066,6 +5148,8 @@ const createForm = reactive({
   description: "",
   i18n: {} as GroupI18n,
   platform: "anthropic" as GroupPlatform,
+  display_icon: "",
+  display_category: "",
   rate_multiplier: 1.0,
   is_exclusive: false,
   subscription_type: "standard" as SubscriptionType,
@@ -5433,6 +5517,8 @@ const editForm = reactive({
   description: "",
   i18n: {} as GroupI18n,
   platform: "anthropic" as GroupPlatform,
+  display_icon: "",
+  display_category: "",
   rate_multiplier: 1.0,
   is_exclusive: false,
   status: "active" as "active" | "inactive",
@@ -5916,6 +6002,8 @@ const closeCreateModal = () => {
   createForm.description = "";
   createForm.i18n = {};
   createForm.platform = "anthropic";
+  createForm.display_icon = "";
+  createForm.display_category = "";
   createForm.rate_multiplier = 1.0;
   createForm.is_exclusive = false;
   createForm.subscription_type = "standard";
@@ -6179,6 +6267,8 @@ const handleCreateGroup = async () => {
           description: createForm.description,
           i18n: createForm.i18n,
           platform: createForm.platform,
+          display_icon: createForm.display_icon,
+          display_category: createForm.display_category,
         }
       : requestData;
     await adminAPI.groups.create(payload);
@@ -6212,6 +6302,8 @@ const handleEdit = async (group: AdminGroup) => {
     ]),
   );
   editForm.platform = group.platform;
+  editForm.display_icon = displayIconOptions.value.find((option) => option.value === group.display_icon?.trim())?.value ?? "";
+  editForm.display_category = displayCategoryOptions.value.find((option) => option.value === group.display_category?.trim())?.value ?? "";
   editForm.rate_multiplier = group.rate_multiplier;
   editForm.is_exclusive = group.is_exclusive;
   editForm.status = group.status;
@@ -6338,6 +6430,8 @@ const closeEditModal = () => {
   clearAllAccountSearchState();
   showEditModal.value = false;
   editingGroup.value = null;
+  editForm.display_icon = "";
+  editForm.display_category = "";
   editForm.max_reasoning_effort = "";
   editForm.max_reasoning_effort_over_limit = reasoningEffortOverLimitDowngrade;
   editForm.reasoning_effort_mappings = [];
@@ -6546,6 +6640,8 @@ const handleUpdateGroup = async () => {
           name: editForm.name,
           description: editForm.description,
           i18n: editForm.i18n,
+          display_icon: editForm.display_icon,
+          display_category: editForm.display_category,
         }
       : payload;
     await adminAPI.groups.update(editingGroup.value.id, requestData);

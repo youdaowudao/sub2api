@@ -217,14 +217,16 @@ export default {
     providers: {
       anthropic: 'Anthropic',
       openai: 'OpenAI',
+      gemini: 'Gemini',
       domestic: '国产模型',
       other: '其他'
     },
     providerHints: {
       anthropic: '选择 Anthropic / Claude 的可用分组',
       openai: '选择 OpenAI / GPT 的可用分组',
+      gemini: '选择 Gemini 的可用分组',
       domestic: '包含 DeepSeek、Kimi、智谱 GLM、MiniMax',
-      other: '包含 Gemini、Grok、Antigravity、OpenCode 和混合分组'
+      other: '其他平台的可用分组'
     },
     selectGroup: '选择分组',
     statusLabel: '状态',

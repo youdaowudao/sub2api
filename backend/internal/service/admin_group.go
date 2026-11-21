@@ -381,6 +381,7 @@ func normalizeCreateGroupInputForSimpleMode(input *CreateGroupInput) {
 	}
 	*input = CreateGroupInput{
 		Name: input.Name, Description: input.Description, I18n: input.I18n, Platform: input.Platform,
+		DisplayIcon: input.DisplayIcon, DisplayCategory: input.DisplayCategory,
 		RateMultiplier: 1, SubscriptionType: SubscriptionTypeStandard,
 	}
 }
@@ -389,10 +390,21 @@ func normalizeUpdateGroupInputForSimpleMode(input *UpdateGroupInput) {
 	if input == nil {
 		return
 	}
-	*input = UpdateGroupInput{Name: input.Name, Description: input.Description, I18n: input.I18n}
+	*input = UpdateGroupInput{
+		Name: input.Name, Description: input.Description, I18n: input.I18n,
+		DisplayIcon: input.DisplayIcon, DisplayCategory: input.DisplayCategory,
+	}
 }
 
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
+	displayIcon, err := normalizeGroupDisplayIcon(input.DisplayIcon)
+	if err != nil {
+		return nil, err
+	}
+	displayCategory, err := normalizeGroupDisplayCategory(input.DisplayCategory)
+	if err != nil {
+		return nil, err
+	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && NormalizeGroupPlatform(input.Platform) == PlatformComposite {
 		return nil, infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite groups are not supported in simple mode")
 	}
@@ -581,6 +593,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		Description:                     input.Description,
 		I18n:                            i18n,
 		Platform:                        platform,
+		DisplayIcon:                     displayIcon,
+		DisplayCategory:                 displayCategory,
 		RateMultiplier:                  input.RateMultiplier,
 		IsExclusive:                     input.IsExclusive,
 		Status:                          StatusActive,
@@ -770,6 +784,20 @@ func (s *adminServiceImpl) validateFallbackGroupOnInvalidRequest(ctx context.Con
 }
 
 func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *UpdateGroupInput) (*Group, error) {
+	var displayIcon, displayCategory string
+	var err error
+	if input.DisplayIcon != nil {
+		displayIcon, err = normalizeGroupDisplayIcon(*input.DisplayIcon)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if input.DisplayCategory != nil {
+		displayCategory, err = normalizeGroupDisplayCategory(*input.DisplayCategory)
+		if err != nil {
+			return nil, err
+		}
+	}
 	group, err := s.groupRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -802,6 +830,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.Platform != "" {
 		group.Platform = input.Platform
+	}
+	if input.DisplayIcon != nil {
+		group.DisplayIcon = displayIcon
+	}
+	if input.DisplayCategory != nil {
+		group.DisplayCategory = displayCategory
 	}
 	if input.RateMultiplier != nil {
 		if *input.RateMultiplier <= 0 {

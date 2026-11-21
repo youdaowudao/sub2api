@@ -118,6 +118,10 @@ const (
 	FieldSupportedModelScopes = "supported_model_scopes"
 	// FieldSortOrder holds the string denoting the sort_order field in the database.
 	FieldSortOrder = "sort_order"
+	// FieldDisplayIcon holds the string denoting the display_icon field in the database.
+	FieldDisplayIcon = "display_icon"
+	// FieldDisplayCategory holds the string denoting the display_category field in the database.
+	FieldDisplayCategory = "display_category"
 	// FieldAllowMessagesDispatch holds the string denoting the allow_messages_dispatch field in the database.
 	FieldAllowMessagesDispatch = "allow_messages_dispatch"
 	// FieldAllowLive holds the string denoting the allow_live field in the database.
@@ -280,6 +284,8 @@ var Columns = []string{
 	FieldMcpXMLInject,
 	FieldSupportedModelScopes,
 	FieldSortOrder,
+	FieldDisplayIcon,
+	FieldDisplayCategory,
 	FieldAllowMessagesDispatch,
 	FieldAllowLive,
 	FieldForceOpenaiFast,
@@ -407,6 +413,14 @@ var (
 	DefaultSupportedModelScopes []string
 	// DefaultSortOrder holds the default value on creation for the "sort_order" field.
 	DefaultSortOrder int
+	// DefaultDisplayIcon holds the default value on creation for the "display_icon" field.
+	DefaultDisplayIcon string
+	// DisplayIconValidator is a validator for the "display_icon" field. It is called by the builders before save.
+	DisplayIconValidator func(string) error
+	// DefaultDisplayCategory holds the default value on creation for the "display_category" field.
+	DefaultDisplayCategory string
+	// DisplayCategoryValidator is a validator for the "display_category" field. It is called by the builders before save.
+	DisplayCategoryValidator func(string) error
 	// DefaultAllowMessagesDispatch holds the default value on creation for the "allow_messages_dispatch" field.
 	DefaultAllowMessagesDispatch bool
 	// DefaultAllowLive holds the default value on creation for the "allow_live" field.
@@ -687,6 +701,16 @@ func ByMcpXMLInject(opts ...sql.OrderTermOption) OrderOption {
 // BySortOrder orders the results by the sort_order field.
 func BySortOrder(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldSortOrder, opts...).ToFunc()
+}
+
+// ByDisplayIcon orders the results by the display_icon field.
+func ByDisplayIcon(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDisplayIcon, opts...).ToFunc()
+}
+
+// ByDisplayCategory orders the results by the display_category field.
+func ByDisplayCategory(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldDisplayCategory, opts...).ToFunc()
 }
 
 // ByAllowMessagesDispatch orders the results by the allow_messages_dispatch field.

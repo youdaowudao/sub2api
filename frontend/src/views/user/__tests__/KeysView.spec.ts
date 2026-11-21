@@ -3,9 +3,10 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 import { bindGuideBusinessSession } from '@/features/guide/businessEvents'
-import type { ApiKey } from '@/types'
+import type { ApiKey, Group } from '@/types'
 import { keysAPI } from '@/api'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 import KeysView from '../KeysView.vue'
 
 const {
@@ -53,6 +54,11 @@ const messages: Record<string, string> = {
   'keys.created': 'Created',
   'keys.expiresAt': 'Expires',
   'keys.group': 'Group',
+  'keys.providers.openai': 'OpenAI',
+  'keys.providers.anthropic': 'Anthropic',
+  'keys.providers.gemini': 'Gemini',
+  'keys.providers.domestic': '国产模型',
+  'keys.providers.other': '其他',
   'keys.id': 'ID',
   'keys.currentConcurrency': 'Current Concurrency',
   'keys.lastUsedAt': 'Last Used',
@@ -247,7 +253,7 @@ const IconStub = {
   template: '<span data-test="icon">{{ name }}</span>',
 }
 
-const mountView = async (realDialog = false) => {
+const mountView = async (realDialog = false, realBadge = false) => {
   const wrapper = mount(KeysView, {
     global: {
       stubs: {
@@ -268,7 +274,7 @@ const mountView = async (realDialog = false) => {
         UseKeyModal: true,
         BulkEditKeysModal: true,
         EndpointPopover: true,
-        GroupBadge: true,
+        GroupBadge: !realBadge,
         GroupOptionItem: true,
         Teleport: true,
       },
@@ -291,6 +297,14 @@ const getButtonByText = (wrapper: VueWrapper, text: string) => {
     throw new Error(`Button not found: ${text}`)
   }
   return button
+}
+
+const groupPicker = (wrapper: VueWrapper) => wrapper.get('[data-tour="key-group-dropdown"]')
+const groupPickerTabs = (wrapper: VueWrapper) => groupPicker(wrapper).findAll('button[aria-pressed]')
+const pickerTab = (wrapper: VueWrapper, label: string) => {
+  const tab = groupPickerTabs(wrapper).find(button => button.text().replace(/ \d+$/, '') === label)
+  expect(tab).toBeDefined()
+  return tab!
 }
 
 describe('user KeysView column settings', () => {
@@ -534,7 +548,11 @@ describe('user KeysView column settings', () => {
       key: `sk-fake-${id}`,
       group_id: platform ? id : null,
       status,
-      group: platform ? { id, name: `g${id}`, platform, status: 'active', allow_image_generation: allowImage } : undefined,
+      group: platform ? {
+        id, name: `g${id}`, platform, status: 'active', allow_image_generation: allowImage,
+        display_icon: platform === 'gemini' ? 'kimi' : 'gemini',
+        display_category: platform === 'gemini' ? 'domestic' : 'gemini',
+      } : undefined,
     })
     const items = [
       row(1, 'anthropic'), row(2, 'openai'), row(3, 'openai', 'active', true),
@@ -544,6 +562,9 @@ describe('user KeysView column settings', () => {
     getKeyById.mockImplementation(async (id: number) => items.find((item) => item.id === id))
     listKeys.mockResolvedValueOnce({ items, total: items.length, page: 1, page_size: 20, pages: 1 })
     const wrapper = await mountView()
+    const badges = wrapper.findAll('[data-tour="key-group"]').map(button => button.findComponent({ name: 'GroupBadge' }))
+    expect(badges.map(badge => badge.exists() ? badge.props('platform') : null))
+      .toEqual(['gemini', 'gemini', 'gemini', 'gemini', 'kimi', null, 'gemini'])
     const buttons = wrapper.findAll('[data-testid="codex-import"]')
     expect(buttons.map((b) => b.attributes('data-app'))).toEqual(['claude', 'codex', 'codex', 'image'])
     const targets = ['Claude', 'Codex', 'Codex', '生图工具']
@@ -569,6 +590,19 @@ describe('user KeysView column settings', () => {
     }
   })
 
+  it('passes the real platform to the key tutorial with a different display icon and category', async () => {
+    const group = { id: 2, name: 'Compatible group', platform: 'openai', display_icon: 'gemini', display_category: 'gemini' } as Group
+    const key = { ...createApiKey(), group_id: group.id, group }
+    listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = await mountView()
+    expect(wrapper.get('[data-tour="key-group"]').findComponent({ name: 'GroupBadge' }).props('platform')).toBe('gemini')
+    await getButtonByText(wrapper, 'keys.useKey').trigger('click')
+    const modal = wrapper.getComponent({ name: 'UseKeyModal' })
+    expect(modal.props('show')).toBe(true)
+    expect(modal.props('platform')).toBe('openai')
+    wrapper.unmount()
+  })
+
   it('switches the row import button between Codex and Claude after changing the key group', async () => {
     const openai = { id: 21, name: 'GPT 组', platform: 'openai', rate_multiplier: 1, status: 'active', subscription_type: 'standard', is_exclusive: false }
     const anthropic = { id: 22, name: 'Claude 组', platform: 'anthropic', rate_multiplier: 1, status: 'active', subscription_type: 'standard', is_exclusive: false }
@@ -584,6 +618,9 @@ describe('user KeysView column settings', () => {
     listKeys.mockResolvedValueOnce(page({ ...before, group_id: 22, group: anthropic }))
     await wrapper.get('[data-tour="key-group"]').trigger('click')
     await nextTick()
+    expect(pickerTab(wrapper, 'OpenAI').attributes('aria-pressed')).toBe('true')
+    await pickerTab(wrapper, 'Anthropic').trigger('click')
+    expect(updateKey).not.toHaveBeenCalled()
     const option = wrapper
       .findAll('[data-tour="key-group-option"]')
       .find((o) => o.findComponent({ name: 'GroupOptionItem' }).exists() && o.findComponent({ name: 'GroupOptionItem' }).props('name') === 'Claude 组')
@@ -591,6 +628,7 @@ describe('user KeysView column settings', () => {
     await option!.trigger('click')
     await flushPromises()
 
+    expect(updateKey).toHaveBeenCalledTimes(1)
     expect(updateKey).toHaveBeenCalledWith(7, { group_id: 22 })
     expect(wrapper.get('[data-testid="codex-import"]').attributes('data-app')).toBe('claude')
     expect(wrapper.get('[data-testid="codex-import"]').text()).toContain('Claude')
@@ -670,12 +708,12 @@ describe('user KeysView column settings', () => {
       subscription_type: 'standard',
     }))
     const groupSelect = (wrapper: VueWrapper) => wrapper.findComponent('[data-tour="key-form-group"]')
-    const optionIds = (wrapper: VueWrapper) => {
-      const options = groupSelect(wrapper).props('options') as { value: string | number; kind?: string; disabled?: boolean; platform?: string }[]
+    const optionIds = (wrapper: VueWrapper, categoryLabels?: string[]) => {
+      const options = groupSelect(wrapper).props('options') as { value: string | number; kind?: string; disabled?: boolean; label: string }[]
       const headings = options.filter(o => o.kind === 'group')
       const real = options.filter(o => o.kind !== 'group')
       expect(headings.every(o => o.disabled === true && typeof o.value === 'string')).toBe(true)
-      expect(new Set(headings.map(o => o.value)).size).toBe(new Set(real.map(o => o.platform)).size)
+      if (categoryLabels) expect(headings.map(o => o.label)).toEqual(categoryLabels)
       return real.map(o => o.value)
     }
     const chooseProvider = (wrapper: VueWrapper, value: string) => wrapper.get(`input[name="key-provider"][value="${value}"]`).setValue()
@@ -818,22 +856,126 @@ describe('user KeysView column settings', () => {
       wrapper.unmount()
     })
 
+    it('shows a Gemini card with the Gemini group', async () => {
+      const wrapper = await openCreate()
+      expect(wrapper.find('input[name="key-provider"][value="gemini"]').exists()).toBe(true)
+      await chooseProvider(wrapper, 'gemini')
+      expect(optionIds(wrapper)).toEqual([7])
+      wrapper.unmount()
+    })
+
     it('classifies all configured platforms and retains the complete table filter', async () => {
       const wrapper = await openCreate()
-      expect(wrapper.findAll('input[name="key-provider"]').map(input => input.attributes('value'))).toEqual(['openai', 'anthropic', 'domestic', 'other'])
+      expect(wrapper.findAll('input[name="key-provider"]').map(input => input.attributes('value'))).toEqual(['openai', 'anthropic', 'gemini', 'domestic', 'other'])
+      expect(wrapper.get('[data-tour="key-form-provider"] .grid').classes()).toContain('sm:grid-cols-5')
       expect(wrapper.get<HTMLInputElement>('input[value="openai"]').element.checked).toBe(true)
-      expect(optionIds(wrapper)).toEqual([2])
+      expect(optionIds(wrapper, ['OpenAI'])).toEqual([2])
       expect(groupSelect(wrapper).props('modelValue')).toBeNull()
       await chooseProvider(wrapper, 'anthropic')
-      expect(optionIds(wrapper)).toEqual([1])
+      expect(optionIds(wrapper, ['Anthropic'])).toEqual([1])
       await chooseProvider(wrapper, 'domestic')
-      expect(optionIds(wrapper)).toEqual([3, 4, 5, 6])
+      expect(optionIds(wrapper, ['国产模型'])).toEqual([3, 4, 5, 6])
       await chooseProvider(wrapper, 'other')
-      expect(optionIds(wrapper)).toEqual([7, 9, 8, 11, 12, 10])
-      const tableOptions = wrapper.findAllComponents({ name: 'Select' })[0].props('options') as { kind?: string; disabled?: boolean }[]
+      expect(optionIds(wrapper, ['其他'])).toEqual([9, 8, 11, 12, 10])
+      const tableOptions = wrapper.findAllComponents({ name: 'Select' })[0].props('options') as { kind?: string; disabled?: boolean; label: string }[]
       expect(tableOptions.filter(o => o.kind !== 'group')).toHaveLength(14)
-      expect(tableOptions.filter(o => o.kind === 'group')).toHaveLength(12)
+      expect(tableOptions.filter(o => o.kind === 'group').map(o => o.label)).toEqual(['OpenAI', 'Anthropic', 'Gemini', '国产模型', '其他'])
       expect(tableOptions.filter(o => o.kind === 'group').every(o => o.disabled)).toBe(true)
+    })
+
+    it.each([
+      { display: 'gemini', category: 'Gemini', color: 'text-sky-700', unrelated: 'openai' },
+      { display: '', category: 'OpenAI', color: 'text-green-700', unrelated: 'gemini' },
+    ])('uses the display overrides or the default in each key group control ($category)', async ({ display, category, color, unrelated }) => {
+      const group = { ...availableGroups[1], display_icon: display, display_category: display } as Group
+      const key = { ...createApiKey(), group_id: group.id, group }
+      getAvailableGroups.mockResolvedValue([group])
+      listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = await mountView(false, true)
+      const platform = display || 'openai'
+      const badge = wrapper.get('[data-tour="key-group"]').getComponent({ name: 'GroupBadge' })
+      expect(badge.props('platform')).toBe(platform)
+      expect(badge.classes()).toContain(color)
+
+      const options = [
+        { kind: 'group', disabled: true, label: category },
+        { value: group.id, label: group.name },
+      ]
+      const filter = wrapper.findAllComponents({ name: 'Select' })[0].props('options')
+      expect(filter).toEqual([
+        { value: '', label: 'All Groups' },
+        { value: 0, label: 'keys.noGroup' },
+        { ...options[0], value: `__group_category:${platform}` },
+        options[1],
+      ])
+
+      await wrapper.get('[data-tour="key-group"]').trigger('click')
+      const picker = groupPicker(wrapper)
+      expect(groupPickerTabs(wrapper).map(tab => tab.text())).toEqual([`${category} 1`])
+      expect(picker.getComponent({ name: 'GroupOptionItem' }).props('platform')).toBe(platform)
+      await picker.get('[data-tour="key-group-option"]').trigger('click')
+
+      await wrapper.get('[data-tour="keys-create-btn"]').trigger('click')
+      expect(wrapper.get<HTMLInputElement>(`input[value="${platform}"]`).element.checked).toBe(true)
+      expect(wrapper.get<HTMLInputElement>(`input[value="${unrelated}"]`).element.disabled).toBe(true)
+      expect(wrapper.findAll('input[name="key-provider"]')).toHaveLength(4)
+      expect(wrapper.get('[data-tour="key-form-provider"] .grid').classes()).toContain('sm:grid-cols-4')
+      expect(optionIds(wrapper, [category])).toEqual([group.id])
+      expect(groupSelect(wrapper).props('options')[1].platform).toBe(platform)
+      await wrapper.get('[data-test="close-dialog"]').trigger('click')
+
+      await getButtonByText(wrapper, 'common.edit').trigger('click')
+      expect(optionIds(wrapper, [category])).toEqual([group.id])
+      expect(groupSelect(wrapper).props('options')[1].platform).toBe(platform)
+      expect(updateKey).not.toHaveBeenCalled()
+      wrapper.unmount()
+    })
+
+    it('removes Other across controls after its last group is reclassified on reload', async () => {
+      const grok = availableGroups[7]
+      const image = { ...availableGroups[1], allow_image_generation: true }
+      const checkHeadings = async (expected: string[]) => {
+        const wrapper = await openCreate()
+        expect(wrapper.find('input[value="other"]').exists()).toBe(expected.includes('其他'))
+        await chooseProvider(wrapper, 'openai')
+        expect(optionIds(wrapper, ['OpenAI'])).toEqual([2])
+        await wrapper.get('[data-test="close-dialog"]').trigger('click')
+        await wrapper.get('[data-tour="key-group"]').trigger('click')
+        expect(groupPickerTabs(wrapper).map(tab => tab.text())).toEqual(expected.map(category => `${category} 1`))
+        const filter = wrapper.findAllComponents({ name: 'Select' })[0].props('options') as { kind?: string; label: string }[]
+        expect(filter.filter(option => option.kind === 'group').map(option => option.label)).toEqual(expected)
+        await getButtonByText(wrapper, 'common.edit').trigger('click')
+        expect(optionIds(wrapper, expected)).toEqual([image.id, grok.id])
+        wrapper.unmount()
+      }
+      getAvailableGroups.mockResolvedValue([image, grok])
+      await checkHeadings(['OpenAI', '其他'])
+      getAvailableGroups.mockResolvedValue([image, { ...grok, display_category: 'domestic' }])
+      await checkHeadings(['OpenAI', '国产模型'])
+    })
+
+    it('puts an OpenAI image group in Domestic when manually classified there', async () => {
+      const image = { ...availableGroups[1], allow_image_generation: true, display_category: 'domestic' } as Group
+      const key = { ...createApiKey(), group_id: image.id, group: image }
+      listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+      getAvailableGroups.mockResolvedValue([image])
+      const wrapper = await openCreate()
+      expect(wrapper.get<HTMLInputElement>('input[value="domestic"]').element.checked).toBe(true)
+      expect(wrapper.get<HTMLInputElement>('input[value="openai"]').element.disabled).toBe(true)
+      expect(optionIds(wrapper, ['国产模型'])).toEqual([image.id])
+      expect(groupSelect(wrapper).props('options')[1].platform).toBe('openai')
+      await wrapper.get('[data-test="close-dialog"]').trigger('click')
+      const groupButton = wrapper.get('[data-tour="key-group"]')
+      expect(groupButton.getComponent({ name: 'GroupBadge' }).props('platform')).toBe('openai')
+      await groupButton.trigger('click')
+      expect(groupPickerTabs(wrapper).map(tab => tab.text())).toEqual(['国产模型 1'])
+      expect(groupPicker(wrapper).getComponent({ name: 'GroupOptionItem' }).props('platform')).toBe('openai')
+      const filter = wrapper.findAllComponents({ name: 'Select' })[0].props('options') as { kind?: string; label: string }[]
+      expect(filter.filter(option => option.kind === 'group').map(option => option.label)).toEqual(['国产模型'])
+      await getButtonByText(wrapper, 'common.edit').trigger('click')
+      expect(optionIds(wrapper, ['国产模型'])).toEqual([image.id])
+      expect(groupSelect(wrapper).props('options')[1].platform).toBe('openai')
+      wrapper.unmount()
     })
 
     it('clears the previous group on provider change and submits only the newly selected group', async () => {
@@ -891,24 +1033,30 @@ describe('user KeysView column settings', () => {
       expect(copyToClipboard).not.toHaveBeenCalled()
     })
 
-    it('keeps guide markers on real group buttons and excludes headings from search-only results', async () => {
+    it('uses a row of colored category buttons and keeps guide markers on group options', async () => {
       const wrapper = await mountView()
       await wrapper.get('[data-tour="key-group"]').trigger('click')
-      const popup = wrapper.get('[data-tour="key-group-dropdown"]')
-      expect(popup.findAll('[role="presentation"]')).toHaveLength(12)
-      expect(popup.findAll('[role="presentation"]').slice(0, 2).map(n => n.text())).toEqual(['OpenAI', 'Anthropic'])
-      expect(popup.findAll('[role="presentation"]').every(n => n.element.tagName !== 'BUTTON' && !n.attributes('data-tour'))).toBe(true)
+      const popup = groupPicker(wrapper)
+      const tabs = groupPickerTabs(wrapper)
+      expect(tabs.map(tab => tab.text())).toEqual(['OpenAI 1', 'Anthropic 1', 'Gemini 1', '国产模型 4', '其他 5'])
+      expect(tabs.every(tab => !tab.attributes('data-tour'))).toBe(true)
+      expect(tabs.map(tab => tab.findAllComponents({ name: 'PlatformIcon' }).map(icon => icon.props('platform')))).toEqual([
+        ['openai'], ['anthropic'], ['gemini'], ['deepseek', 'kimi'], ['grok'],
+      ])
+      expect(tabs[0].classes()).toContain('text-green-600')
+      expect(tabs[1].classes()).toContain('text-orange-600')
+      expect(tabs[2].classes()).toContain('text-blue-600')
+
       const first = popup.get('[data-tour="key-group-option"]')
       expect(first.element.tagName).toBe('BUTTON')
       expect(first.findComponent({ name: 'GroupOptionItem' }).props('name')).toBe('Shared group 2')
+      await pickerTab(wrapper, 'Gemini').trigger('click')
+      expect(pickerTab(wrapper, 'Gemini').attributes('aria-pressed')).toBe('true')
       expect(updateKey).not.toHaveBeenCalled()
-      await popup.get('input').setValue('Anthropic')
-      await flushPromises()
-      expect((wrapper.vm as any).groupSearchQuery).toBe('Anthropic')
-      expect((wrapper.vm as any).filteredGroupOptions).toHaveLength(0)
-      expect((wrapper.vm as any).filteredGroupSections).toHaveLength(0)
-      expect(wrapper.get('[data-tour="key-group-dropdown"]').findAll('[role="presentation"]')).toHaveLength(0)
-      expect(wrapper.get('[data-tour="key-group-dropdown"]').findAll('[data-tour="key-group-option"]')).toHaveLength(0)
+      await groupPicker(wrapper).get('input').setValue('Anthropic')
+      expect(groupPickerTabs(wrapper).every(tab => tab.element.hasAttribute('disabled'))).toBe(true)
+      expect(groupPicker(wrapper).findAll('[data-tour="key-group-option"]')).toHaveLength(0)
+      expect(groupPicker(wrapper).text()).toContain('keys.noGroupFound')
       wrapper.unmount()
     })
 
@@ -920,11 +1068,16 @@ describe('user KeysView column settings', () => {
       await wrapper.get('[data-tour="key-group"]').trigger('click')
       const popup = () => wrapper.get('[data-tour="key-group-dropdown"]')
       const options = () => popup().findAll('[data-tour="key-group-option"]')
-      expect(options().slice(0, 2).map(option => option.findComponent({ name: 'GroupOptionItem' }).props('selected'))).toEqual([false, true])
+      expect(pickerTab(wrapper, 'Anthropic').attributes('aria-pressed')).toBe('true')
+      expect(options()[0].findComponent({ name: 'GroupOptionItem' }).props('selected')).toBe(true)
+      await pickerTab(wrapper, 'OpenAI').trigger('click')
       expect(updateKey).not.toHaveBeenCalled()
-      await options()[1].trigger('click')
+      await pickerTab(wrapper, 'Anthropic').trigger('click')
+      await options()[0].trigger('click')
+      expect(wrapper.find('[data-tour="key-group-dropdown"]').exists()).toBe(false)
       expect(updateKey).not.toHaveBeenCalled()
       await wrapper.get('[data-tour="key-group"]').trigger('click')
+      await pickerTab(wrapper, 'OpenAI').trigger('click')
       await options()[0].trigger('click')
       await flushPromises()
       expect(updateKey).toHaveBeenCalledTimes(1)
@@ -985,6 +1138,132 @@ describe('user KeysView column settings', () => {
       expect(optionIds(wrapper)).toHaveLength(12)
     })
   })
+  describe('single-column group picker', () => {
+    const pickerGroups = [
+      { id: 1, platform: 'openai', name: 'GPT Reference', description: null, rate_multiplier: 1, subscription_type: 'standard' },
+      { id: 2, platform: 'anthropic', name: 'Claude Group', description: 'Reference access', rate_multiplier: 1, subscription_type: 'standard' },
+      { id: 3, platform: 'grok', name: 'Grok Group', description: null, rate_multiplier: 1, subscription_type: 'standard' },
+    ]
+    let wrapper: Awaited<ReturnType<typeof mountView>> | undefined
+
+    const openPicker = async () => {
+      wrapper = await mountView()
+      await wrapper.get('[data-tour="key-group"]').trigger('click')
+      return wrapper
+    }
+    const items = (view: VueWrapper) => groupPicker(view).findAllComponents({ name: 'GroupOptionItem' })
+    const names = (view: VueWrapper) => items(view).map(item => item.props('name'))
+    const tabs = (view: VueWrapper) => groupPickerTabs(view).map(tab => tab.text())
+
+    afterEach(() => {
+      wrapper?.unmount()
+      wrapper = undefined
+      vi.useRealTimers()
+    })
+
+    it('searches across categories, disables the tabs, and restores the active category on clear', async () => {
+      getAvailableGroups.mockResolvedValue(pickerGroups)
+      const view = await openPicker()
+      expect(tabs(view)).toEqual(['OpenAI 1', 'Anthropic 1', '其他 1'])
+      await pickerTab(view, '其他').trigger('click')
+      await groupPicker(view).get('input').setValue('  rEfErEnCe ')
+      expect(names(view)).toEqual(['GPT Reference', 'Claude Group'])
+      expect(groupPickerTabs(view).every(tab => tab.element.hasAttribute('disabled'))).toBe(true)
+      await pickerTab(view, 'OpenAI').trigger('click')
+      await groupPicker(view).get('input').setValue(' ')
+      expect(pickerTab(view, '其他').attributes('aria-pressed')).toBe('true')
+      expect(names(view)).toEqual(['Grok Group'])
+      expect(updateKey).not.toHaveBeenCalled()
+    })
+
+    it('renders a single Other tab if groups arrive after opening and none have a fixed category', async () => {
+      let release!: (value: typeof pickerGroups) => void
+      getAvailableGroups.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+      const view = await openPicker()
+      expect(tabs(view)).toEqual([])
+      expect(names(view)).toEqual([])
+      release([pickerGroups[2]])
+      await flushPromises()
+      expect(tabs(view)).toEqual(['其他 1'])
+      expect(names(view)).toEqual(['Grok Group'])
+    })
+
+    it('keeps the original order, wraps long names, and lets display icons change independently', async () => {
+      const groups = [
+        { ...pickerGroups[1], sort_order: 2, display_icon: 'openai', display_category: 'gemini' },
+        { ...pickerGroups[0], sort_order: 3, display_icon: 'anthropic', display_category: 'gemini' },
+        { ...pickerGroups[1], id: 4, name: 'Claude without sort order or a short name', display_icon: 'openai', display_category: 'gemini' },
+        { ...pickerGroups[0], id: 5, name: 'First GPT', sort_order: 1, display_icon: 'anthropic', display_category: 'gemini' },
+      ]
+      getAvailableGroups.mockResolvedValueOnce(groups)
+      const view = await openPicker()
+      const expected = sortGroupsForDisplay(groups)
+      expect(tabs(view)).toEqual(['Gemini 4'])
+      expect(names(view)).toEqual(expected.map(group => group.name))
+      expect(items(view).map(item => item.props('platform'))).toEqual(expected.map(group => group.display_icon))
+      expect(items(view).every(item => item.props('wrapName') === true)).toBe(true)
+
+      getAvailableGroups.mockResolvedValueOnce(groups.map(group => ({ ...group, display_icon: 'gemini' })))
+      await (view.vm as unknown as { loadGroups: () => Promise<void> }).loadGroups()
+      expect(names(view)).toEqual(expected.map(group => group.name))
+      expect(items(view).every(item => item.props('platform') === 'gemini')).toBe(true)
+    })
+
+    it('hovers for 150 ms, cancels on exit or search, and clicks immediately', async () => {
+      getAvailableGroups.mockResolvedValue(pickerGroups)
+      const view = await openPicker()
+      vi.useFakeTimers()
+      const anthropic = pickerTab(view, 'Anthropic')
+      await anthropic.trigger('pointerenter')
+      await vi.advanceTimersByTimeAsync(149)
+      expect(names(view)).toEqual(['GPT Reference'])
+      await anthropic.trigger('pointerleave')
+      await vi.advanceTimersByTimeAsync(1)
+      expect(names(view)).toEqual(['GPT Reference'])
+      await groupPicker(view).get('input').setValue(' ')
+      await anthropic.trigger('pointerenter')
+      await vi.advanceTimersByTimeAsync(150)
+      expect(names(view)).toEqual(['Claude Group'])
+      await pickerTab(view, '其他').trigger('pointerenter')
+      await groupPicker(view).get('input').setValue('Reference')
+      await vi.advanceTimersByTimeAsync(150)
+      await groupPicker(view).get('input').setValue('')
+      expect(names(view)).toEqual(['Claude Group'])
+      await pickerTab(view, 'OpenAI').trigger('pointerenter')
+      await pickerTab(view, '其他').trigger('click')
+      expect(names(view)).toEqual(['Grok Group'])
+      await vi.advanceTimersByTimeAsync(150)
+      expect(names(view)).toEqual(['Grok Group'])
+      expect(updateKey).not.toHaveBeenCalled()
+    })
+
+    it('cancels hover and restores a valid category after a list change or closing', async () => {
+      const setGroups = async (groups: typeof pickerGroups) => {
+        getAvailableGroups.mockResolvedValueOnce(groups)
+        await (view.vm as unknown as { loadGroups: () => Promise<void> }).loadGroups()
+      }
+      getAvailableGroups.mockResolvedValue(pickerGroups)
+      const view = await openPicker()
+      vi.useFakeTimers()
+      await pickerTab(view, '其他').trigger('pointerenter')
+      await setGroups(pickerGroups.slice(0, 2))
+      await vi.advanceTimersByTimeAsync(150)
+      expect(names(view)).toEqual(['GPT Reference'])
+      await setGroups(pickerGroups)
+      await pickerTab(view, '其他').trigger('click')
+      await groupPicker(view).get('input').setValue('Reference')
+      await setGroups(pickerGroups.slice(0, 2))
+      expect(names(view)).toEqual(['GPT Reference', 'Claude Group'])
+      await groupPicker(view).get('input').setValue('')
+      expect(names(view)).toEqual(['GPT Reference'])
+      await pickerTab(view, 'Anthropic').trigger('pointerenter')
+      await view.get('[data-tour="key-group"]').trigger('click')
+      await view.get('[data-tour="key-group"]').trigger('click')
+      await vi.advanceTimersByTimeAsync(150)
+      expect(names(view)).toEqual(['GPT Reference'])
+    })
+  })
+
   describe('guide success callbacks', () => {
     let wrapper: VueWrapper | undefined
     let release: (() => void) | undefined
@@ -1082,6 +1361,23 @@ describe('user KeysView column settings', () => {
       finishSettings({ quick_import_image_group_id: -1 })
       await flushPromises()
       expect(state.formData.group_id).toBe(8)
+    })
+
+    it('preselects the Gemini card for the first real GPT group and submits its ID', async () => {
+      routeState.query = { create: 'quick' }
+      getAvailableGroups.mockResolvedValue([
+        group(1, 'gemini', 0),
+        { ...group(4, 'openai', 1), display_icon: 'gemini', display_category: 'gemini' },
+        group(8, 'openai', 2),
+      ])
+      vi.mocked(keysAPI.create).mockResolvedValue({ ...createApiKey(), id: 2 })
+      const wrapper = await mountView()
+      expect(wrapper.get<HTMLInputElement>('input[value="gemini"]').element.checked).toBe(true)
+      expect(wrapper.getComponent('[data-tour="key-form-group"]').props('modelValue')).toBe(4)
+      await wrapper.get('#key-form').trigger('submit')
+      await flushPromises()
+      expect(vi.mocked(keysAPI.create).mock.calls[0].slice(0, 2)).toEqual(['测试', 4])
+      wrapper.unmount()
     })
 
     it('numbers the default name when test keys already exist, and stays normal without the query', async () => {
