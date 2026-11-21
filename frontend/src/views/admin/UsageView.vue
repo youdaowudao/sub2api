@@ -81,7 +81,7 @@
             @click="switchTab(tab.key)"
           >
             <Icon :name="tab.icon" size="sm" />
-            {{ tab.label }}<span v-if="tab.key === 'errors'" class="hidden text-xs sm:inline"> · {{ t('admin.ops.records.usageLink') }}</span>
+            {{ tab.label }}
           </button>
         </div>
 
@@ -140,6 +140,34 @@
           />
           <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
         </div>
+        <div v-if="activeTab === 'errors'" class="rounded-b-2xl">
+          <div v-if="errorListError" role="alert" class="m-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-900/20 dark:text-rose-300">
+            {{ errorListError }}
+            <button type="button" class="ml-2 underline" @click="loadErrorRequests">{{ t('admin.ops.records.retry') }}</button>
+          </div>
+          <OpsErrorLogTable
+            v-else
+            flat
+            user-clickable
+            column-width-storage-key="admin-usage-error-column-widths"
+            :rows="errorRows"
+            :total="errorTotal"
+            :loading="errorLoading"
+            :page="errorPage"
+            :page-size="errorPageSize"
+            :page-size-options="errorPageSizeOptions"
+            :sort-by="errorSortBy"
+            :sort-order="errorSortOrder"
+            :visible-column-keys="errorVisibleColumnKeys"
+            @sort="sortErrors"
+            @update:page="changeErrorPage"
+            @update:pageSize="changeErrorPageSize"
+            @userClick="handleUserClick"
+            @openErrorDetail="openErrorDetail"
+            @ipGeoBatchFailed="handleIpGeoBatchFailed"
+          />
+          <OpsErrorDetailModal v-model:show="showErrorDetail" :error-id="errorDetailId" error-type="request" />
+        </div>
         <!-- 懒挂载：首次切到该 tab 才请求排行数据，之后随筛选自动刷新 -->
         <div v-if="rankingMounted" v-show="activeTab === 'ranking'" class="overflow-hidden rounded-b-2xl">
           <UserTokenRanking
@@ -179,11 +207,15 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { saveAs } from 'file-saver'
-import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
-import { useAdminSettingsStore } from '@/stores/adminSettings'
+import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'; import { adminAPI } from '@/api/admin'; import { adminUsageAPI } from '@/api/admin/usage'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
-import { formatReasoningEffort } from '@/utils/format'
+import { formatDateLocalInput, formatReasoningEffort } from '@/utils/format'
+import { getConfiguredTablePageSizeOptions } from '@/utils/tablePreferences'
+import { opsAPI, type OpsErrorLog } from '@/api/admin/ops'
+import OpsErrorLogTable from './ops/components/OpsErrorLogTable.vue'
+import OpsErrorDetailModal from './ops/components/OpsErrorDetailModal.vue'
+import { errorRecordRows } from './ops/useOpsErrorRecords'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
@@ -202,8 +234,6 @@ type DistributionMetric = 'tokens' | 'actual_cost'
 type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
 const route = useRoute()
-const router = useRouter()
-const adminSettingsStore = useAdminSettingsStore()
 const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
 const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
@@ -526,6 +556,8 @@ const loadChartData = async () => {
 }
 const applyFilters = () => {
   pagination.page = 1
+  errorPage.value = 1
+  if (activeTab.value === 'errors') void loadErrorRequests()
   invalidateModelStatsCache()
   loadLogs()
   loadStats()
@@ -538,6 +570,7 @@ const refreshData = () => {
   loadStats(true)
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
+  if (activeTab.value === 'errors') void loadErrorRequests()
   if (rankingMounted.value) rankingRef.value?.reload()
 }
 const resetFilters = () => {
@@ -685,9 +718,73 @@ const toggleColumn = (key: string) => {
   }
 }
 
-const currentToggleableColumns = toggleableColumns
-const isCurrentColumnVisible = isColumnVisible
-const toggleCurrentColumn = toggleColumn
+// ---- 错误请求 tab 列设置(与用量明细同机制,独立存储) ----
+const ERROR_ALWAYS_VISIBLE = ['user', 'status', 'created_at', 'actions']
+const ERROR_DEFAULT_HIDDEN_COLUMNS = ['user_agent']
+const ERROR_HIDDEN_COLUMNS_KEY = 'usage-error-hidden-columns'
+
+// key 集合须与 OpsErrorLogTable 内部 allColumns 一致
+const errorColumns = computed(() => [
+  { key: 'user', label: t('admin.ops.errorLog.user') },
+  { key: 'api_key', label: t('admin.ops.errorLog.apiKey') },
+  { key: 'account', label: t('admin.ops.errorLog.account') },
+  { key: 'platform', label: t('admin.ops.errorLog.platform') },
+  { key: 'model', label: t('admin.ops.errorLog.model') },
+  { key: 'endpoint', label: t('admin.ops.errorLog.endpoint') },
+  { key: 'group', label: t('admin.ops.errorLog.group') },
+  { key: 'type', label: t('admin.ops.errorLog.type') },
+  { key: 'category', label: t('usage.errors.category') },
+  { key: 'status', label: t('admin.ops.errorLog.status') },
+  { key: 'message', label: t('admin.ops.errorLog.message') },
+  { key: 'created_at', label: t('admin.ops.errorLog.time') },
+  { key: 'user_agent', label: t('usage.userAgent') },
+  { key: 'client_ip', label: t('admin.ops.errorLog.ip') },
+  { key: 'actions', label: t('admin.ops.errorLog.action') },
+])
+
+const errorHiddenColumns = reactive(new Set(readErrorHiddenColumns()))
+
+function readErrorHiddenColumns(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(ERROR_HIDDEN_COLUMNS_KEY) ?? 'null')
+    if (Array.isArray(value) && value.every(item => typeof item === 'string')) return value
+  } catch {
+    // A malformed saved preference falls back to the defaults.
+  }
+  return ERROR_DEFAULT_HIDDEN_COLUMNS
+}
+
+const errorToggleableColumns = computed(() =>
+  errorColumns.value.filter(col => !ERROR_ALWAYS_VISIBLE.includes(col.key))
+)
+
+const errorVisibleColumnKeys = computed(() =>
+  errorColumns.value
+    .filter(col => ERROR_ALWAYS_VISIBLE.includes(col.key) || !errorHiddenColumns.has(col.key))
+    .map(col => col.key)
+)
+
+const toggleErrorColumn = (key: string) => {
+  if (errorHiddenColumns.has(key)) {
+    errorHiddenColumns.delete(key)
+  } else {
+    errorHiddenColumns.add(key)
+    if (key === errorSortBy.value) sortErrors('created_at', 'desc')
+  }
+  try {
+    localStorage.setItem(ERROR_HIDDEN_COLUMNS_KEY, JSON.stringify([...errorHiddenColumns]))
+  } catch (e) {
+    console.error('Failed to save error columns:', e)
+  }
+}
+
+const currentToggleableColumns = computed(() =>
+  activeTab.value === 'errors' ? errorToggleableColumns.value : toggleableColumns.value
+)
+const isCurrentColumnVisible = (key: string) =>
+  activeTab.value === 'errors' ? !errorHiddenColumns.has(key) : isColumnVisible(key)
+const toggleCurrentColumn = (key: string) =>
+  activeTab.value === 'errors' ? toggleErrorColumn(key) : toggleColumn(key)
 
 const loadSavedColumns = () => {
   try {
@@ -733,28 +830,108 @@ const rankingRef = ref<InstanceType<typeof UserTokenRanking> | null>(null)
 const restoredStringFilters = ['model', 'request_type', 'billing_mode', 'error_phase', 'error_category'] as const
 const restoredNumberFilters = ['api_key_id', 'account_id', 'group_id', 'billing_type', 'status_code'] as const
 const restoredBooleanFilters = ['native_compaction_v2', 'upstream_model_mismatch'] as const
-const switchTab = async (tab: DetailTab) => {
-  if (tab === 'errors') {
-    await adminSettingsStore.fetch()
-    if (!adminSettingsStore.opsMonitoringEnabled) { appStore.showError(t('admin.ops.records.disabled')); return }
-    const start = new Date(startDate.value + 'T00:00:00')
-    const end = new Date(endDate.value + 'T00:00:00'); end.setDate(end.getDate() + 1)
-    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end) { appStore.showError(t('admin.ops.records.invalid')); return }
-    const returnQuery: LocationQueryRaw = { ...route.query, start_date: startDate.value, end_date: endDate.value }
-    for (const key of [...restoredStringFilters, ...restoredNumberFilters, ...restoredBooleanFilters, 'user_id']) delete returnQuery[key]
-    for (const [key, value] of Object.entries(filters.value)) if (value !== undefined && value !== null && value !== '') returnQuery[key] = String(value)
-    await router.replace({ query: returnQuery })
-    const query: Record<string, string> = { tr: 'custom', start_time: start.toISOString(), end_time: end.toISOString(), errors_focus: '1', errors_scope: 'request', errors_view: 'all' }
-    for (const key of ['user_id', 'api_key_id', 'account_id', 'model'] as const) { const value = filters.value[key]; if (value != null && value !== '') query['errors_' + key] = String(value) }
-    if (filters.value.group_id) query.group_id = String(filters.value.group_id)
-    if (filters.value.error_phase) query.errors_phase = filters.value.error_phase
-    if (filters.value.error_category) query.errors_category = filters.value.error_category
-    if (filters.value.status_code != null) query.errors_status_codes = String(filters.value.status_code)
-    await router.push({ path: '/admin/ops', query })
-    return
+const errorRows = ref<OpsErrorLog[]>([])
+const errorTotal = ref(0)
+const errorPage = ref(1)
+const errorPageSize = ref(20)
+const errorPageSizeOptions = [
+  ...new Set([20, ...getConfiguredTablePageSizeOptions().filter(size => size <= 100)])
+].sort((a, b) => a - b)
+const errorSortBy = ref('created_at')
+const errorSortOrder = ref<'asc' | 'desc'>('desc')
+const errorListError = ref('')
+const errorLoading = ref(false)
+const showErrorDetail = ref(false)
+const errorDetailId = ref<number | null>(null)
+let errorController: AbortController | undefined
+
+const switchTab = (tab: DetailTab) => {
+  if (tab === activeTab.value) return
+  if (activeTab.value === 'errors') {
+    errorController?.abort()
+    showErrorDetail.value = false
   }
   activeTab.value = tab
+  if (tab === 'errors') void loadErrorRequests()
   if (tab === 'ranking') rankingMounted.value = true
+}
+
+async function loadErrorRequests() {
+  errorController?.abort()
+  errorRows.value = []
+  errorTotal.value = 0
+  errorListError.value = ''
+
+  const start = new Date(startDate.value + 'T00:00:00')
+  const end = new Date(endDate.value + 'T00:00:00')
+  if (!startDate.value || !endDate.value ||
+      formatDateLocalInput(start) !== startDate.value ||
+      formatDateLocalInput(end) !== endDate.value || start > end) {
+    errorLoading.value = false
+    errorListError.value = t('admin.ops.records.invalid')
+    return
+  }
+  // Set the next day's wall-clock midnight even if this day's midnight was skipped.
+  end.setHours(24, 0, 0, 0)
+
+  const controller = new AbortController()
+  errorController = controller
+  errorLoading.value = true
+  const { user_id, api_key_id, account_id, group_id, model, error_phase, error_category, status_code } = filters.value
+  try {
+    const response = await opsAPI.listErrorRecords({
+      scope: 'request', view: 'all', finance: 'include', display: 'raw',
+      start_time: start.toISOString(), end_time: end.toISOString(),
+      user_id: user_id ?? undefined,
+      api_key_id: api_key_id ?? undefined,
+      account_id: account_id ?? undefined,
+      group_id: group_id ?? undefined,
+      model: model || undefined,
+      phase: error_phase || undefined,
+      category: error_category || undefined,
+      status_codes: status_code == null ? undefined : String(status_code),
+      page: errorPage.value,
+      page_size: errorPageSize.value,
+      sort_by: errorSortBy.value,
+      sort_order: errorSortOrder.value,
+    }, { signal: controller.signal })
+    if (controller.signal.aborted) return
+    errorRows.value = errorRecordRows(response.items)
+    errorTotal.value = response.total
+  } catch (error) {
+    if (controller.signal.aborted) return
+    const failure = error as { code?: string; reason?: string } | null
+    if (failure?.code === 'OPS_DISABLED') {
+      errorListError.value = t('admin.ops.records.disabled')
+    } else if (failure?.reason === 'OPS_ERROR_RECORDS_QUERY_TIMEOUT') {
+      errorListError.value = t('usage.errors.queryTimeout')
+    } else {
+      errorListError.value = t('usage.errors.retryLoad')
+    }
+  } finally {
+    if (!controller.signal.aborted) errorLoading.value = false
+  }
+}
+
+function changeErrorPage(page: number) {
+  errorPage.value = page
+  void loadErrorRequests()
+}
+
+function changeErrorPageSize(size: number) {
+  errorPageSize.value = size
+  changeErrorPage(1)
+}
+
+function sortErrors(key: string, order: 'asc' | 'desc') {
+  errorSortBy.value = key
+  errorSortOrder.value = order
+  changeErrorPage(1)
+}
+
+function openErrorDetail(id: number) {
+  errorDetailId.value = id
+  showErrorDetail.value = true
 }
 
 const showColumnDropdown = ref(false)
@@ -778,7 +955,7 @@ onMounted(() => {
   loadSavedColumns()
   document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { cacheHitRateReqSeq++; abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
+onUnmounted(() => { cacheHitRateReqSeq++; abortController?.abort(); exportAbortController?.abort(); errorController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)

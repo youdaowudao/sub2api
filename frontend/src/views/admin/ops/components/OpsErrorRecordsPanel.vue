@@ -1,5 +1,5 @@
 <template>
-  <section id="ops-error-records" ref="panel" class="card scroll-mt-24 overflow-hidden" data-testid="ops-error-records" :aria-label="t('admin.ops.records.title')">
+  <section id="ops-error-records" ref="panel" class="card scroll-mt-24" data-testid="ops-error-records" :aria-label="t('admin.ops.records.title')">
     <div class="space-y-3 border-b border-gray-100 p-4 dark:border-dark-700">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <h2 class="font-semibold text-gray-900 dark:text-gray-100">{{ t('admin.ops.records.title') }}</h2>
@@ -30,10 +30,29 @@
           </div>
         </details>
       </div>
-      <div v-if="showMore" class="grid grid-cols-1 gap-3 rounded-xl bg-gray-50 p-3 dark:bg-dark-900 sm:grid-cols-2 xl:grid-cols-4" data-testid="error-more-filters">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <OpsErrorIdentityFilter kind="user" :id="filters.user_id" :label="t('admin.ops.errorLog.user')" @update:id="changeUser" />
         <OpsErrorIdentityFilter kind="key" v-model:id="filters.api_key_id" :user-id="filters.user_id" :label="t('admin.ops.errorLog.apiKey')" @update:id="changeFilters" />
         <OpsErrorIdentityFilter kind="account" v-model:id="filters.account_id" :label="t('admin.ops.errorLog.account')" @update:id="changeFilters" />
+        <div>
+          <label class="input-label" for="ops-error-group">{{ t('admin.usage.group') }}</label>
+          <Select
+            id="ops-error-group"
+            :model-value="groupId"
+            :options="groupOptions ?? []"
+            :aria-label="t('admin.usage.group')"
+            aria-describedby="ops-error-group-sync"
+            searchable
+            @update:model-value="emit('update:group', $event)"
+          />
+          <p id="ops-error-group-sync" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.records.groupSync') }}</p>
+          <p v-if="groupOptionsFailed" role="alert" class="mt-1 text-xs text-rose-700 dark:text-rose-300">
+            {{ t('admin.ops.records.groupLoadFailed') }}
+            <button type="button" class="underline" @click="emit('retry-groups')">{{ t('admin.ops.records.retry') }}</button>
+          </p>
+        </div>
+      </div>
+      <div v-if="showMore" class="grid grid-cols-1 gap-3 rounded-xl bg-gray-50 p-3 dark:bg-dark-900 sm:grid-cols-2 xl:grid-cols-4" data-testid="error-more-filters">
         <div><label class="input-label" for="ops-error-model">{{ t('usage.model') }}</label><input id="ops-error-model" :value="filters.model" class="input" @change="setText('model', $event)" /></div>
         <div><label class="input-label">{{ t('admin.ops.errorLog.type') }}</label><Select v-model="filters.phase" :options="phaseOptions" @change="changeFilters" /></div>
         <div><label class="input-label">{{ t('usage.errors.category') }}</label><Select v-model="filters.category" :options="categoryOptions" @change="changeFilters" /></div>
@@ -77,7 +96,20 @@ import OpsErrorIdentityFilter from './OpsErrorIdentityFilter.vue'
 import { useOpsErrorRecords, errorRecordRows, errorRecordMeta, readRecordPreference, saveRecordPreference, type RecordFilters } from '../useOpsErrorRecords'
 import { formatDateTime } from '../utils/opsFormatters'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
-const props = withDefaults(defineProps<{ timeRange: string; customStartTime?: string | null; customEndTime?: string | null; platform?: string; groupId?: number | null; refreshToken?: number }>(), { platform: '', groupId: null, refreshToken: 0 })
+const props = withDefaults(defineProps<{
+  timeRange: string
+  customStartTime?: string | null
+  customEndTime?: string | null
+  platform?: string
+  groupId?: number | null
+  groupOptions?: Array<{ value: number | null; label: string }>
+  groupOptionsFailed?: boolean
+  refreshToken?: number
+}>(), { platform: '', groupId: null, refreshToken: 0 })
+const emit = defineEmits<{
+  'update:group': [value: string | number | boolean | null]
+  'retry-groups': []
+}>()
 const { t } = useI18n(); const auth = useAuthStore(); const app = useAppStore()
 const prefix = computed(() => auth.user?.id ? `admin-ops-error-records:${auth.user.id}:` : undefined)
 const { filters, page, pageSize, sortBy, sortOrder, items, total, totalRecords, loading, error, updatedAt, windowRange, changeFilters, reset, refresh, sort, group, showGroup, memberItems, memberTotal, memberPage, memberPageSize, memberSortBy, memberSortOrder, memberLoading, memberError, closeGroup, openGroup, loadMembers, sortMembers } = useOpsErrorRecords(props, () => prefix.value, t)

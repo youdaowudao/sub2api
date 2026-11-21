@@ -5,6 +5,9 @@ import { reactive } from 'vue'
 import OpsDashboard from '../OpsDashboard.vue'
 import { opsAPI } from '@/api/admin/ops'
 
+const { getGroups } = vi.hoisted(() => ({ getGroups: vi.fn() }))
+vi.mock('@/api', () => ({ adminAPI: { groups: { getAll: getGroups } } }))
+
 const route = reactive({ query: {} as Record<string, string> })
 const settings = { opsMonitoringEnabled: true, opsQueryModeDefault: 'auto', fetch: vi.fn(async () => { settings.opsQueryModeDefault = 'raw' }) }
 vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => ({ replace: vi.fn(async (target: { query?: Record<string, string> }) => { if (target.query) route.query = target.query }) }) }))
@@ -17,10 +20,11 @@ vi.mock('@/api/admin/ops', async (importOriginal) => {
 })
 const mountDashboard = () => shallowMount(OpsDashboard, { global: { stubs: {
   AppLayout: { template: '<main><slot /></main>' },
-  OpsErrorRecordsPanel: { name: 'OpsErrorRecordsPanel', props: ['refreshToken', 'timeRange', 'customStartTime', 'customEndTime', 'platform', 'groupId'], methods: { focus: vi.fn(), refresh: vi.fn() }, template: '<section />' },
+  OpsErrorRecordsPanel: { name: 'OpsErrorRecordsPanel', props: ['refreshToken', 'timeRange', 'customStartTime', 'customEndTime', 'platform', 'groupId', 'groupOptions', 'groupOptionsFailed'], methods: { focus: vi.fn(), refresh: vi.fn() }, template: '<section />' },
 } } })
 beforeEach(() => {
   vi.clearAllMocks(); route.query = {}; settings.opsQueryModeDefault = 'auto'
+  getGroups.mockReset().mockResolvedValue([])
   vi.mocked(opsAPI.getAdvancedSettings).mockResolvedValue({ auto_refresh_enabled: false, auto_refresh_interval_seconds: 30 } as never)
 })
 describe('dashboard and embedded errors', () => {
@@ -88,4 +92,43 @@ it('preserves an ungrouped legacy alert link without an invalid empty group', as
   expect(route.query.group_id).toBeUndefined()
   expect(route.query).toEqual(expect.objectContaining({ errors_scope: 'request', errors_view: 'errors', errors_focus: '1', alert_rule_id: '17' }))
   wrapper.unmount()
+})
+
+it('shares the group filter and retains a missing historical group until cleared', async () => {
+  route.query = { group_id: '12' }
+  getGroups.mockResolvedValue([{ id: 21, name: 'OpenAI fixture', platform: 'openai' }])
+  const wrapper = mountDashboard()
+  await flushPromises()
+  const header = wrapper.findComponent({ name: 'OpsDashboardHeader' })
+  const panel = wrapper.findComponent({ name: 'OpsErrorRecordsPanel' })
+  expect(getGroups).toHaveBeenCalledTimes(1)
+  expect(panel.props('groupOptions')).toEqual(header.props('groupOptions'))
+  expect(panel.props('groupOptions')).toContainEqual({ value: 12, label: 'admin.ops.records.groupFallback' })
+  expect(panel.props('groupId')).toBe(12)
+  panel.vm.$emit('update:group', 21)
+  await flushPromises()
+  expect(header.props('groupId')).toBe(21)
+  expect(opsAPI.getDashboardSnapshotV2).toHaveBeenLastCalledWith(expect.objectContaining({ group_id: 21 }), expect.anything())
+  header.vm.$emit('update:platform', 'anthropic')
+  await flushPromises()
+  expect(panel.props('groupId')).toBeNull()
+  expect(panel.props('groupOptions')).not.toContainEqual(expect.objectContaining({ value: 21 }))
+})
+
+it('retries unavailable group options without changing the active group', async () => {
+  route.query = { group_id: '12' }
+  getGroups.mockRejectedValueOnce(new Error('group fixture failure')).mockResolvedValueOnce([
+    { id: 12, name: 'Recovered group', platform: 'openai' },
+  ])
+  const wrapper = mountDashboard()
+  await flushPromises()
+  const panel = wrapper.findComponent({ name: 'OpsErrorRecordsPanel' })
+  expect(panel.props('groupOptionsFailed')).toBe(true)
+  expect(panel.props('groupId')).toBe(12)
+  panel.vm.$emit('retry-groups')
+  await flushPromises()
+  expect(panel.props('groupOptionsFailed')).toBe(false)
+  expect(panel.props('groupOptions')).toContainEqual({ value: 12, label: 'Recovered group' })
+  expect(panel.props('groupId')).toBe(12)
+  expect(opsAPI.getDashboardSnapshotV2).toHaveBeenCalledTimes(1)
 })

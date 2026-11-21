@@ -104,3 +104,35 @@ it('does not label first-page rows as page two when paging fails', async () => {
   expect(panel.get('[role="alert"]').text()).not.toContain('admin.ops.records.refreshFailed')
   panel.unmount()
 })
+
+it('shows the common identity filters before expanding the advanced filters', async () => {
+  const panel = mountPanel()
+  await panel.setProps({ groupId: 31 })
+  await flushPromises()
+  const filters = panel.findAllComponents({ name: 'OpsErrorIdentityFilter' })
+  expect(panel.find('[data-testid="error-more-filters"]').exists()).toBe(false)
+  expect(filters.map(filter => filter.props('kind'))).toEqual(['user', 'key', 'account'])
+  for (const [index, id] of [21, 22, 23].entries()) {
+    filters[index].vm.$emit('update:id', id)
+    await flushPromises()
+  }
+  expect(opsAPI.listErrorRecords).toHaveBeenLastCalledWith(
+    expect.objectContaining({ user_id: 21, api_key_id: 22, account_id: 23 }), expect.anything()
+  )
+  filters[0].vm.$emit('update:id', 24)
+  await flushPromises()
+  expect(opsAPI.listErrorRecords).toHaveBeenLastCalledWith(
+    expect.objectContaining({ user_id: 24, account_id: 23 }), expect.anything()
+  )
+  expect(vi.mocked(opsAPI.listErrorRecords).mock.calls.at(-1)?.[0].api_key_id).toBeUndefined()
+  filters[2].vm.$emit('update:id', undefined)
+  await flushPromises()
+  expect(vi.mocked(opsAPI.listErrorRecords).mock.calls.at(-1)?.[0]).toMatchObject({ user_id: 24, group_id: 31 })
+  expect(vi.mocked(opsAPI.listErrorRecords).mock.calls.at(-1)?.[0].account_id).toBeUndefined()
+  await panel.findAll('button').find(button => button.text() === 'admin.ops.records.reset')!.trigger('click')
+  await flushPromises()
+  const resetQuery = vi.mocked(opsAPI.listErrorRecords).mock.calls.at(-1)?.[0]
+  expect(resetQuery?.group_id).toBe(31)
+  expect(resetQuery?.user_id).toBeUndefined()
+
+})

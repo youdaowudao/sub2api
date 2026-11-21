@@ -588,6 +588,8 @@ export default {
       keyName: 'Key Name', keyDeleted: 'Deleted', allKeys: 'All keys',
       modelPlaceholder: 'Search model', allCategories: 'All categories', allStatuses: 'All status codes',
       empty: 'No error requests', failedToLoad: 'Failed to load error requests',
+      retryLoad: 'Could not load failed requests. Please try again.',
+      queryTimeout: 'The failed requests query timed out. Narrow the date range or filter by account, then try again.',
       categories: {
         auth: 'Auth failed', rate_limit: 'Rate limited', quota: 'Balance/Subscription',
         invalid_request: 'Invalid request', service_unavailable: 'Service unavailable',
