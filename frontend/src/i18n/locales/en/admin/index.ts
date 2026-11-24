@@ -5,6 +5,7 @@ import resources from './resources'
 import ops from './ops'
 import settings from './settings'
 import audit from './audit'
+import videoTasks from './videoTasks'
 import promptAudit from './promptAudit'
 import plugins from './plugins'
 import forkEmailSignupFilter from './forkEmailSignupFilter'
@@ -17,6 +18,7 @@ export default {
   ...ops,
   ...settings,
   ...audit,
+  ...videoTasks,
   ...promptAudit,
   ...plugins,
   ...forkEmailSignupFilter,

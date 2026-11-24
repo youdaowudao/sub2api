@@ -200,12 +200,20 @@ func NewHTTPUpstream(cfg *config.Config) service.HTTPUpstream {
 //   - 调用方必须关闭 resp.Body，否则会导致 inFlight 计数泄漏
 //   - inFlight > 0 的客户端不会被淘汰，确保活跃请求不被中断
 func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	if req != nil {
+		if err := service.VideoRelayTrackingCanceled(req.Context()); err != nil {
+			return nil, err
+		}
+	}
 	applyGrokCLIProxyHeaders(req)
 	if err := s.validateRequestHost(req); err != nil {
 		return nil, err
 	}
 	profile := service.HTTPUpstreamProfileDefault
 	if req != nil {
+		if err := service.VideoRelayTrackingCanceled(req.Context()); err != nil {
+			return nil, err
+		}
 		profile = service.HTTPUpstreamProfileFromContext(req.Context())
 	}
 
@@ -314,6 +322,10 @@ func doUpstreamRequest(client *http.Client, req *http.Request, drainTimeouts ...
 		drainTimeout = drainTimeouts[0]
 	}
 	ctx, cancel := pkghttputil.NewUpstreamAttemptContext(req.Context(), drainTimeout)
+	if err := service.VideoRelayTrackingCanceled(ctx); err != nil {
+		cancel()
+		return nil, err
+	}
 	resp, err := servertiming.Do(client, req.WithContext(ctx))
 	if err != nil {
 		cancel()

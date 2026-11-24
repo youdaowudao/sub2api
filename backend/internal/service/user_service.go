@@ -1056,6 +1056,20 @@ func (s *UserService) GetByID(ctx context.Context, id int64) (*User, error) {
 	return user, nil
 }
 
+func (s *UserService) GetVideoTaskAdmin(ctx context.Context, id *int64, sessionBinding bool) (*User, bool, error) {
+	reader, ok := s.userRepo.(interface {
+		GetVideoTaskAdmin(context.Context, *int64, bool) (*User, bool, error)
+	})
+	if !ok {
+		return nil, false, fmt.Errorf("video task admin lookup is unavailable")
+	}
+	user, enabled, err := reader.GetVideoTaskAdmin(ctx, id, sessionBinding)
+	if err == nil && sessionBinding {
+		normalizeLoadedUserTokenVersion(user)
+	}
+	return user, enabled, err
+}
+
 func normalizeLoadedUserTokenVersion(user *User) {
 	if user == nil || user.TokenVersionResolved {
 		return

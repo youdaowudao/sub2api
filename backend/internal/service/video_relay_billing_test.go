@@ -20,63 +20,25 @@ type videoRelayBillingCacheFixture struct {
 	windowWrites int
 }
 
-type videoRelayBillingKeyFixture struct {
-	APIKeyRepository
-	key *APIKey
-	err error
-}
-
-func (r videoRelayBillingKeyFixture) GetByID(context.Context, int64) (*APIKey, error) {
-	return r.key, r.err
-}
-
-type videoRelayBillingConcurrencyFixture struct {
-	ConcurrencyCache
-	reads int
-}
-
-func (cache *videoRelayBillingConcurrencyFixture) GetAPIKeyConcurrencyBatch(context.Context, []int64) (map[int64]int, error) {
-	cache.reads++
-	return nil, nil
-}
-
-type videoRelayBillingUserFixture struct {
-	UserRepository
-	user  *User
-	reads int
-}
-
-func (r *videoRelayBillingUserFixture) GetByID(context.Context, int64) (*User, error) {
-	r.reads++
-	return r.user, nil
-}
-
-func TestVideoRelayBillingReusesUserFromKeyRead(t *testing.T) {
-	user := &User{ID: 7}
-	users := &videoRelayBillingUserFixture{user: user}
-	key := &APIKey{ID: 11, UserID: user.ID, User: user}
-	concurrent := &videoRelayBillingConcurrencyFixture{}
-	keys := &APIKeyService{apiKeyRepo: videoRelayBillingKeyFixture{key: key},
-		concurrencyService: NewConcurrencyService(concurrent)}
-	svc := NewVideoRelayService(nil, &OpenAIGatewayService{
-		userRepo: users, accountRepo: stubOpenAIAccountRepo{accounts: []Account{{ID: 13, Type: AccountTypeAPIKey}}},
-	}, keys)
-	task := &VideoRelayTask{UserID: user.ID, APIKeyID: key.ID, AccountID: 13, HoldAmount: 5}
-
-	params, err := svc.videoRelayBillingParams(context.Background(), task)
-	require.NoError(t, err)
-	require.Same(t, user, params.User)
-	require.Zero(t, users.reads, "the key lookup already loaded this user")
-	require.Zero(t, concurrent.reads, "settlement does not need current displayed key concurrency")
+func TestVideoRelayBillingUsesLockedSources(t *testing.T) {
+	accountRate := 2.0
+	sources := &VideoRelayBillingSources{
+		User:    User{ID: 7},
+		Key:     APIKey{ID: 11, UserID: 7, Quota: 9, RateLimit5h: 8},
+		Account: Account{ID: 13, Type: AccountTypeAPIKey, RateMultiplier: &accountRate},
+	}
+	svc := NewVideoRelayService(nil, &OpenAIGatewayService{}, &APIKeyService{})
+	task := &VideoRelayTask{UserID: 7, APIKeyID: 11, AccountID: 13, HoldAmount: 5, TotalCost: 3}
+	params := svc.videoRelayBillingParams(task, sources)
+	require.Same(t, &sources.User, params.User)
+	require.Same(t, &sources.Key, params.APIKey)
+	require.Same(t, &sources.Account, params.Account)
 	require.Equal(t, 5.0, params.Cost.ActualCost)
-
-	keys.apiKeyRepo = videoRelayBillingKeyFixture{err: ErrAPIKeyNotFound}
-	params, err = svc.videoRelayBillingParams(context.Background(), task)
-	require.NoError(t, err)
-	require.Same(t, user, params.User)
-	require.Equal(t, task.APIKeyID, params.APIKey.ID)
-	require.Equal(t, 1, users.reads, "the original user is still needed when the key was removed")
-	require.Zero(t, concurrent.reads)
+	require.Equal(t, 3.0, params.Cost.TotalCost)
+	require.Equal(t, accountRate, params.AccountRateMultiplier)
+	command := buildUsageBillingCommand(task.UsageRequestID(), nil, params)
+	require.Equal(t, 5.0, command.APIKeyQuotaCost)
+	require.Equal(t, 5.0, command.APIKeyRateLimitCost)
 }
 
 func (cache *videoRelayBillingCacheFixture) InvalidateUserBalance(_ context.Context, userID int64) error {
@@ -133,4 +95,39 @@ func TestVideoRelayInvalidatesBalanceAndWindowWithoutApplyingAnotherDebit(t *tes
 	require.Equal(t, float64(6), cache.windows[keyID])
 	require.Zero(t, cache.deductions)
 	require.Zero(t, cache.windowWrites)
+}
+
+func TestVideoRelayZeroHoldKeepsCustomerCaches(t *testing.T) {
+	const userID, keyID = int64(5), int64(7)
+	cache := &videoRelayBillingCacheFixture{
+		balances: map[int64]float64{userID: 10},
+		windows:  map[int64]float64{keyID: 4},
+	}
+	userKeys := &videoRelayBillingKeysFixture{}
+	keys := &APIKeyService{apiKeyRepo: userKeys}
+	svc := NewVideoRelayService(nil, &OpenAIGatewayService{
+		billingCacheService: &BillingCacheService{cache: cache},
+	}, keys)
+	task := &VideoRelayTask{UserID: userID, APIKeyID: keyID, HoldAmount: 0, TotalCost: 3}
+	for _, charged := range []bool{false, true} {
+		svc.invalidateFunds(context.Background(), task, charged)
+		require.Equal(t, float64(10), cache.balances[userID], "zero amount must leave the actual cached wallet intact")
+		require.Equal(t, float64(4), cache.windows[keyID], "zero amount must leave the actual cached key window intact")
+	}
+	require.Zero(t, userKeys.reads, "no cache work needs a key inventory read")
+	task.HoldAmount = 1
+	svc.invalidateFunds(context.Background(), task, true)
+	require.NotContains(t, cache.balances, userID)
+	require.NotContains(t, cache.windows, keyID)
+	require.Equal(t, 1, userKeys.reads)
+}
+
+type videoRelayBillingKeysFixture struct {
+	APIKeyRepository
+	reads int
+}
+
+func (r *videoRelayBillingKeysFixture) ListKeysByUserID(context.Context, int64) ([]string, error) {
+	r.reads++
+	return nil, nil
 }

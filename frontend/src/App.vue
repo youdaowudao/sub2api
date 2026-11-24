@@ -72,6 +72,20 @@ function onAdminComplianceRequired(event: Event) {
   adminComplianceStore.requireAcknowledgement(detail)
 }
 
+async function checkAdminComplianceAfterNavigation() {
+  await router.isReady()
+  if (!authStore.isAdmin || !authStore.isAuthenticated || adminComplianceStore.initialized) return
+
+  const redirect = route.query.redirect
+  const destination = route.name === 'Login' && typeof redirect === 'string' &&
+    redirect.startsWith('/') && !redirect.startsWith('//')
+    ? router.resolve(redirect)
+    : route
+  if (!destination.meta.skipAdminCompliance) {
+    await adminComplianceStore.fetchStatus()
+  }
+}
+
 // 订阅功能开关（opt-out）。关闭后不再预加载/轮询订阅接口；开关在登录后才到达时补启动，反向则清空。
 const subscriptionFeatureEnabled = computed(() => isFeatureFlagEnabled(FeatureFlags.subscription))
 
@@ -96,7 +110,7 @@ watch(
   (isAuthenticated, oldValue) => {
     if (isAuthenticated) {
       if (authStore.isAdmin) {
-        adminComplianceStore.fetchStatus().catch((error) => {
+        checkAdminComplianceAfterNavigation().catch((error) => {
           console.error('Failed to fetch admin compliance status:', error)
         })
       }
@@ -171,5 +185,5 @@ onMounted(async () => {
   <Toast />
   <AnnouncementPopup />
   <GuideHost />
-  <AdminComplianceDialog />
+  <AdminComplianceDialog v-if="!route.meta.skipAdminCompliance" />
 </template>

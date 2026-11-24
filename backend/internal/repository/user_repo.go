@@ -194,6 +194,50 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 	return out, nil
 }
 
+// GetVideoTaskAdmin reads only the identity needed to authorize the video
+// task list. A nil ID denotes the existing legacy admin-key identity.
+func (r *userRepository) GetVideoTaskAdmin(ctx context.Context, id *int64, sessionBinding bool) (*service.User, bool, error) {
+	exec, err := r.userProfileIdentitySQL(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	user := &service.User{}
+	var bindingEnabled bool
+	projection := `SELECT id,email,role,status,concurrency`
+	dest := []any{&user.ID, &user.Email, &user.Role, &user.Status, &user.Concurrency}
+	var args []any
+	if id != nil {
+		args = append(args, *id)
+	}
+	if sessionBinding {
+		projection += `,password_hash,token_version,
+			COALESCE((SELECT value FROM settings WHERE key=$2),'')='true'`
+		args = append(args, service.SettingKeySessionBindingEnabled)
+		dest = append(dest, &user.PasswordHash, &user.TokenVersion, &bindingEnabled)
+	}
+	query := projection + ` FROM users WHERE deleted_at IS NULL`
+	if id == nil {
+		query += ` AND role='admin' AND status='active' ORDER BY id LIMIT 1`
+	} else {
+		query += ` AND id=$1`
+	}
+	rows, err := exec.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, false, err
+		}
+		return nil, false, service.ErrUserNotFound
+	}
+	if err := rows.Scan(dest...); err != nil {
+		return nil, false, err
+	}
+	return user, bindingEnabled, rows.Err()
+}
+
 func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*service.User, error) {
 	ctx = mixins.SkipSoftDelete(ctx)
 	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)

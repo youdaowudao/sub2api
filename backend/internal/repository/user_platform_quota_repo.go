@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 // UserPlatformQuotaRecord 是 repository 层的传输结构体，
@@ -200,6 +201,9 @@ func (r *userPlatformQuotaRepository) IncrementUsageWithReset(ctx context.Contex
 		// 30 天滚动月度窗口：过期时重置为 cost 并以 now 为新起始，否则累加保留原起始
 		newMonthly, newMonthlyStart := monthlyMaybeReset(existing.MonthlyUsageUsd, existing.MonthlyWindowStart, cost, now)
 
+		if err := service.VideoRelayTrackingCanceled(txCtx); err != nil {
+			return err
+		}
 		_, e := existing.Update().
 			SetDailyUsageUsd(newDaily).
 			SetWeeklyUsageUsd(newWeekly).

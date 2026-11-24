@@ -68,6 +68,10 @@ func enforceSessionBinding(
 	if settingService == nil || !settingService.IsSessionBindingEnabled(c.Request.Context()) {
 		return true
 	}
+	return enforceEnabledSessionBinding(c, authService, auditService, claims)
+}
+
+func enforceEnabledSessionBinding(c *gin.Context, authService *service.AuthService, auditService *service.AuditLogService, claims *service.JWTClaims) bool {
 	if claims == nil || claims.BindingHash == "" {
 		return true
 	}

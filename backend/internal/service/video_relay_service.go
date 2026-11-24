@@ -42,6 +42,10 @@ func VideoRelayFailureMessage(reason string) string {
 		return videoRelayRejectedMessage
 	case VideoRelayUnconfirmed:
 		return videoRelayUnconfirmedMessage
+	case VideoRelayTrackingExpired:
+		return "Video tracking expired. The frozen amount was returned. Submit a new request if you still need the video."
+	case VideoRelayAccountDeleted:
+		return "The video route was removed. The frozen amount was returned. Submit a new request if you still need the video."
 	default:
 		return videoRelayFailedMessage
 	}
@@ -279,7 +283,7 @@ func (s *VideoRelayService) submitSelected(c *gin.Context, input VideoRelayReque
 		return current, nil
 	}
 	current = s.recordSubmission(ctx, sent, requestID, reply.TaskID)
-	if current.UpstreamTaskID != reply.TaskID {
+	if current.BillingState != VideoRelayHeld || current.UpstreamTaskID != reply.TaskID {
 		return current, nil
 	}
 	if reply.Status == VideoRelayStatusCompleted || reply.Status == VideoRelayStatusFailed {
@@ -462,84 +466,71 @@ func (s *VideoRelayService) applyReply(ctx context.Context, task *VideoRelayTask
 }
 
 func (s *VideoRelayService) refund(ctx context.Context, task *VideoRelayTask, reason, message string) *VideoRelayTask {
-	writeCtx, cancel := detachedBillingContext(ctx)
-	defer cancel()
-	updated, result, err := s.repo.Settle(writeCtx, task, VideoRelaySettlement{FailureReason: reason, ErrorMessage: message})
-	if err != nil {
-		logger.LegacyPrintf("service.video_relay", "refund pending for task %s: %v", task.TaskID, err)
-		return s.readPersisted(ctx, task)
-	}
-	if result != nil && result.Applied {
-		s.invalidateFunds(writeCtx, task, false)
-	}
-	return updated
+	return s.settleVideoRelayForCustomer(ctx, task, VideoRelaySettlement{FailureReason: reason, ErrorMessage: message})
 }
 
 func (s *VideoRelayService) charge(ctx context.Context, task *VideoRelayTask) *VideoRelayTask {
+	return s.settleVideoRelayForCustomer(ctx, task, VideoRelaySettlement{Completed: true})
+}
+
+func (s *VideoRelayService) settleVideoRelayForCustomer(ctx context.Context, task *VideoRelayTask, change VideoRelaySettlement) *VideoRelayTask {
 	writeCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
-	params, err := s.videoRelayBillingParams(writeCtx, task)
+	updated, _, err := s.settleVideoRelay(writeCtx, writeCtx, task, change)
 	if err != nil {
-		return task
-	}
-	cmd := buildUsageBillingCommand(task.UsageRequestID(), nil, params)
-	updated, result, err := s.repo.Settle(writeCtx, task, VideoRelaySettlement{
-		Completed: true, AccountType: params.Account.Type, Billing: *cmd,
-	})
-	if err != nil {
-		logger.LegacyPrintf("service.video_relay", "charge pending for task %s: %v", task.TaskID, err)
+		logger.LegacyPrintf("service.video_relay", "settlement pending for task %s: %v", task.TaskID, err)
 		return s.readPersisted(ctx, task)
-	}
-	if result != nil && result.Applied {
-		s.invalidateFunds(writeCtx, task, true)
-		s.finishCharge(writeCtx, params, result)
 	}
 	return updated
 }
 
-func (s *VideoRelayService) videoRelayBillingParams(ctx context.Context, task *VideoRelayTask) (*postUsageBillingParams, error) {
-	// The repository already loads the owner. Displayed concurrency and compiled
-	// IP rules are used by other entry points, not by settlement.
-	key, err := s.keys.apiKeyRepo.GetByID(ctx, task.APIKeyID)
-	if errors.Is(err, ErrAPIKeyNotFound) {
-		key = &APIKey{ID: task.APIKeyID, UserID: task.UserID}
-	} else if err != nil {
-		return nil, err
-	}
-	user := key.User
-	if key.UserID != task.UserID {
-		key = &APIKey{ID: task.APIKeyID, UserID: task.UserID}
-		user = nil
-	}
-	if user == nil || user.ID != task.UserID {
-		user, err = s.gateway.userRepo.GetByID(ctx, task.UserID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	account, err := s.gateway.accountRepo.GetByID(ctx, task.AccountID)
-	if errors.Is(err, ErrAccountNotFound) {
-		account = &Account{ID: task.AccountID}
-	} else if err != nil {
-		return nil, err
-	}
+func (s *VideoRelayService) videoRelayBillingParams(task *VideoRelayTask, sources *VideoRelayBillingSources) *postUsageBillingParams {
 	return &postUsageBillingParams{
 		Cost: &CostBreakdown{ActualCost: task.HoldAmount, TotalCost: task.TotalCost},
-		User: user, APIKey: key, Account: account, APIKeyService: s.keys,
-		AccountRateMultiplier: account.BillingRateMultiplier(), Platform: PlatformOpenAI,
-	}, nil
+		User: &sources.User, APIKey: &sources.Key, Account: &sources.Account, APIKeyService: s.keys,
+		AccountRateMultiplier: sources.Account.BillingRateMultiplier(), Platform: PlatformOpenAI,
+	}
+}
+
+func (s *VideoRelayService) settleVideoRelay(ctx, cleanup context.Context, task *VideoRelayTask, change VideoRelaySettlement) (*VideoRelayTask, *UsageBillingApplyResult, error) {
+	var params *postUsageBillingParams
+	if change.Completed {
+		change.BuildBilling = func(sources *VideoRelayBillingSources) UsageBillingCommand {
+			params = s.videoRelayBillingParams(task, sources)
+			return *buildUsageBillingCommand(task.UsageRequestID(), nil, params)
+		}
+	}
+	updated, result, err := s.repo.Settle(ctx, task, change)
+	if err != nil || result == nil || !result.Applied {
+		return updated, result, err
+	}
+	charged := updated.BillingState == VideoRelayCharged
+	s.invalidateFunds(cleanup, task, charged)
+	if charged && params != nil && VideoRelayTrackingCanceled(cleanup) == nil {
+		s.finishCharge(cleanup, params, result)
+	}
+	return updated, result, nil
 }
 
 func (s *VideoRelayService) invalidateFunds(ctx context.Context, task *VideoRelayTask, charged bool) {
-	cacheCtx, cancel := detachedBillingContext(ctx)
+	if task.HoldAmount == 0 {
+		return
+	}
+	var cacheCtx context.Context
+	var cancel context.CancelFunc
+	if ctx.Value(videoRelayTrackingContextKey{}) == nil {
+		cacheCtx, cancel = detachedBillingContext(ctx)
+	} else {
+		cacheCtx, cancel = context.WithTimeout(ctx, postUsageBillingTimeout)
+	}
 	defer cancel()
-	if cache := s.gateway.billingCacheService; cache != nil {
+	if cache := s.gateway.billingCacheService; cache != nil && VideoRelayTrackingCanceled(cacheCtx) == nil {
 		_ = cache.InvalidateUserBalance(cacheCtx, task.UserID)
-		if charged {
+		if charged && VideoRelayTrackingCanceled(cacheCtx) == nil {
 			_ = cache.InvalidateAPIKeyRateLimit(cacheCtx, task.APIKeyID)
 		}
 	}
-	if s.keys != nil {
+	if s.keys != nil && VideoRelayTrackingCanceled(cacheCtx) == nil {
 		s.keys.InvalidateAuthCacheByUserID(cacheCtx, task.UserID)
 	}
 }
@@ -550,14 +541,18 @@ func (s *VideoRelayService) finishCharge(ctx context.Context, params *postUsageB
 		deps.deferredService.ScheduleLastUsedUpdate(params.Account.ID)
 	}
 	if cost := params.Cost.ActualCost; cost > 0 && deps.userPlatformQuotaRepo != nil && deps.billingCacheService != nil {
-		if deps.billingCacheService.HasUserPlatformQuotaLimit(ctx, params.User.ID, params.Platform) {
-			deps.billingCacheService.IncrementUserPlatformQuotaUsage(params.User.ID, params.Platform, cost)
-			if s.gateway.cfg == nil || !s.gateway.cfg.Database.UserPlatformQuotaFlusherEnabled {
+		if deps.billingCacheService.HasUserPlatformQuotaLimit(ctx, params.User.ID, params.Platform) && VideoRelayTrackingCanceled(ctx) == nil {
+			if ctx.Value(videoRelayTrackingContextKey{}) == nil {
+				deps.billingCacheService.IncrementUserPlatformQuotaUsage(params.User.ID, params.Platform, cost)
+			} else {
+				deps.billingCacheService.incrementUserPlatformQuotaUsage(ctx, params.User.ID, params.Platform, cost)
+			}
+			if (s.gateway.cfg == nil || !s.gateway.cfg.Database.UserPlatformQuotaFlusherEnabled) && VideoRelayTrackingCanceled(ctx) == nil {
 				persistPostUsagePlatformQuota(ctx, deps.userPlatformQuotaRepo, params.User.ID, params.Platform, cost)
 			}
 		}
 	}
-	if deps.balanceNotifyService != nil {
+	if deps.balanceNotifyService != nil && VideoRelayTrackingCanceled(ctx) == nil {
 		deps.balanceNotifyService.submitUsageNotifications(params, deps, result)
 	}
 }

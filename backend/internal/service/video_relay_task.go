@@ -24,12 +24,17 @@ const (
 	VideoRelayUpstreamRejected = "upstream_rejected"
 	VideoRelayUpstreamFailed   = "upstream_failed"
 	VideoRelayUnconfirmed      = "unconfirmed_unresolvable"
+	VideoRelayTrackingExpired  = "tracking_expired"
+	VideoRelayAccountDeleted   = "account_deleted"
+	VideoRelayAPIKeyDeleted    = "api_key_deleted"
+	VideoRelayUserDeleted      = "user_deleted"
 )
 
 var (
 	ErrVideoRelayNotFound    = errors.New("video task not found")
 	ErrVideoRelaySendBlocked = errors.New("video route is confirming an earlier submission")
 	ErrVideoRelayNoSend      = errors.New("task is no longer eligible to submit a video")
+	ErrVideoRelayLeaseLost   = errors.New("video tracking lease is no longer current")
 )
 
 type VideoRelayTask struct {
@@ -64,6 +69,13 @@ type VideoRelayTask struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	SettledAt    *time.Time
+	NextCheckAt  *time.Time
+
+	// TrackingLease is set only for an owned background claim. A foreground
+	// read can see NextCheckAt without acquiring the right to use this lease.
+	TrackingLease         *time.Time
+	TrackingStartedAt     time.Time
+	TrackingSourceRemoval string
 }
 
 const VideoRelayConfirmationWindow = 30 * time.Minute
@@ -149,6 +161,47 @@ type VideoRelaySettlement struct {
 	ErrorMessage  string
 	AccountType   string
 	Billing       UsageBillingCommand
+	BuildBilling  func(*VideoRelayBillingSources) UsageBillingCommand
+}
+
+type VideoRelayBillingSources struct {
+	User    User
+	Key     APIKey
+	Account Account
+}
+
+type VideoRelayAdminFilter struct {
+	UserID   int64
+	TaskID   string
+	Status   string
+	RiskOnly bool
+}
+
+type VideoRelayAdminRow struct {
+	TaskID         string     `json:"task_id"`
+	UserID         int64      `json:"user_id"`
+	UserEmail      string     `json:"user_email"`
+	GroupID        int64      `json:"group_id"`
+	AccountID      int64      `json:"account_id"`
+	Model          string     `json:"model"`
+	UpstreamModel  string     `json:"upstream_model"`
+	Seconds        int        `json:"seconds"`
+	Resolution     string     `json:"resolution"`
+	HoldAmount     float64    `json:"hold_amount"`
+	Status         string     `json:"status"`
+	BillingState   string     `json:"billing_state"`
+	FailureReason  string     `json:"failure_reason"`
+	UpstreamTaskID string     `json:"upstream_task_id"`
+	CreatedAt      time.Time  `json:"created_at"`
+	SettledAt      *time.Time `json:"settled_at"`
+	Risk           bool       `json:"risk"`
+}
+
+type VideoRelayTrackingFinish struct {
+	Status         string
+	Progress       int
+	Retry          bool
+	AccountRemoved bool
 }
 
 type VideoRelayRepository interface {
@@ -160,4 +213,8 @@ type VideoRelayRepository interface {
 	ConfirmLookup(ctx context.Context, ticket *VideoRelayTask, collectionPath string, logs []VideoRelayChargeRecord) (*VideoRelayTask, error)
 	UpdateProgress(ctx context.Context, task *VideoRelayTask, status string, progress int) (*VideoRelayTask, error)
 	Settle(ctx context.Context, task *VideoRelayTask, change VideoRelaySettlement) (*VideoRelayTask, *UsageBillingApplyResult, error)
+	ClaimDue(ctx context.Context) (*VideoRelayTask, error)
+	ClaimTrackingLookup(ctx context.Context, claim *VideoRelayTask) (*VideoRelayTask, bool, error)
+	FinishClaim(ctx context.Context, claim *VideoRelayTask, finish VideoRelayTrackingFinish) (*VideoRelayTask, error)
+	ListAdmin(ctx context.Context, filter VideoRelayAdminFilter, offset, limit int) ([]VideoRelayAdminRow, int64, error)
 }

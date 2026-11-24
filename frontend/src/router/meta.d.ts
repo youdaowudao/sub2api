@@ -19,6 +19,8 @@ declare module 'vue-router' {
      */
     requiresAdmin?: boolean
 
+    skipAdminCompliance?: boolean
+
     /**
      * Page title for this route
      */

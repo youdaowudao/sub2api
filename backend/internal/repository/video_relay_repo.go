@@ -15,7 +15,7 @@ const videoRelayColumns = `task_id, user_id, api_key_id, group_id, account_id,
 	model, upstream_model, seconds, resolution, total_cost, hold_amount, rate_multiplier,
 	upstream_site_fingerprint, upstream_credential_fingerprint, upstream_route_fingerprint,
 	upstream_task_id, upstream_request_id, status, billing_state, progress, error_message, failure_reason,
-	sent_at, last_lookup_at, created_at, updated_at, settled_at`
+	sent_at, last_lookup_at, created_at, updated_at, settled_at, next_check_at`
 
 const videoRelayTrustedTaskIDSQL = `(upstream_task_id COLLATE "C" ~ '^[A-Za-z0-9_.-]{1,128}$' AND upstream_task_id ~ '[^.]')`
 
@@ -30,15 +30,16 @@ func NewVideoRelayRepository(db *sql.DB) service.VideoRelayRepository {
 	return &videoRelayRepository{db: db, billing: usageBillingRepository{db: db}}
 }
 
-func scanVideoRelayTask(row interface{ Scan(...any) error }) (*service.VideoRelayTask, error) {
+func scanVideoRelayTask(row interface{ Scan(...any) error }, additional ...any) (*service.VideoRelayTask, error) {
 	task := &service.VideoRelayTask{}
-	err := row.Scan(
+	fields := []any{
 		&task.TaskID, &task.UserID, &task.APIKeyID, &task.GroupID, &task.AccountID,
 		&task.Model, &task.UpstreamModel, &task.Seconds, &task.Resolution, &task.TotalCost, &task.HoldAmount, &task.RateMultiplier,
 		&task.SiteFingerprint, &task.CredentialFingerprint, &task.RouteFingerprint,
 		&task.UpstreamTaskID, &task.UpstreamRequestID, &task.Status, &task.BillingState, &task.Progress, &task.ErrorMessage, &task.FailureReason,
-		&task.SentAt, &task.LastLookupAt, &task.CreatedAt, &task.UpdatedAt, &task.SettledAt,
-	)
+		&task.SentAt, &task.LastLookupAt, &task.CreatedAt, &task.UpdatedAt, &task.SettledAt, &task.NextCheckAt,
+	}
+	err := row.Scan(append(fields, additional...)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrVideoRelayNotFound
 	}
@@ -153,7 +154,8 @@ func hasOtherVideoRelayUnresolvedSend(ctx context.Context, tx *sql.Tx, task *ser
 
 func sameVideoRelaySend(task, sent *service.VideoRelayTask) bool {
 	return task.SentAt != nil && sent.SentAt != nil && task.SentAt.Equal(*sent.SentAt) &&
-		task.RouteFingerprint == sent.RouteFingerprint
+		task.RouteFingerprint == sent.RouteFingerprint && task.SiteFingerprint == sent.SiteFingerprint &&
+		task.CredentialFingerprint == sent.CredentialFingerprint
 }
 
 func (r *videoRelayRepository) RecordSubmission(ctx context.Context, sent *service.VideoRelayTask, requestID, upstreamTaskID string) (*service.VideoRelayTask, error) {
@@ -169,18 +171,24 @@ func (r *videoRelayRepository) RecordSubmission(ctx context.Context, sent *servi
 	if err != nil {
 		return nil, err
 	}
-	if current.BillingState != service.VideoRelayHeld || !sameVideoRelaySend(current, sent) {
+	acceptsLateEvidence := current.BillingState == service.VideoRelayRefunded && isVideoRelayDeletionReason(current.FailureReason)
+	if !sameVideoRelaySend(current, sent) || current.BillingState != service.VideoRelayHeld && !acceptsLateEvidence {
 		return current, nil
 	}
 	if current.UpstreamRequestID != "" && requestID != "" && requestID != current.UpstreamRequestID ||
 		service.ValidVideoRelayUpstreamTaskID(current.UpstreamTaskID) && upstreamTaskID != "" && upstreamTaskID != current.UpstreamTaskID {
 		return current, errors.New("video submission evidence conflicts with stored identity")
 	}
+	if acceptsLateEvidence && (requestID == "" || requestID == current.UpstreamRequestID) &&
+		(upstreamTaskID == "" || upstreamTaskID == current.UpstreamTaskID) {
+		return current, nil
+	}
 	updated, err := scanVideoRelayTask(tx.QueryRowContext(ctx, `
 		UPDATE video_relay_tasks
 		SET upstream_request_id=COALESCE(NULLIF($2, ''), upstream_request_id),
 		    upstream_task_id=COALESCE(NULLIF($3, ''), upstream_task_id),
 		    status=CASE
+		        WHEN billing_state<>'held' THEN status
 		        WHEN status='submitting' AND $3='' THEN 'unconfirmed'
 		        WHEN status IN ('submitting','unconfirmed') AND $3<>'' THEN 'queued'
 		        ELSE status
@@ -197,27 +205,49 @@ func (r *videoRelayRepository) RecordSubmission(ctx context.Context, sent *servi
 }
 
 func (r *videoRelayRepository) ClaimLookup(ctx context.Context, taskID string) (*service.VideoRelayTask, bool, error) {
+	return r.claimVideoRelayLookup(ctx, &service.VideoRelayTask{TaskID: taskID})
+}
+
+func (r *videoRelayRepository) ClaimTrackingLookup(ctx context.Context, claim *service.VideoRelayTask) (*service.VideoRelayTask, bool, error) {
+	if claim.TrackingLease == nil {
+		return nil, false, service.ErrVideoRelayLeaseLost
+	}
+	return r.claimVideoRelayLookup(ctx, claim)
+}
+
+func (r *videoRelayRepository) claimVideoRelayLookup(ctx context.Context, expected *service.VideoRelayTask) (*service.VideoRelayTask, bool, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, false, err
 	}
 	defer tx.Rollback()
-	task, err := lockVideoRelayTask(ctx, tx, taskID)
+	task, now, err := lockObservedVideoRelayTask(ctx, tx, expected)
 	if err != nil {
-		return nil, false, err
+		return task, false, err
 	}
-	if !task.CanLookupSubmission() {
-		return task, false, nil
-	}
-	var now time.Time
-	if err := tx.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
-		return nil, false, err
-	}
-	cutoff := task.SentAt.Add(service.VideoRelayConfirmationWindow)
-	if last := task.LastLookupAt; last != nil && now.Sub(*last) < videoRelayLookupInterval {
-		// The first lookup at or beyond the deadline may bypass the normal interval.
-		if now.Before(cutoff) || !last.Before(cutoff) {
+	if expected.TrackingLease != nil {
+		point, _ := service.VideoRelayTrackingLookupPoints(task, now)
+		if point.IsZero() {
 			return task, false, nil
+		}
+		if last := task.LastLookupAt; last != nil && !last.Before(point) {
+			terminal := task.BillingState == service.VideoRelayHeld &&
+				point.Equal(task.SentAt.Add(service.VideoRelayConfirmationWindow))
+			if !terminal || now.Sub(*last) < service.VideoRelayTrackingLease ||
+				!last.Before(expected.TrackingStartedAt) {
+				return task, false, nil
+			}
+		}
+	} else {
+		if !task.CanLookupSubmission() {
+			return task, false, nil
+		}
+		cutoff := task.SentAt.Add(service.VideoRelayConfirmationWindow)
+		if last := task.LastLookupAt; last != nil && now.Sub(*last) < videoRelayLookupInterval {
+			// The first lookup at or beyond the deadline may bypass the regular interval.
+			if now.Before(cutoff) || !last.Before(cutoff) {
+				return task, false, nil
+			}
 		}
 	}
 	ambiguous, err := hasOtherVideoRelayUnresolvedSend(ctx, tx, task, false)
@@ -225,13 +255,19 @@ func (r *videoRelayRepository) ClaimLookup(ctx context.Context, taskID string) (
 		return task, false, err
 	}
 	ticket, err := scanVideoRelayTask(tx.QueryRowContext(ctx, `
-		UPDATE video_relay_tasks SET last_lookup_at=$2, updated_at=$2 WHERE task_id=$1 RETURNING `+videoRelayColumns, taskID, now))
+		UPDATE video_relay_tasks SET last_lookup_at=$2, updated_at=$2
+		WHERE task_id=$1 AND ($3::timestamptz IS NULL OR (next_check_at=$3 AND next_check_at>clock_timestamp()))
+		RETURNING `+videoRelayColumns, task.TaskID, now, expected.TrackingLease))
+	if errors.Is(err, service.ErrVideoRelayNotFound) && expected.TrackingLease != nil {
+		return task, false, service.ErrVideoRelayLeaseLost
+	}
 	if err != nil {
-		return nil, false, err
+		return task, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, false, err
+		return task, false, err
 	}
+	ticket.TrackingLease, ticket.TrackingStartedAt = expected.TrackingLease, expected.TrackingStartedAt
 	return ticket, true, nil
 }
 
@@ -249,11 +285,12 @@ func (r *videoRelayRepository) ConfirmLookup(ctx context.Context, ticket *servic
 	if err := lockVideoRelaySiteCredential(ctx, tx, ticket); err != nil {
 		return nil, err
 	}
-	current, err := lockVideoRelayTask(ctx, tx, ticket.TaskID)
+	current, _, err := lockObservedVideoRelayTask(ctx, tx, ticket)
 	if err != nil {
 		return nil, err
 	}
-	if !current.CanLookupSubmission() || !sameVideoRelayLookup(current, ticket) {
+	lookupAllowed := current.CanLookupSubmission() || ticket.TrackingLease != nil && current.CanTrackRefund()
+	if !lookupAllowed || !sameVideoRelayLookup(current, ticket) {
 		return current, nil
 	}
 	candidate, err := videoRelayLookupCandidate(ctx, tx, current, collectionPath, logs)
@@ -264,7 +301,11 @@ func (r *videoRelayRepository) ConfirmLookup(ctx context.Context, ticket *servic
 		UPDATE video_relay_tasks
 		SET upstream_task_id=$2, updated_at=clock_timestamp(),
 		    status=CASE WHEN billing_state='held' THEN 'queued' ELSE status END
-		WHERE task_id=$1 RETURNING `+videoRelayColumns, current.TaskID, candidate))
+		WHERE task_id=$1 AND ($3::timestamptz IS NULL OR (next_check_at=$3 AND next_check_at>clock_timestamp()))
+		RETURNING `+videoRelayColumns, current.TaskID, candidate, ticket.TrackingLease))
+	if errors.Is(err, service.ErrVideoRelayNotFound) && ticket.TrackingLease != nil {
+		return current, service.ErrVideoRelayLeaseLost
+	}
 	if err != nil {
 		var pgError *pq.Error
 		if errors.As(err, &pgError) && pgError.Constraint == "video_relay_tasks_site_task_uidx" {
@@ -275,6 +316,7 @@ func (r *videoRelayRepository) ConfirmLookup(ctx context.Context, ticket *servic
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	updated.TrackingLease, updated.TrackingStartedAt = ticket.TrackingLease, ticket.TrackingStartedAt
 	return updated, nil
 }
 
@@ -350,26 +392,59 @@ func (r *videoRelayRepository) Settle(ctx context.Context, task *service.VideoRe
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	current, err := lockVideoRelayTask(ctx, tx, task.TaskID)
+	current, now, err := lockObservedVideoRelayTask(ctx, tx, task)
 	if err != nil {
-		return nil, nil, err
-	}
-	if current.BillingState != service.VideoRelayHeld || !canSettleVideoRelay(current, task, change) {
-		return current, nil, nil
-	}
-	if err := lockActiveVideoRelayUser(ctx, tx, current.UserID); err != nil {
 		return current, nil, err
 	}
+	if current.BillingState != service.VideoRelayHeld {
+		updated, err := recordVideoRelayLateRefundEvidence(ctx, tx, current, task, change)
+		return updated, nil, err
+	}
+	if !canSettleVideoRelay(current, task, change, now) {
+		return current, nil, nil
+	}
+	sources, deleted, err := lockVideoRelayBillingSources(ctx, tx, current, change.Completed && change.BuildBilling != nil)
+	if err != nil {
+		return current, nil, err
+	}
+	// Pure deletion observations are only a reason to enter this transaction.
+	// The locks above make the actual deletion and refund decision.
+	if isVideoRelayDeletionReason(change.FailureReason) && deleted == "" {
+		return current, nil, nil
+	}
+	if deleted != "" {
+		explicit := change.FailureReason == service.VideoRelayNotSent || change.FailureReason == service.VideoRelayUpstreamRejected
+		if !explicit && current.SentAt != nil && !service.ValidVideoRelayUpstreamTaskID(current.UpstreamTaskID) &&
+			now.Before(current.SentAt.Add(service.VideoRelaySendGrace)) {
+			return current, nil, nil
+		}
+		change.Completed = false
+		if !explicit {
+			change.FailureReason = deleted
+			change.ErrorMessage = service.VideoRelayFailureMessage(deleted)
+		}
+	}
+
 	result := &service.UsageBillingApplyResult{Applied: true}
 	reason, message := change.FailureReason, change.ErrorMessage
 	status, billingState, progress := service.VideoRelayStatusFailed, service.VideoRelayRefunded, current.Progress
-	if change.Completed {
+	switch {
+	case change.Completed:
+		if change.BuildBilling != nil {
+			change.AccountType = sources.Account.Type
+			change.Billing = change.BuildBilling(&sources)
+		}
 		if err := r.charge(ctx, tx, current, change, result); err != nil {
 			return current, nil, err
 		}
 		status, billingState, progress = service.VideoRelayStatusCompleted, service.VideoRelayCharged, 100
 		reason, message = "", ""
-	} else {
+	case deleted == service.VideoRelayUserDeleted:
+		result.NewBalance, err = refundDeletedVideoRelayUser(ctx, tx, current)
+		if err != nil {
+			return current, nil, err
+		}
+	default:
 		hold, err := releaseUsageBillingHeldBalance(ctx, tx, videoRelayAmount(current))
 		if err != nil {
 			return current, nil, err
@@ -377,10 +452,22 @@ func (r *videoRelayRepository) Settle(ctx context.Context, task *service.VideoRe
 		result.NewBalance = hold.NewBalance
 	}
 	finished, err := scanVideoRelayTask(tx.QueryRowContext(ctx, `
+		WITH settled AS MATERIALIZED (SELECT clock_timestamp() AS at)
 		UPDATE video_relay_tasks
 		SET status=$2, billing_state=$3, progress=$4, failure_reason=$5, error_message=$6,
-		    settled_at=clock_timestamp(), updated_at=clock_timestamp()
-		WHERE task_id=$1 RETURNING `+videoRelayColumns, current.TaskID, status, billingState, progress, reason, message))
+			settled_at=(SELECT at FROM settled), updated_at=(SELECT at FROM settled),
+			next_check_at=CASE
+				WHEN $7::timestamptz IS NULL THEN next_check_at
+				WHEN $3='refunded' AND sent_at IS NOT NULL AND NOT `+videoRelayTrustedTaskIDSQL+`
+					AND $5 IN ('unconfirmed_unresolvable','api_key_deleted','user_deleted')
+					THEN (SELECT at FROM settled)+interval '10 minutes'
+				ELSE NULL
+			END
+		WHERE task_id=$1 AND ($7::timestamptz IS NULL OR (next_check_at=$7 AND next_check_at>clock_timestamp()))
+		RETURNING `+videoRelayColumns, current.TaskID, status, billingState, progress, reason, message, task.TrackingLease))
+	if errors.Is(err, service.ErrVideoRelayNotFound) && task.TrackingLease != nil {
+		return current, nil, service.ErrVideoRelayLeaseLost
+	}
 	if err != nil {
 		return current, nil, err
 	}
@@ -390,15 +477,46 @@ func (r *videoRelayRepository) Settle(ctx context.Context, task *service.VideoRe
 	return finished, result, nil
 }
 
-// These conditions are checked with the task row locked, using the persisted
-// evidence for the same send or lookup that gave the caller its result.
-func canSettleVideoRelay(current, expected *service.VideoRelayTask, change service.VideoRelaySettlement) bool {
+func isVideoRelayDeletionReason(reason string) bool {
+	return reason == service.VideoRelayUserDeleted || reason == service.VideoRelayAPIKeyDeleted || reason == service.VideoRelayAccountDeleted
+}
+
+func recordVideoRelayLateRefundEvidence(ctx context.Context, tx *sql.Tx, current, expected *service.VideoRelayTask, change service.VideoRelaySettlement) (*service.VideoRelayTask, error) {
+	if current.BillingState != service.VideoRelayRefunded || !isVideoRelayDeletionReason(current.FailureReason) ||
+		service.ValidVideoRelayUpstreamTaskID(current.UpstreamTaskID) || !sameVideoRelaySend(current, expected) ||
+		current.UpstreamRequestID != expected.UpstreamRequestID {
+		return current, nil
+	}
+	if change.FailureReason != service.VideoRelayNotSent &&
+		(change.FailureReason != service.VideoRelayUpstreamRejected || current.UpstreamRequestID == "") {
+		return current, nil
+	}
+	if change.FailureReason == service.VideoRelayNotSent && current.UpstreamRequestID != "" {
+		return current, nil
+	}
+	updated, err := scanVideoRelayTask(tx.QueryRowContext(ctx, `
+		UPDATE video_relay_tasks SET failure_reason=$2,error_message=$3,updated_at=clock_timestamp()
+		WHERE task_id=$1 RETURNING `+videoRelayColumns, current.TaskID, change.FailureReason, change.ErrorMessage))
+	if err != nil {
+		return current, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+// Check persisted evidence for the same send or lookup, with the task locked.
+func canSettleVideoRelay(current, expected *service.VideoRelayTask, change service.VideoRelaySettlement, now time.Time) bool {
 	hasTaskID := service.ValidVideoRelayUpstreamTaskID(current.UpstreamTaskID)
 	if change.Completed || change.FailureReason == service.VideoRelayUpstreamFailed {
 		return hasTaskID && current.UpstreamTaskID == expected.UpstreamTaskID
 	}
 	switch change.FailureReason {
 	case service.VideoRelayNotSent:
+		if expected.TrackingLease != nil {
+			return current.SentAt == nil && !now.Before(current.CreatedAt.Add(service.VideoRelayUnsentDeadline))
+		}
 		return !hasTaskID && current.UpstreamRequestID == "" &&
 			(current.SentAt == nil && expected.SentAt == nil || sameVideoRelaySend(current, expected))
 	case service.VideoRelayUpstreamRejected:
@@ -407,8 +525,11 @@ func canSettleVideoRelay(current, expected *service.VideoRelayTask, change servi
 	case service.VideoRelayUnconfirmed:
 		return !hasTaskID && sameVideoRelayLookup(current, expected) &&
 			!current.LastLookupAt.Before(current.SentAt.Add(service.VideoRelayConfirmationWindow))
+	case service.VideoRelayTrackingExpired:
+		return expected.TrackingLease != nil && hasTaskID && current.UpstreamTaskID == expected.UpstreamTaskID &&
+			!expected.TrackingStartedAt.Before(current.CreatedAt.Add(service.VideoRelayTrackingWindow))
 	default:
-		return false
+		return expected.TrackingLease != nil && isVideoRelayDeletionReason(change.FailureReason)
 	}
 }
 

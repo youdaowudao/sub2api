@@ -13,7 +13,7 @@ func (s *APIKeyService) InvalidateAuthCacheByKey(ctx context.Context, key string
 
 // InvalidateAuthCacheByUserID 清除用户相关的 API Key 认证缓存
 func (s *APIKeyService) InvalidateAuthCacheByUserID(ctx context.Context, userID int64) {
-	if userID <= 0 {
+	if userID <= 0 || VideoRelayTrackingCanceled(ctx) != nil {
 		return
 	}
 	keys, err := s.apiKeyRepo.ListKeysByUserID(ctx, userID)
@@ -40,6 +40,9 @@ func (s *APIKeyService) deleteAuthCacheByKeys(ctx context.Context, keys []string
 		return
 	}
 	for _, key := range keys {
+		if VideoRelayTrackingCanceled(ctx) != nil {
+			return
+		}
 		if key == "" {
 			continue
 		}

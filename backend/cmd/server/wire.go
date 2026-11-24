@@ -134,8 +134,12 @@ func provideCleanup(
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
+	videoRelayTracker *service.VideoRelayTracker,
 ) func() {
 	return func() {
+		// Tracking can still be finishing a committed settlement. Wait while
+		// its billing, notification, cache and database dependencies are live.
+		videoRelayTracker.Stop()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 

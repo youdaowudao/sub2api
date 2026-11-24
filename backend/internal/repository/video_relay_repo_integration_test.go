@@ -585,7 +585,7 @@ func TestVideoRelayRepoUpstreamFailureRefundsOriginalHoldOnce(t *testing.T) {
 	assertVideoRelayFunds(t, db2, task, 10, 0, 0)
 }
 
-func TestVideoRelayRepoChecksActiveUserEvenForFreeSettlement(t *testing.T) {
+func TestVideoRelayRepoRefundsDeletedUserEvenForFreeSettlement(t *testing.T) {
 	ctx := context.Background()
 	repo := NewVideoRelayRepository(integrationDB)
 	db2 := videoRelayIndependentDB(t)
@@ -598,13 +598,18 @@ func TestVideoRelayRepoChecksActiveUserEvenForFreeSettlement(t *testing.T) {
 		require.NoError(t, err)
 		_, err = db2.ExecContext(ctx, "UPDATE users SET deleted_at=clock_timestamp() WHERE id=$1", task.UserID)
 		require.NoError(t, err)
-		_, _, err = repo.Settle(ctx, accepted, service.VideoRelaySettlement{Completed: true, AccountType: service.AccountTypeAPIKey})
-		require.ErrorIs(t, err, service.ErrUserNotFound)
+		finished, _, err := repo.Settle(ctx, accepted, service.VideoRelaySettlement{Completed: true, AccountType: service.AccountTypeAPIKey})
+		require.NoError(t, err, "a deleted owner must get the original refund on their own row")
+		require.Equal(t, service.VideoRelayRefunded, finished.BillingState)
+		require.Equal(t, "user_deleted", finished.FailureReason)
 		current, err := repo.Get(ctx, task.TaskID, task.UserID, task.APIKeyID)
 		require.NoError(t, err)
-		require.Equal(t, service.VideoRelayHeld, current.BillingState)
+		require.Equal(t, service.VideoRelayRefunded, current.BillingState)
 		require.False(t, current.CanDownload())
-		assertVideoRelayFunds(t, db2, task, 10-hold, hold, 0)
+		var deleted bool
+		require.NoError(t, db2.QueryRowContext(ctx, "SELECT deleted_at IS NOT NULL FROM users WHERE id=$1", task.UserID).Scan(&deleted))
+		require.True(t, deleted, "refund must preserve the owner's deletion")
+		assertVideoRelayFunds(t, db2, task, 10, 0, 0)
 	}
 }
 
@@ -702,6 +707,8 @@ func TestVideoRelayRepoZeroRateSavedThroughGroupAPIAndChargedThroughGateway(t *t
 		"model_mapping": map[string]any{fixture.Model: fixture.UpstreamModel},
 	}
 	account.Status, account.Schedulable = service.StatusActive, true
+	accountRate := 2.0
+	account.RateMultiplier = &accountRate
 	require.NoError(t, accountRepo.Update(ctx, account))
 	require.NoError(t, accountRepo.BindGroups(ctx, account.ID, []int64{fixture.GroupID}))
 
@@ -735,7 +742,9 @@ func TestVideoRelayRepoZeroRateSavedThroughGroupAPIAndChargedThroughGateway(t *t
 
 	billing := service.NewBillingService(cfg, nil)
 	concurrency := service.NewConcurrencyService(NewConcurrencyCache(testRedis(t), 1, 10))
-	cache := service.NewBillingCacheService(nil, userRepo, nil, apiKeyRepo, nil, nil, cfg, nil)
+	billingCacheStore := NewBillingCache(testRedis(t))
+	require.NoError(t, billingCacheStore.SetUserBalance(ctx, fixture.UserID, 5))
+	cache := service.NewBillingCacheService(billingCacheStore, userRepo, nil, apiKeyRepo, nil, nil, cfg, nil)
 	t.Cleanup(cache.Stop)
 	keys := service.NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, nil, nil, nil, cfg)
 	openAI := service.NewOpenAIGatewayService(accountRepo, nil, nil, userRepo, nil, nil, nil, cfg, nil, concurrency,
@@ -779,6 +788,15 @@ func TestVideoRelayRepoZeroRateSavedThroughGroupAPIAndChargedThroughGateway(t *t
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT actual_cost,total_cost FROM usage_logs WHERE request_id=$1 AND api_key_id=$2`, fixture.UsageRequestID(), fixture.APIKeyID).Scan(&charged, &price))
 	require.Zero(t, charged)
 	require.InDelta(t, 3, price, 0.00000001)
+	var accountQuota, keyQuota, keyWindow float64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT COALESCE((extra->>'quota_used')::numeric,0) FROM accounts WHERE id=$1`, fixture.AccountID).Scan(&accountQuota))
+	require.InDelta(t, 6, accountQuota, 0.00000001, "free customer video still uses the positive provider cost times the account multiplier")
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT quota_used,usage_5h FROM api_keys WHERE id=$1", fixture.APIKeyID).Scan(&keyQuota, &keyWindow))
+	require.Zero(t, keyQuota)
+	require.Zero(t, keyWindow)
+	cached, err := billingCacheStore.GetUserBalance(ctx, fixture.UserID)
+	require.NoError(t, err, "a real zero-fee order must leave the cached wallet intact")
+	require.Equal(t, 5.0, cached)
 
 	t.Run("recheck the real database when the refund response is lost", func(t *testing.T) {
 		reject.Store(true)

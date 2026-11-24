@@ -69,6 +69,31 @@ func TestVideoRelayHandlerOnlyReportsRefundAfterSettlement(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"status":"queued"`)
 }
 
+func TestVideoRelayHandlerReportsTrackingAndRemovedRouteRefunds(t *testing.T) {
+	for reason, message := range map[string]string{
+		service.VideoRelayTrackingExpired: "Video tracking expired. The frozen amount was returned. Submit a new request if you still need the video.",
+		service.VideoRelayAccountDeleted:  "The video route was removed. The frozen amount was returned. Submit a new request if you still need the video.",
+	} {
+		for _, state := range []string{service.VideoRelayRefunded, service.VideoRelayHeld} {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			task := &service.VideoRelayTask{
+				Status: service.VideoRelayStatusFailed, BillingState: state, FailureReason: reason,
+				ErrorMessage: "UPSTREAM_INTERNAL_TEST_MESSAGE",
+			}
+			writeVideoRelayTask(c, task)
+			require.NotContains(t, recorder.Body.String(), task.ErrorMessage)
+			if state == service.VideoRelayRefunded {
+				require.Contains(t, recorder.Body.String(), `"status":"failed"`)
+				require.Contains(t, recorder.Body.String(), message)
+			} else {
+				require.Contains(t, recorder.Body.String(), `"status":"queued"`)
+				require.NotContains(t, recorder.Body.String(), message)
+			}
+		}
+	}
+}
+
 func TestVideoRelayHandlerUsageRecordShowsOnlyThePublicModel(t *testing.T) {
 	model, mapped := "customer-video", "provider-only-video"
 	log := &service.UsageLog{RequestID: "video_relay:video_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
