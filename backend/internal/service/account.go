@@ -105,6 +105,7 @@ const (
 	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
 	OpenAIEndpointCapabilityAlphaSearch     OpenAIEndpointCapability = "alpha_search"
 	OpenAIEndpointCapabilityLive            OpenAIEndpointCapability = "live"
+	OpenAIEndpointCapabilityVideos          OpenAIEndpointCapability = "videos"
 	// OpenAIEndpointCapabilityGrokMediaGeneration keeps image/video generation
 	// away from Grok accounts that are explicitly disabled or whose billing
 	// entitlement probe was forbidden. Video status lookups intentionally do not
@@ -1942,6 +1943,15 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	if a == nil {
 		return false
 	}
+	if a.IsOpenAIVideoRelayDedicated() || capability == OpenAIEndpointCapabilityVideos {
+		if capability != OpenAIEndpointCapabilityVideos || a.Platform != PlatformOpenAI ||
+			a.Type != AccountTypeAPIKey || strings.TrimSpace(a.GetCredential("base_url")) == "" {
+			return false
+		}
+		configured, _ := a.openAIEndpointCapabilitySet()
+		_, valid := a.OpenAIVideoRelaySettings()
+		return configured[string(OpenAIEndpointCapabilityVideos)] && valid
+	}
 	if capability == OpenAIEndpointCapabilitySeedance {
 		configured, _ := a.openAIEndpointCapabilitySet()
 		return configured["seedance"] && a.Platform == PlatformOpenAI && a.Type == AccountTypeAPIKey &&
@@ -2130,7 +2140,7 @@ func (a *Account) SupportsOpenAIImageCapability(capability OpenAIImagesCapabilit
 	if capability == "" {
 		return true
 	}
-	if !a.IsOpenAI() {
+	if !a.IsOpenAI() || a.IsOpenAIVideoRelayDedicated() {
 		return false
 	}
 	switch capability {

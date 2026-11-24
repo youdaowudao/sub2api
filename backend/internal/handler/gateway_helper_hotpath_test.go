@@ -319,6 +319,34 @@ func TestAcquireUserSlotWithWait_TracksAPIKeySlot(t *testing.T) {
 	require.Equal(t, 1, cache.apiKeyReleaseCalls)
 }
 
+func TestVideoRelayHandlerSubmitKeepsUserSlotWithoutTrackingKey(t *testing.T) {
+	for _, fixture := range []struct {
+		path            string
+		wantKeyCommands int
+	}{{"/v1/videos", 0}, {"/videos", 0}, {"/v1/responses", 1}} {
+		t.Run(fixture.path, func(t *testing.T) {
+			cache := &helperConcurrencyCacheStub{userSeq: []bool{true}}
+			helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, 5*time.Millisecond)
+			router := gin.New()
+			router.POST(fixture.path, func(c *gin.Context) {
+				c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 77, Group: &service.Group{Platform: service.PlatformOpenAI}})
+				streamStarted := false
+				release, err := helper.AcquireUserSlotWithWait(c, 202, 3, false, &streamStarted)
+				require.NoError(t, err)
+				release()
+				c.Status(http.StatusOK)
+			})
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, fixture.path, nil))
+			require.Equal(t, http.StatusOK, response.Code)
+			require.Equal(t, 1, cache.userAcquireCalls)
+			require.Equal(t, 1, cache.userReleaseCalls)
+			require.Equal(t, fixture.wantKeyCommands, cache.apiKeyTrackCalls)
+			require.Equal(t, fixture.wantKeyCommands, cache.apiKeyReleaseCalls)
+		})
+	}
+}
+
 func TestTryAcquireUserSlotForAPIKey_TracksAPIKeySlot(t *testing.T) {
 	cache := &helperConcurrencyCacheStub{
 		userSeq: []bool{true},

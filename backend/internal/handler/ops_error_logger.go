@@ -1349,7 +1349,9 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 	} else if lastStatus > 0 {
 		entry.ErrorMessage += " " + strconv.Itoa(lastStatus)
 	}
-	if entry.UpstreamErrorMessage != nil && strings.TrimSpace(*entry.UpstreamErrorMessage) != "" {
+	apiKey := getOpsAPIKey(c)
+	videoRelay := c.Request != nil && service.IsOpenAIVideoRelayRoute(apiKey, c.Request.Method, c.FullPath())
+	if !videoRelay && entry.UpstreamErrorMessage != nil && strings.TrimSpace(*entry.UpstreamErrorMessage) != "" {
 		entry.ErrorMessage += ": " + strings.TrimSpace(*entry.UpstreamErrorMessage)
 	}
 	entry.ErrorMessage = truncateString(entry.ErrorMessage, 2048)
@@ -1375,7 +1377,6 @@ func logOpsRecoveredUpstream(c *gin.Context, ops *service.OpsService, finalStatu
 	entry.UpstreamModel = c.GetString(opsUpstreamModelKey)
 	entry.RequestType = opsRequestTypeFromContext(c)
 
-	apiKey := getOpsAPIKey(c)
 	fallbackPlatform := guessPlatformFromPath(entry.RequestPath)
 	requestContext := context.Background()
 	if c.Request != nil {

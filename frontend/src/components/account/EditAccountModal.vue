@@ -34,6 +34,7 @@
             v-model="editBaseUrl"
             type="text"
             class="input"
+            :required="account.platform === 'openai' && openAIVideoEnabled"
             :placeholder="
               account.platform === 'openai'
                 ? 'https://api.openai.com'
@@ -2217,7 +2218,8 @@
                 type="checkbox"
                 class="rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-dark-500"
                 :data-testid="`openai-endpoint-capability-${option.value}`"
-                :checked="openAIEndpointCapabilities.includes(option.value)"
+                :checked="option.value === 'videos' ? openAIVideoEnabled : !openAIVideoOnly && openAIEndpointCapabilities.includes(option.value)"
+                :disabled="option.value === 'videos' ? !openAIVideoEnabled && !editBaseUrl.trim() : openAIVideoOnly"
                 @change="toggleOpenAIEndpointCapability(option.value, $event)"
               />
               <span class="text-gray-700 dark:text-gray-200">{{ option.label }}</span>
@@ -2225,6 +2227,7 @@
           </div>
           <p class="input-hint">{{ t('admin.accounts.openai.endpointCapabilitiesDesc') }}</p>
         </div>
+        <OpenAIVideoSettingsField v-if="openAIVideoEnabled" v-model="openAIVideoSettings" />
       </div>
 
       <!-- OpenAI APIKey images: backfill b64_json from url -->
@@ -3430,6 +3433,8 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
+import OpenAIVideoSettingsField from '@/components/account/OpenAIVideoSettingsField.vue'
+import { defaultOpenAIVideoSettings, readOpenAIVideoSettings } from '@/components/account/openAIVideoSettings'
 import OpenAIImageSizeTiersField from '@/components/account/OpenAIImageSizeTiersField.vue'
 import {
   OPENAI_IMAGE_SIZE_TIERS,
@@ -4187,6 +4192,10 @@ const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
 const openAIImagesUrlToB64JsonEnabled = ref(false)
 const openAIImageSizeTiers = ref<OpenAIImageSizeTier[]>([...OPENAI_IMAGE_SIZE_TIERS])
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
+const openAIVideoEnabled = ref(false)
+const openAIVideoSettings = ref(defaultOpenAIVideoSettings())
+const openAIVideoDedicated = computed(() => Object.prototype.hasOwnProperty.call(props.account?.credentials ?? {}, 'openai_videos'))
+const openAIVideoOnly = computed(() => openAIVideoEnabled.value || openAIVideoDedicated.value)
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
@@ -4348,10 +4357,11 @@ const openAITextEndpointCapabilityLabel = computed(() => {
 const openAIEndpointCapabilityOptions = computed<{ value: OpenAIEndpointCapability; label: string }[]>(() => [
   { value: 'chat_completions', label: openAITextEndpointCapabilityLabel.value },
   { value: 'embeddings', label: t('admin.accounts.openai.capabilityEmbeddings') },
-  { value: 'seedance', label: 'Seedance (Ark)' }
+  { value: 'seedance', label: 'Seedance (Ark)' },
+  { value: 'videos', label: t('admin.accounts.openai.capabilityVideos') }
 ])
 const openAITextGenerationCapabilityEnabled = computed(() =>
-  openAIEndpointCapabilities.value.includes('chat_completions')
+  !openAIVideoOnly.value && openAIEndpointCapabilities.value.includes('chat_completions')
 )
 
 const normalizeOpenAIEndpointCapabilities = (values: OpenAIEndpointCapability[]) => {
@@ -4381,6 +4391,11 @@ const readOpenAIEndpointCapabilities = (credentials?: Record<string, unknown>): 
 }
 
 const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, event?: Event) => {
+  if (capability === 'videos') {
+    openAIVideoEnabled.value = (event?.target as HTMLInputElement | null)?.checked ?? !openAIVideoEnabled.value
+    if (openAIVideoEnabled.value) openAIResponsesMode.value = 'auto'
+    return
+  }
   if (openAIEndpointCapabilities.value.includes(capability)) {
     if (openAIEndpointCapabilities.value.length <= 1) {
       const input = event?.target as HTMLInputElement | null
@@ -4402,6 +4417,15 @@ const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, ev
 }
 
 const applyOpenAIEndpointCapabilities = (credentials: Record<string, unknown>) => {
+  if (openAIVideoEnabled.value) {
+    credentials.openai_capabilities = ['videos']
+    credentials.openai_videos = { ...openAIVideoSettings.value }
+    return
+  }
+  if (openAIVideoDedicated.value) {
+    delete credentials.openai_capabilities
+    return
+  }
   const capabilities = normalizeOpenAIEndpointCapabilities(openAIEndpointCapabilities.value)
   if (capabilities.length === 2 && !capabilities.includes('seedance')) {
     delete credentials.openai_capabilities
@@ -4685,6 +4709,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
+  openAIVideoEnabled.value = false
+  openAIVideoSettings.value = defaultOpenAIVideoSettings()
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -4709,6 +4735,11 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
     if (newAccount.type === 'apikey') {
       openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
+      const capabilityConfig = newAccount.credentials?.openai_capabilities
+      openAIVideoEnabled.value = Array.isArray(capabilityConfig)
+        ? capabilityConfig.includes('videos')
+        : !!capabilityConfig && typeof capabilityConfig === 'object' && (capabilityConfig as Record<string, unknown>).videos === true
+      openAIVideoSettings.value = readOpenAIVideoSettings(newAccount.credentials?.openai_videos)
       openAIEndpointCapabilities.value = readOpenAIEndpointCapabilities(
         newAccount.credentials as Record<string, unknown> | undefined
       )

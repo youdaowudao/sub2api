@@ -644,11 +644,24 @@ func (s *OpenAIGatewayService) isCodexImageGenerationBridgeEnabled(ctx context.C
 	return s != nil && s.cfg != nil && s.cfg.Gateway.CodexImageGenerationBridgeEnabled
 }
 
+type videoRelayChannelModelKey struct{}
+
+type videoRelayChannelModel struct {
+	requested string
+	mapping   ChannelMappingResult
+	specs     *videoRelaySelectionSpecs
+}
+
 func (s *OpenAIGatewayService) checkChannelPricingRestriction(ctx context.Context, groupID *int64, requestedModel string) bool {
 	if groupID == nil || s.channelService == nil || requestedModel == "" {
 		return false
 	}
-	mapping := s.channelService.ResolveChannelMapping(ctx, *groupID, requestedModel)
+	var mapping ChannelMappingResult
+	if video, ok := ctx.Value(videoRelayChannelModelKey{}).(videoRelayChannelModel); ok {
+		requestedModel, mapping = video.requested, video.mapping
+	} else {
+		mapping = s.channelService.ResolveChannelMapping(ctx, *groupID, requestedModel)
+	}
 	billingModel := billingModelForRestriction(mapping.BillingModelSource, requestedModel, mapping.MappedModel)
 	if billingModel == "" {
 		return false
@@ -659,6 +672,10 @@ func (s *OpenAIGatewayService) checkChannelPricingRestriction(ctx context.Contex
 func (s *OpenAIGatewayService) isUpstreamModelRestrictedByChannel(ctx context.Context, groupID int64, account *Account, requestedModel string, requireCompact bool) bool {
 	if s.channelService == nil {
 		return false
+	}
+	if video, ok := ctx.Value(videoRelayChannelModelKey{}).(videoRelayChannelModel); ok {
+		upstreamModel := strings.TrimSpace(account.GetMappedModel(video.mapping.MappedModel))
+		return upstreamModel != "" && s.channelService.IsModelRestricted(ctx, groupID, upstreamModel)
 	}
 	if compactForwardModel, ok := openAIForwardModelFromContext(ctx); ok {
 		requestedModel = compactForwardModel.model

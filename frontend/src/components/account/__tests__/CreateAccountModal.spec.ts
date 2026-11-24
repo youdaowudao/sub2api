@@ -219,6 +219,33 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it('creates a dedicated video account with the chosen limits', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('video test account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('video-fixture-key')
+    const video = wrapper.get<HTMLInputElement>('[data-testid="openai-endpoint-capability-videos"]')
+    expect(wrapper.find('[data-testid="openai-video-requirements"]').exists()).toBe(false)
+    await video.setValue(true)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="openai-endpoint-capability-chat_completions"]').element.disabled).toBe(true)
+    expect(wrapper.get('[data-testid="openai-video-requirements"] li:nth-child(4)').exists()).toBe(true)
+    await wrapper.get('[data-testid="openai-video-max-seconds"]').setValue(45)
+    await wrapper.get('[data-testid="openai-video-resolution-720p"]').setValue(true)
+    await video.setValue(false)
+    expect(wrapper.find('[data-testid="openai-video-requirements"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="openai-video-max-seconds"]').exists()).toBe(false)
+    await video.setValue(true)
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const credentials = createAccountMock.mock.calls[0]?.[0]?.credentials
+    expect(credentials?.openai_capabilities).toEqual(['videos'])
+    expect(credentials?.openai_videos).toEqual({
+      resolutions: ['480p', '720p'], min_seconds: 5, max_seconds: 45, default_seconds: 5,
+    })
+    wrapper.unmount()
+  })
+
   it('can create a passthrough account with model filtering enabled', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

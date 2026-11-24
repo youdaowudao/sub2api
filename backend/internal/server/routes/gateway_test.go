@@ -302,10 +302,36 @@ func TestGatewayRoutesCompositeChatCompletionsWithGrokModelUsesOpenAIGateway(t *
 	}
 }
 
-func TestGatewayRoutesNonGrokVideosAreRejectedAtPlatformGate(t *testing.T) {
+func TestGatewayRoutesOpenAIVideoRelay(t *testing.T) {
 	router := newGatewayRoutesTestRouter(service.PlatformOpenAI)
+	for _, prefix := range []string{"/v1", ""} {
+		for _, tc := range []struct {
+			method string
+			path   string
+			body   string
+		}{
+			{http.MethodPost, prefix + "/videos", `{"prompt":"waves"}`},
+			{http.MethodGet, prefix + "/videos/invalid-task-id", ""},
+			{http.MethodGet, prefix + "/videos/invalid-task-id/content", ""},
+		} {
+			t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+				req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+				req.Header.Set("Content-Type", "application/json")
+				w := httptest.NewRecorder()
+				router.ServeHTTP(w, req)
 
-	for _, tc := range []struct {
+				require.NotEqual(t, http.StatusNotFound, w.Code,
+					"OpenAI request should reach the video relay handler, response: %s", w.Body.String())
+				require.NotContains(t, w.Body.String(), "Videos API is not supported for this platform")
+				require.Equal(t, http.StatusServiceUnavailable, w.Code)
+				require.Contains(t, w.Body.String(), "Video relay is temporarily unavailable.")
+			})
+		}
+	}
+}
+
+func TestGatewayRoutesNonGrokVideosAreRejectedAtPlatformGate(t *testing.T) {
+	tests := []struct {
 		method string
 		path   string
 		body   string
@@ -334,15 +360,35 @@ func TestGatewayRoutesNonGrokVideosAreRejectedAtPlatformGate(t *testing.T) {
 		{http.MethodGet, "/videos/edits/request-123/content", ""},
 		{http.MethodGet, "/v1/videos/extensions/request-123/content", ""},
 		{http.MethodGet, "/videos/extensions/request-123/content", ""},
-	} {
-		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-
-		router.ServeHTTP(w, req)
-		require.Equal(t, http.StatusNotFound, w.Code, "method=%s path=%s", tc.method, tc.path)
-		require.Contains(t, w.Body.String(), "Videos API is not supported for this platform")
 	}
+	for _, platform := range []string{service.PlatformOpenAI, service.PlatformAnthropic} {
+		router := newGatewayRoutesTestRouter(platform)
+		for _, tc := range tests {
+			if platform == service.PlatformOpenAI &&
+				(tc.path == "/v1/videos" || tc.path == "/videos" ||
+					tc.path == "/v1/videos/request-123" || tc.path == "/videos/request-123" ||
+					tc.path == "/v1/videos/request-123/content" || tc.path == "/videos/request-123/content") {
+				continue
+			}
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusNotFound, w.Code, "platform=%s method=%s path=%s", platform, tc.method, tc.path)
+			require.Contains(t, w.Body.String(), "Videos API is not supported for this platform")
+		}
+	}
+}
+
+func TestGatewayRoutesCompositeOpenAIVideoDoesNotEnterVideoRelay(t *testing.T) {
+	router := newGatewayRoutesTestRouter(service.PlatformComposite)
+	req := httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{"model":"fixture-video","prompt":"waves"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(service.WithResolvedTargetPlatform(req.Context(), service.PlatformOpenAI))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.Contains(t, w.Body.String(), "Videos API is not supported for this platform")
 }
 
 func TestGatewayRoutesCompositeVideoGenerationAllowed(t *testing.T) {

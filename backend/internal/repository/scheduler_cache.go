@@ -1502,6 +1502,9 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 			filtered[key] = value
 		}
 	}
+	if settings, present := credentials[service.OpenAIVideoRelayCredentialsKey]; present {
+		filtered[service.OpenAIVideoRelayCredentialsKey] = settings
+	}
 	if len(filtered) == 0 {
 		return nil
 	}

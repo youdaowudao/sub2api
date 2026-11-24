@@ -60,6 +60,7 @@ type Handlers struct {
 	Admin            *AdminHandlers
 	Gateway          *GatewayHandler
 	OpenAIGateway    *OpenAIGatewayHandler
+	VideoRelay       *VideoRelayHandler
 	Setting          *SettingHandler
 	Totp             *TotpHandler
 	Passkey          *PasskeyHandler

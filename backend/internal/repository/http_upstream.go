@@ -238,6 +238,10 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	return resp, nil
 }
 
+// SupportsVideoRelayConnectionTrace reports that Do uses the shared Go HTTP
+// transports, which notify GotConn before they can transmit the request.
+func (s *httpUpstreamService) SupportsVideoRelayConnectionTrace() bool { return true }
+
 // DoWithTLS 执行带 TLS 指纹伪装的 HTTP 请求
 //
 // profile 为 nil 时不启用 TLS 指纹，行为与 Do 方法相同。
@@ -1588,6 +1592,7 @@ func decompressResponseBody(resp *http.Response) {
 	}
 
 	resp.Body = &decompressedBody{reader: reader, closer: originalBody}
+	resp.Uncompressed = true
 	resp.Header.Del("Content-Encoding")
 	resp.Header.Del("Content-Length") // 解压后长度不确定
 	resp.ContentLength = -1

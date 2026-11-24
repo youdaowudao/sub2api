@@ -1821,6 +1821,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if !accountSupportsOpenAICapabilities(account, req.RequiredCapability, req.RequiredImageCapability) {
 		return false, "capability_mismatch"
 	}
+	if req.RequiredCapability == OpenAIEndpointCapabilityVideos && videoRelaySpecsMismatch(ctx, account) {
+		return false, "video_specs_mismatch"
+	}
 	if vetoed, reason := openAIImageSizeVetoReason(ctx, account); vetoed {
 		return false, reason
 	}
