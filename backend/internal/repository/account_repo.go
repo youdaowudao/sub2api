@@ -285,6 +285,15 @@ func (r *accountRepository) GetByID(ctx context.Context, id int64) (*service.Acc
 	return &accounts[0], nil
 }
 
+// GetAccountForTokenVersion reads credential state without loading scheduling relations.
+func (r *accountRepository) GetAccountForTokenVersion(ctx context.Context, id int64) (*service.Account, error) {
+	account, err := r.accountTransactionScope(ctx).getAccountByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return accountEntityToService(account), nil
+}
+
 func (r *accountRepository) getAccountByID(ctx context.Context, id int64) (*dbent.Account, error) {
 	account, err := r.client.Account.Query().Where(dbaccount.IDEQ(id)).Only(ctx)
 	if err != nil {

@@ -908,3 +908,25 @@ func TestApiKeyAuthWithSubscriptionGoogle_SubscriptionLimitExceededReturns429(t 
 	require.Equal(t, "RESOURCE_EXHAUSTED", resp.Error.Status)
 	require.Contains(t, resp.Error.Message, "daily usage limit exceeded（订阅日用量已达上限，请等待重置）")
 }
+
+func TestApiKeyAuthWithSubscriptionGoogleSetsUserAccountBlockUserID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	user := &service.User{ID: 17, Role: service.RoleUser, Status: service.StatusActive}
+	key := &service.APIKey{ID: 21, UserID: user.ID, Key: "block-test", Status: service.StatusActive, User: user}
+	repo := fakeAPIKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) { return key, nil }}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	router := gin.New()
+	router.Use(APIKeyAuthWithSubscriptionGoogle(newTestAPIKeyService(repo), nil, cfg))
+	var got int64
+	router.GET("/v1beta/test", func(c *gin.Context) {
+		got = service.UserAccountBlockUserIDFromContext(c.Request.Context())
+		require.Nil(t, c.Request.Context().Value(ctxkey.UserID))
+		c.Status(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1beta/test", nil)
+	req.Header.Set("x-goog-api-key", key.Key)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusNoContent, res.Code)
+	require.Equal(t, user.ID, got)
+}

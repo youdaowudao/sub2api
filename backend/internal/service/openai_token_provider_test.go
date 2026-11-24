@@ -966,3 +966,96 @@ func TestOpenAITokenProvider_NoRefreshTokenExpired_DisablesAccount(t *testing.T)
 	require.Equal(t, account.ID, blocker.accounts[0].ID)
 	require.Equal(t, "missing_refresh_token", blocker.reasons[0])
 }
+
+type openAIAccountVersionRepo struct {
+	AccountRepository
+	account      *Account
+	getErr       error
+	getCalled    int
+	versionCalls int
+}
+
+func (r *openAIAccountVersionRepo) GetByID(context.Context, int64) (*Account, error) {
+	r.getCalled++
+	return r.account, r.getErr
+}
+
+func (r *openAIAccountVersionRepo) GetAccountForTokenVersion(context.Context, int64) (*Account, error) {
+	r.versionCalls++
+	return r.account, r.getErr
+}
+
+func TestOpenAITokenProvider_CacheMissUsesAccountVersionLookup(t *testing.T) {
+	ctx := context.Background()
+	account := &Account{ID: 101, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{
+		"access_token": "original", "expires_at": time.Now().Add(time.Hour).Format(time.RFC3339), "_token_version": int64(1),
+	}}
+	latest := &Account{ID: account.ID, Platform: account.Platform, Type: account.Type, Credentials: map[string]any{
+		"access_token": "newer", "_token_version": int64(2),
+	}}
+	for _, tc := range []struct {
+		name       string
+		latest     *Account
+		readErr    error
+		preloaded  bool
+		want       string
+		wantLookup int
+		wantSet    int32
+	}{
+		{"newer_version", latest, nil, false, "newer", 1, 0},
+		{"failed_lookup_keeps_existing_behavior", nil, errors.New("lookup failed"), false, "original", 1, 1},
+		{"same_version_fills_cache", account, nil, false, "original", 1, 1},
+		{"cache_hit", nil, nil, true, "cached", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &openAIAccountVersionRepo{account: tc.latest, getErr: tc.readErr}
+			cache := newOpenAITokenCacheStub()
+			if tc.preloaded {
+				cache.tokens[OpenAITokenCacheKey(account)] = "cached"
+			}
+			got, err := NewOpenAITokenProvider(repo, cache, nil).GetAccessToken(ctx, account)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+			require.Equal(t, tc.wantSet, cache.setCalled)
+			require.Equal(t, tc.wantLookup, repo.versionCalls)
+			require.Zero(t, repo.getCalled)
+		})
+	}
+}
+
+type openAIRefreshedAccountVersionRepo struct {
+	*refreshAPIAccountRepo
+	versionCalls int
+}
+
+func (r *openAIRefreshedAccountVersionRepo) GetAccountForTokenVersion(context.Context, int64) (*Account, error) {
+	r.versionCalls++
+	latest := *r.account
+	latest.Credentials = shallowCopyMap(r.account.Credentials)
+	latest.Credentials["_token_version"] = r.account.GetCredentialAsInt64("_token_version") + 1
+	latest.Credentials["access_token"] = "updated-after-save"
+	return &latest, nil
+}
+
+func TestOpenAITokenProvider_CacheMissUsesAccountVersionLookup_AfterRefresh(t *testing.T) {
+	ctx := context.Background()
+	account := openAIRefreshTestAccount()
+	account.Credentials["expires_at"] = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	repo := &openAIRefreshedAccountVersionRepo{refreshAPIAccountRepo: &refreshAPIAccountRepo{account: account}}
+	cache := newOpenAITokenCacheStub()
+	client := &openAIRotationClientStub{}
+	oauth := NewOpenAIOAuthService(nil, client)
+	t.Cleanup(oauth.Stop)
+	provider := NewOpenAITokenProvider(repo, cache, oauth)
+	provider.SetRefreshAPI(NewOAuthRefreshAPI(repo, nil), NewOpenAITokenRefresher(oauth, repo))
+
+	got, err := provider.GetAccessToken(ctx, account)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, client.rotationCalls)
+	require.Equal(t, 1, repo.openAISuccessCASCalls)
+	require.Equal(t, 1, repo.versionCalls)
+	require.Equal(t, 2, repo.getByIDCalls)
+	require.Equal(t, "updated-after-save", got)
+	require.Zero(t, cache.setCalled)
+}

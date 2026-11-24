@@ -1225,3 +1225,23 @@ func mergePlatformQuotaDefaults(dst, src *DefaultPlatformQuotaSetting) {
 		dst.MonthlyLimitUSD = src.MonthlyLimitUSD
 	}
 }
+
+func validUserAccountBlockDuration(hours int) bool {
+	return hours == UserAccountBlockDurationShortHours || hours == UserAccountBlockDurationLongHours
+}
+
+func parseUserAccountBlockSettings(raw string) UserAccountBlockSettings {
+	var settings UserAccountBlockSettings
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil || !validUserAccountBlockDuration(settings.DurationHours) {
+		settings.DurationHours = DefaultUserAccountBlockDurationHours
+	}
+	return settings
+}
+
+func (s *SettingService) GetUserAccountBlockSettings(ctx context.Context) (UserAccountBlockSettings, error) {
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyUserAccountBlockSettings)
+	if err != nil && !errors.Is(err, ErrSettingNotFound) {
+		return UserAccountBlockSettings{}, err
+	}
+	return parseUserAccountBlockSettings(raw), nil
+}

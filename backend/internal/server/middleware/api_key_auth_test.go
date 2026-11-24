@@ -1910,3 +1910,25 @@ func (r *stubUserSubscriptionRepo) IncrementUsage(ctx context.Context, id int64,
 func (r *stubUserSubscriptionRepo) BatchUpdateExpiredStatus(ctx context.Context) (int64, error) {
 	return 0, errors.New("not implemented")
 }
+
+func TestAPIKeyAuthSetsUserAccountBlockUserID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	user := &service.User{ID: 17, Role: service.RoleUser, Status: service.StatusActive}
+	key := &service.APIKey{ID: 21, UserID: user.ID, Key: "block-test", Status: service.StatusActive, User: user}
+	repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) { return key, nil }}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	apiKeyService := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, nil, cfg)))
+	var got int64
+	router.GET("/test", func(c *gin.Context) {
+		got = service.UserAccountBlockUserIDFromContext(c.Request.Context())
+		c.Status(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("x-api-key", key.Key)
+	res := httptest.NewRecorder()
+	router.ServeHTTP(res, req)
+	require.Equal(t, http.StatusNoContent, res.Code)
+	require.Equal(t, user.ID, got)
+}

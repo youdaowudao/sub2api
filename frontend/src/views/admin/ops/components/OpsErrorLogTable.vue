@@ -176,14 +176,27 @@
         </template>
 
         <template #cell-actions="{ row }">
-          <button
-            type="button"
-            class="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-600 dark:hover:text-primary-400"
-            :title="t('admin.ops.errorLog.details')"
-            @click.stop="emit('openErrorDetail', row.id)"
-          >
-            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-          </button>
+          <div class="flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              class="shrink-0 rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-600 dark:hover:text-primary-400"
+              :title="t('admin.ops.errorLog.details')"
+              @click.stop="emit('openErrorDetail', row.id)"
+            >
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            </button>
+            <button
+              v-if="row.user_id && row.account_id"
+              type="button"
+              class="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/30 dark:hover:text-red-400"
+              :title="blockAccountLabel(row)"
+              :aria-label="blockAccountLabel(row)"
+              :disabled="blocking"
+              @click.stop="blockAccount(row)"
+            >
+              <Icon name="ban" size="sm" />
+            </button>
+          </div>
         </template>
 
         <template #empty><EmptyState :message="emptyMessage || t('admin.ops.errorLog.noErrors')" /></template>
@@ -206,13 +219,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DataTable from '@/components/common/DataTable.vue'
+import Icon from '@/components/icons/Icon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import IpGeoBatchToolbar from '@/components/common/IpGeoBatchToolbar.vue'
+import { createUserAccountBlock } from '@/api/admin/settings'
+import { useAppStore } from '@/stores/app'
+import { formatDateTime as formatBlockDateTime } from '@/utils/format'
+import { blockWriteErrorMessage } from '@/views/admin/settings/userAccountBlockErrors'
 import type { OpsErrorLog, OpsErrorRecord } from '@/api/admin/ops'
 import type { Column } from '@/components/common/types'
 import { getSeverityClass, formatDateTime } from '../utils/opsFormatters'
@@ -220,6 +238,30 @@ import { mapErrorCategory } from '@/utils/errorCategory'
 import { mapErrorSortKey, statusCodeBadgeClass } from '@/utils/errorBadges'
 
 const { t } = useI18n()
+const appStore = useAppStore()
+const blocking = ref(false)
+
+function blockAccountLabel(row: OpsErrorLog) {
+  return t('admin.ops.errorLog.blockAccount', {
+    user: `${row.user_email ? `${row.user_email} ` : ''}#${row.user_id}`,
+    account: `${row.account_name ? `${row.account_name} ` : ''}#${row.account_id}`,
+  })
+}
+
+async function blockAccount(row: OpsErrorLog) {
+  if (blocking.value || !row.user_id || !row.account_id) return
+  blocking.value = true
+  try {
+    const item = await createUserAccountBlock(row.user_id, row.account_id)
+    appStore.showSuccess(t('admin.ops.errorLog.blockAccountSuccess', { time: formatBlockDateTime(item.expires_at) }))
+  } catch (error) {
+    const message = blockWriteErrorMessage(error, t, 'admin.ops.errorLog.blockAccountFailed')
+    if (message) appStore.showError(message)
+  } finally {
+    blocking.value = false
+  }
+}
+
 
 // 列序对齐管理端用量明细:身份(用户→Key→账号)→ 请求形态(平台→模型→端点→分组→类型)
 // → 结果(状态→消息)→ 时间→UA→IP→操作
@@ -238,7 +280,7 @@ const allColumns = computed<Column[]>(() => [
   { key: 'created_at', label: t('admin.ops.errorLog.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent') },
   { key: 'client_ip', label: t('admin.ops.errorLog.ip') },
-  { key: 'actions', label: t('admin.ops.errorLog.action') },
+  { key: 'actions', label: t('admin.ops.errorLog.action'), class: '!px-2' },
 ])
 
 // 传入 visibleColumnKeys 时按其过滤(列设置);未传则全量(Ops 弹窗等使用方)
