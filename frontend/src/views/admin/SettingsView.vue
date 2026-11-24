@@ -551,6 +551,11 @@
             </div>
           </div>
 
+          <UserAccountBlockSettings
+            v-model="form.user_account_block_duration_hours"
+            :active="activeTab === 'gateway'"
+          />
+
           <!-- Request Rectifier Settings -->
           <div class="card">
             <div
@@ -9094,6 +9099,7 @@ import {
 } from "@/utils/rechargeBonus";
 import RegistrationEmailBlacklistEditor from "@/components/admin/settings/RegistrationEmailBlacklistEditor.vue";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
+import UserAccountBlockSettings from "@/views/admin/settings/UserAccountBlockSettings.vue";
 import ForkEmailSignupFilterSettings from "@/views/admin/settings/ForkEmailSignupFilterSettings.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import {
@@ -9822,6 +9828,7 @@ type SettingsForm = Omit<
   payment_recharge_bonus_mode: RechargeBonusMode;
   payment_recharge_bonus_notice: string;
   // 系统全局平台限额 map；form 内始终归一化为全部平台对象（模板非空绑定依赖此不变量）
+  user_account_block_duration_hours: number;
   default_platform_quotas: DefaultPlatformQuotasMap;
   account_scheduling_thresholds: ReturnType<typeof normalizeAccountSchedulingThresholdsMap>;
 };
@@ -9878,6 +9885,7 @@ const form = reactive<SettingsForm>({
   backend_mode_enabled: false,
   hide_ccs_import_button: false,
   quick_import_image_group_id: 0,
+  user_account_block_duration_hours: 12,
   payment_enabled: false,
   risk_control_enabled: false,
   cyber_policy_user_allowlist: "",
@@ -10534,6 +10542,7 @@ async function saveWebSearchConfig(): Promise<boolean> {
 }
 
 const savedQuickImportImageGroupId = ref(0);
+const savedUserAccountBlockDuration = ref(12);
 const quickImportImageGroups = computed(() =>
   sortGroupsForDisplay(eligibleGroups.value.filter((group) => group.platform === "openai")),
 );
@@ -11133,6 +11142,8 @@ async function loadSettings() {
     const settings = await adminAPI.settings.getSettings();
     savedQuickImportImageGroupId.value = settings.quick_import_image_group_id ?? 0;
     form.quick_import_image_group_id = savedQuickImportImageGroupId.value;
+    savedUserAccountBlockDuration.value = settings.user_account_block_duration_hours ?? 12;
+    form.user_account_block_duration_hours = savedUserAccountBlockDuration.value;
     settings.payment_load_balance_strategy =
       settings.payment_load_balance_strategy || "round-robin";
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
@@ -11611,6 +11622,9 @@ async function saveSettings() {
       ...(form.quick_import_image_group_id !== savedQuickImportImageGroupId.value
         ? { quick_import_image_group_id: form.quick_import_image_group_id }
         : {}),
+      ...(form.user_account_block_duration_hours !== savedUserAccountBlockDuration.value
+        ? { user_account_block_duration_hours: form.user_account_block_duration_hours }
+        : {}),
       table_default_page_size: form.table_default_page_size,
       table_page_size_options: form.table_page_size_options,
       custom_menu_items: form.custom_menu_items,
@@ -11936,6 +11950,9 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
+    if (updated.user_account_block_duration_hours !== undefined) {
+      savedUserAccountBlockDuration.value = updated.user_account_block_duration_hours;
+    }
     if (updated.quick_import_image_group_id !== undefined) {
       savedQuickImportImageGroupId.value = updated.quick_import_image_group_id;
     }

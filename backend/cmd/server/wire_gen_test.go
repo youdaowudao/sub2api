@@ -183,5 +183,6 @@ func testServerCleanup(entClient *ent.Client, tracker *service.VideoRelayTracker
 		nil, // promptAudit
 		nil, // pluginManager
 		tracker,
+		nil, // userAccountBlocks
 	)
 }

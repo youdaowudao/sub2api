@@ -202,7 +202,7 @@ func (s *OpenAIOAuthService) ExchangeCode(ctx context.Context, input *OpenAIExch
 		tokenInfo.PlanType = userInfo.PlanType
 	}
 
-	s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+	s.enrichTokenInfo(ctx, tokenInfo, proxyURL, chatGPTPersonalSubscriptionIdentity{})
 
 	return tokenInfo, nil
 }
@@ -249,7 +249,15 @@ func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 		tokenInfo.PlanType = userInfo.PlanType
 	}
 
-	s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+	identity := chatGPTPersonalSubscriptionIdentity{}
+	if userInfo != nil {
+		plan := strings.ToLower(strings.TrimSpace(userInfo.PlanType))
+		id := strings.TrimSpace(userInfo.ChatGPTAccountID)
+		if id != "" && (plan == "plus" || plan == "pro") {
+			identity = chatGPTPersonalSubscriptionIdentity{accountID: id, plan: plan}
+		}
+	}
+	s.enrichTokenInfo(ctx, tokenInfo, proxyURL, identity)
 
 	return tokenInfo, nil
 }
@@ -257,7 +265,7 @@ func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 // enrichTokenInfo 通过 ChatGPT backend-api 补全 tokenInfo 并设置隐私（best-effort）。
 // 从 accounts/check 获取最新 plan_type、subscription_expires_at、email，
 // 然后尝试关闭训练数据共享。适用于所有获取/刷新 token 的路径。
-func (s *OpenAIOAuthService) enrichTokenInfo(ctx context.Context, tokenInfo *OpenAITokenInfo, proxyURL string) {
+func (s *OpenAIOAuthService) enrichTokenInfo(ctx context.Context, tokenInfo *OpenAITokenInfo, proxyURL string, identity chatGPTPersonalSubscriptionIdentity) {
 	if tokenInfo.AccessToken == "" || s.privacyClientFactory == nil {
 		return
 	}
@@ -272,7 +280,8 @@ func (s *OpenAIOAuthService) enrichTokenInfo(ctx context.Context, tokenInfo *Ope
 	// accounts/check 命中的记录不属于个人账号时，必须改用个人订阅端点拿到期时间，
 	// 否则会把 workspace 权益的 expires_at 当成个人订阅到期日展示。
 	forcePersonalSubscriptionLookup := false
-	if info := fetchChatGPTAccountInfo(ctx, s.privacyClientFactory, tokenInfo.AccessToken, proxyURL, orgID); info != nil {
+	info := fetchChatGPTAccountInfo(ctx, s.privacyClientFactory, tokenInfo.AccessToken, proxyURL, orgID, identity)
+	if info != nil {
 		// chatgpt_plan_type from the ID token is the canonical personal-plan value.
 		// accounts/check is a multi-account/workspace endpoint; inactive team or
 		// business workspaces can otherwise overwrite Pro/Free with internal
@@ -298,7 +307,9 @@ func (s *OpenAIOAuthService) enrichTokenInfo(ctx context.Context, tokenInfo *Ope
 		}
 	}
 	if forcePersonalSubscriptionLookup || strings.TrimSpace(tokenInfo.SubscriptionExpiresAt) == "" {
-		if expiresAt := fetchChatGPTSubscriptionExpiresAt(ctx, s.privacyClientFactory, tokenInfo.AccessToken, proxyURL, resolveChatGPTSubscriptionAccountID(tokenInfo, orgID)); expiresAt != "" {
+		if info != nil && info.personalSubscriptionExpiresAt != "" {
+			tokenInfo.SubscriptionExpiresAt = info.personalSubscriptionExpiresAt
+		} else if expiresAt := fetchChatGPTSubscriptionExpiresAt(ctx, s.privacyClientFactory, tokenInfo.AccessToken, proxyURL, resolveChatGPTSubscriptionAccountID(tokenInfo, orgID)); expiresAt != "" {
 			tokenInfo.SubscriptionExpiresAt = expiresAt
 		}
 	}
@@ -379,7 +390,7 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 				tokenInfo.ExpiresAt = expiresAt.Unix()
 				tokenInfo.ExpiresIn = int64(time.Until(*expiresAt).Seconds())
 			}
-			s.enrichTokenInfo(ctx, tokenInfo, proxyURL)
+			s.enrichTokenInfo(ctx, tokenInfo, proxyURL, chatGPTPersonalSubscriptionIdentity{})
 			return tokenInfo, nil
 		}
 		return nil, infraerrors.New(http.StatusBadRequest, "OPENAI_OAUTH_NO_REFRESH_TOKEN", "no refresh token available")

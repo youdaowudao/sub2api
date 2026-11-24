@@ -102,8 +102,14 @@ type ChatGPTAccountInfo struct {
 	// AccountID 是本条信息所属账号的标识（优先取 account.account_id，否则取 accounts
 	// 的 map key）。accounts/check 是多账号/工作区端点，调用方需要据此判断拿到的
 	// plan_type / expires_at 到底属于个人账号还是某个 workspace。
-	AccountID             string
-	SubscriptionExpiresAt string // entitlement.expires_at (RFC3339)
+	AccountID                     string
+	SubscriptionExpiresAt         string // entitlement.expires_at (RFC3339)
+	personalSubscriptionExpiresAt string
+}
+
+type chatGPTPersonalSubscriptionIdentity struct {
+	accountID string
+	plan      string
 }
 
 var (
@@ -115,7 +121,7 @@ var (
 // Used as fallback when id_token doesn't contain these fields (e.g., Mobile RT).
 // orgID is used to match the correct account when multiple accounts exist (e.g., personal + team).
 // Returns nil on any failure (best-effort, non-blocking).
-func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFactory, accessToken, proxyURL, orgID string) *ChatGPTAccountInfo {
+func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFactory, accessToken, proxyURL, orgID string, identity chatGPTPersonalSubscriptionIdentity) *ChatGPTAccountInfo {
 	if accessToken == "" || clientFactory == nil {
 		return nil
 	}
@@ -155,6 +161,10 @@ func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFac
 	if !ok {
 		slog.Debug("chatgpt_account_check_no_accounts", "body", truncate(resp.String(), 300))
 		return nil
+	}
+
+	if identity.accountID != "" {
+		info.personalSubscriptionExpiresAt = consistentChatGPTPersonalExpiry(accounts, identity, time.Now())
 	}
 
 	// 优先匹配 orgID 对应的账号（access_token JWT 中的 poid）
@@ -220,6 +230,41 @@ func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFac
 
 	slog.Info("chatgpt_account_check_success", "plan_type", info.PlanType, "subscription_expires_at", info.SubscriptionExpiresAt, "org_id", orgID)
 	return info
+}
+
+// consistentChatGPTPersonalExpiry checks every alias for the token's account.
+func consistentChatGPTPersonalExpiry(accounts map[string]any, identity chatGPTPersonalSubscriptionIdentity, now time.Time) string {
+	var expiry time.Time
+	for _, raw := range accounts {
+		entry, _ := raw.(map[string]any)
+		if !strings.EqualFold(chatGPTAccountObjectID(entry, ""), identity.accountID) {
+			continue
+		}
+		if !isUsableChatGPTAccountCandidate(entry, now) {
+			return ""
+		}
+		account, _ := entry["account"].(map[string]any)
+		if value, exists := account["plan_type"]; exists {
+			plan, _ := value.(string)
+			if !strings.EqualFold(strings.TrimSpace(plan), identity.plan) {
+				return ""
+			}
+		}
+		entitlement, _ := entry["entitlement"].(map[string]any)
+		plan, _ := entitlement["subscription_plan"].(string)
+		if !strings.EqualFold(strings.TrimSpace(plan), identity.plan) {
+			return ""
+		}
+		date, err := time.Parse(time.RFC3339, extractEntitlementExpiresAt(entry))
+		if err != nil || !date.After(now) || (!expiry.IsZero() && !expiry.Equal(date)) {
+			return ""
+		}
+		expiry = date
+	}
+	if expiry.IsZero() {
+		return ""
+	}
+	return expiry.UTC().Format(time.RFC3339Nano)
 }
 
 // fetchChatGPTSubscriptionExpiresAt reads the lightweight subscription endpoint used by

@@ -500,6 +500,16 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
+	var durationHours *int
+	if value, sent := sentFields["user_account_block_duration_hours"]; sent {
+		var hours int
+		if err := json.Unmarshal(value, &hours); err != nil ||
+			(hours != service.UserAccountBlockDurationShortHours && hours != service.UserAccountBlockDurationLongHours) {
+			response.ErrorFrom(c, service.ErrUserAccountBlockInvalidDuration)
+			return
+		}
+		durationHours = &hours
+	}
 	var req UpdateSettingsRequest
 	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
@@ -1538,6 +1548,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	settings := &service.SystemSettings{
+		UserAccountBlockDurationHours: durationHours,
 		// 系统全局 platform quota 默认值（整体替换语义）
 		DefaultPlatformQuotas:       req.DefaultPlatformQuotas,
 		AccountSchedulingThresholds: req.AccountSchedulingThresholds,
@@ -2226,6 +2237,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
 
 	payload := dto.SystemSettings{
+		UserAccountBlockDurationHours:                          updatedSettings.UserAccountBlockDurationHours,
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
 		EmailVerifyEnabled:                                     updatedSettings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       updatedSettings.RegistrationEmailSuffixWhitelist,

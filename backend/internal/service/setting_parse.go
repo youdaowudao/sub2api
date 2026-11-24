@@ -320,7 +320,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 			forwardedClientIPHeaders = parsed
 		}
 	}
+	blockSettings := parseUserAccountBlockSettings(settings[SettingKeyUserAccountBlockSettings])
 	result := &SystemSettings{
+		UserAccountBlockDurationHours:          &blockSettings.DurationHours,
 		RegistrationEnabled:                    settings[SettingKeyRegistrationEnabled] == "true",
 		EmailVerifyEnabled:                     emailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:       ParseRegistrationEmailSuffixWhitelist(settings[SettingKeyRegistrationEmailSuffixWhitelist]),

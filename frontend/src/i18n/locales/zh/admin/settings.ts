@@ -1,5 +1,32 @@
 export default {
     settings: {
+      userAccountBlock: {
+        title: "用户账号屏蔽",
+        description: "在失败记录中点击「屏蔽该账号」后，设定时长内给该用户选账号时会跳过这个账号，其他用户仍可使用。到期自动恢复，也可以在下方提前解除。",
+        duration: "屏蔽时长",
+        hours: "{n} 小时",
+        durationHint: "只影响之后新加的屏蔽，已有屏蔽的到期时间不变。",
+        listTitle: "当前屏蔽名单",
+        user: "用户",
+        account: "账号",
+        createdAt: "屏蔽时间",
+        expiresAt: "到期时间",
+        action: "操作",
+        empty: "当前没有账号屏蔽记录",
+        remove: "解除",
+        removed: "已解除",
+        removeFailed: "解除失败：{reason}",
+        refresh: "刷新",
+        retry: "重试",
+        errors: {
+          loadFailed: "暂时无法读取屏蔽名单，请重试。",
+          readRateLimit: "请求过于频繁，暂时无法读取屏蔽名单，请稍后重试。",
+          writeRateLimit: "请求过于频繁，操作未执行，请稍后重试。",
+          invalidID: "用户或账号编号无效",
+          durationReadFailed: "暂时无法读取屏蔽时长，屏蔽未执行，请稍后重试。",
+          unconfirmedWrite: "暂时无法确认操作结果，请在「用户账号屏蔽」中刷新核对。",
+        },
+      },
       title: '系统设置',
       description: '管理注册、邮箱验证、默认值和 SMTP 设置',
       tabs: {

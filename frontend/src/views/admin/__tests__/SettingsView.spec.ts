@@ -569,6 +569,7 @@ function mountView() {
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
         ForkEmailSignupFilterSettings: true,
+        UserAccountBlockSettings: true,
       },
     },
   });
@@ -1475,6 +1476,7 @@ describe("admin SettingsView payment visible method controls", () => {
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
           ForkEmailSignupFilterSettings: true,
+          UserAccountBlockSettings: true,
         },
       },
     });
@@ -1822,6 +1824,7 @@ describe("admin SettingsView payment visible method controls", () => {
           ImageUpload: ImageUploadStub,
           BackupSettings: true,
           ForkEmailSignupFilterSettings: true,
+          UserAccountBlockSettings: true,
         },
       },
     });

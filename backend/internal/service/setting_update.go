@@ -352,6 +352,16 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyCompactHomeEnabled] = strconv.FormatBool(settings.CompactHomeEnabled)
 	updates[SettingKeyHideCcsImportButton] = strconv.FormatBool(settings.HideCcsImportButton)
 	updates[SettingKeyQuickImportImageGroupID] = strconv.FormatInt(settings.QuickImportImageGroupID, 10)
+	if hours := settings.UserAccountBlockDurationHours; hours != nil {
+		if !validUserAccountBlockDuration(*hours) {
+			return nil, ErrUserAccountBlockInvalidDuration
+		}
+		payload, err := json.Marshal(UserAccountBlockSettings{DurationHours: *hours})
+		if err != nil {
+			return nil, err
+		}
+		updates[SettingKeyUserAccountBlockSettings] = string(payload)
+	}
 	updates[SettingKeyPurchaseSubscriptionEnabled] = strconv.FormatBool(settings.PurchaseSubscriptionEnabled)
 	updates[SettingKeyPurchaseSubscriptionURL] = strings.TrimSpace(settings.PurchaseSubscriptionURL)
 	tableDefaultPageSize, tablePageSizeOptions := normalizeTablePreferences(
