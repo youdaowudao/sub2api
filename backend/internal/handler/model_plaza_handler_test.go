@@ -306,6 +306,70 @@ func TestModelPlazaHandler_VaryKeepsCORSOrigin(t *testing.T) {
 	}
 }
 
+type plazaDisplayChannelRepo struct{ service.ChannelRepository }
+
+func (plazaDisplayChannelRepo) ListAll(context.Context) ([]service.Channel, error) {
+	return []service.Channel{{
+		ID:       1,
+		Name:     "ch",
+		Status:   service.StatusActive,
+		GroupIDs: []int64{1},
+		ModelPricing: []service.ChannelModelPricing{{
+			Platform:    "anthropic",
+			Models:      []string{"claude-x"},
+			BillingMode: service.BillingModeToken,
+			InputPrice:  testPtr(3e-6),
+			OutputPrice: testPtr(1.5e-5),
+		}},
+	}}, nil
+}
+
+type plazaDisplayGroupRepo struct{ service.GroupRepository }
+
+func (plazaDisplayGroupRepo) ListActive(context.Context) ([]service.Group, error) {
+	return []service.Group{{
+		ID:              1,
+		Name:            "g",
+		Platform:        "anthropic",
+		Status:          service.StatusActive,
+		RateMultiplier:  1,
+		DisplayIcon:     "deepseek",
+		DisplayCategory: "gemini",
+	}}, nil
+}
+
+func TestModelPlazaHandler_ReturnsGroupDisplayFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewModelPlazaHandler(
+		service.NewModelPlazaService(plazaDisplayChannelRepo{}, plazaDisplayGroupRepo{}, nil, nil, nil),
+		nil,
+		service.NewSettingService(plazaVarySettingRepo{}, &config.Config{}),
+	)
+	r := gin.New()
+	r.GET("/api/v1/model-plaza", h.Get)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/model-plaza", nil))
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var res struct {
+		Data struct {
+			Groups []map[string]any `json:"groups"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &res))
+	require.Len(t, res.Data.Groups, 1)
+	group := res.Data.Groups[0]
+	require.Equal(t, "anthropic", group["platform"])
+	require.Equal(t, map[string]any{
+		"display_icon":     "deepseek",
+		"display_category": "gemini",
+	}, map[string]any{
+		"display_icon":     group["display_icon"],
+		"display_category": group["display_category"],
+	})
+}
+
 func TestPlazaDisplayOrderProjection(t *testing.T) {
 	for _, order := range []int{0, -10, 20} {
 		raw, err := json.Marshal(toModelPlazaGroupDTO(&service.PlazaGroup{ID: 1, SortOrder: order}, nil))

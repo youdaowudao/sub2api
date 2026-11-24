@@ -6,10 +6,18 @@ import {
   groupCategory,
   groupGroupsByCategory,
   groupIconPlatform,
+  groupPlazaPlatform,
 } from '../groupDisplay'
 import { sortGroupsForDisplay } from '../groupDisplayOrder'
 
 describe('group display', () => {
+  it('uses plaza platform categories and keeps the real platform for other groups', () => {
+    expect(groupPlazaPlatform({ platform: 'openai', display_category: 'gemini' })).toBe('gemini')
+    expect(groupPlazaPlatform({ platform: 'openai', display_category: 'domestic' })).toBe('openai')
+    expect(groupPlazaPlatform({ platform: 'kimi', display_category: '' })).toBe('kimi')
+    expect(groupPlazaPlatform({ platform: 'openai' })).toBe('openai')
+  })
+
   it.each([
     ['openai', 'openai'], ['anthropic', 'anthropic'], ['gemini', 'gemini'],
     ['kimi', 'domestic'], ['zhipu', 'domestic'], ['deepseek', 'domestic'], ['minimax', 'domestic'],

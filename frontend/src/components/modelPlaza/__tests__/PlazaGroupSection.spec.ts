@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import GroupBadge from '@/components/common/GroupBadge.vue'
 import PlazaGroupSection from '../PlazaGroupSection.vue'
 import PlazaModelPricingTable from '../PlazaModelPricingTable.vue'
 import type { ModelPlazaGroup, PlazaModel } from '@/api/modelPlaza'
@@ -90,6 +91,40 @@ function mountSection(g: ModelPlazaGroup) {
 }
 
 const NOTE = 'modelPlaza.detail.longContextDisabledNote'
+
+describe('PlazaGroupSection 前台图标与分类', () => {
+  it('按 Gemini 分类配色并展示 DeepSeek 图标，价格表仍收到真实平台', () => {
+    const wrapper = mountSection(group({
+      platform: 'openai',
+      display_icon: 'deepseek',
+      display_category: 'gemini'
+    }))
+    const badge = wrapper.getComponent(GroupBadge)
+    const table = wrapper.getComponent(PlazaModelPricingTable)
+
+    expect.soft(badge.props('platform')).toBe('gemini')
+    expect.soft(badge.props('iconPlatform')).toBe('deepseek')
+    expect.soft(table.props('platform')).toBe('openai')
+    expect.soft(table.props('accentPlatform')).toBe('gemini')
+    expect.soft(wrapper.classes()).toContain('border-blue-500/35')
+    expect.soft(wrapper.classes()).not.toContain('border-green-500/35')
+  })
+
+  it('国产模型分组保持 OpenAI 配色并展示 Kimi 图标', () => {
+    const wrapper = mountSection(group({
+      platform: 'openai',
+      display_icon: 'kimi',
+      display_category: 'domestic'
+    }))
+    const badge = wrapper.getComponent(GroupBadge)
+    const table = wrapper.getComponent(PlazaModelPricingTable)
+
+    expect.soft(badge.props('platform')).toBe('openai')
+    expect.soft(badge.props('iconPlatform')).toBe('kimi')
+    expect.soft(table.props('accentPlatform')).toBe('openai')
+    expect.soft(wrapper.classes()).toContain('border-green-500/35')
+  })
+})
 
 describe('PlazaGroupSection 长上下文说明', () => {
   it('passes video-specific rates to the pricing table', () => {

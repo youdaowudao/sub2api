@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PlazaModelPricingTable from '../PlazaModelPricingTable.vue'
 import type { PlazaModel } from '@/api/modelPlaza'
+import { platformAccentColor } from '@/utils/platformColors'
 
 const { copyToClipboard } = vi.hoisted(() => ({
   copyToClipboard: vi.fn().mockResolvedValue(true)
@@ -582,6 +583,39 @@ describe('PlazaModelPricingTable', () => {
     ])
     expect(wrapper.text()).toContain('Anthropic')
     expect(wrapper.text()).toContain('OpenAI')
+  })
+
+  it('用指定平台设置实付区配色，同平台模型仍不显示平台标签', () => {
+    const wrapper = mount(PlazaModelPricingTable, {
+      props: {
+        models: [tokenModel({ platform: 'openai' })],
+        platform: 'openai',
+        accentPlatform: 'gemini',
+        rateMultiplier: 1
+      }
+    })
+
+    expect.soft(wrapper.element.style.getPropertyValue('--plaza-accent')).toBe(platformAccentColor('gemini'))
+    expect.soft(wrapper.text()).not.toContain('OpenAI')
+  })
+
+  it('实付区配色设为 OpenAI 时仍显示混合分组各模型的平台标签', () => {
+    const wrapper = mount(PlazaModelPricingTable, {
+      props: {
+        models: [
+          tokenModel({ name: 'shared-model', platform: 'anthropic' }),
+          tokenModel({ name: 'shared-model', platform: 'openai' })
+        ],
+        platform: 'composite',
+        accentPlatform: 'openai',
+        rateMultiplier: 1
+      }
+    })
+
+    expect(wrapper.findAll('tbody tr').map(row => row.get('td').text())).toEqual([
+      'shared-modelAnthropic',
+      'shared-modelOpenAI'
+    ])
   })
 })
 

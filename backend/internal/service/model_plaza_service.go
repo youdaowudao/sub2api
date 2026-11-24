@@ -44,6 +44,8 @@ type PlazaGroup struct {
 	Description        string
 	I18n               GroupI18n
 	Platform           string
+	DisplayIcon        string
+	DisplayCategory    string
 	SubscriptionType   string
 	RateMultiplier     float64
 	PeakRateEnabled    bool
@@ -131,6 +133,8 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 			Description:               g.Description,
 			I18n:                      g.I18n,
 			Platform:                  g.Platform,
+			DisplayIcon:               g.DisplayIcon,
+			DisplayCategory:           g.DisplayCategory,
 			SubscriptionType:          g.SubscriptionType,
 			RateMultiplier:            g.RateMultiplier,
 			PeakRateEnabled:           g.PeakRateEnabled,

@@ -24,6 +24,12 @@ export function groupIconPlatform<Platform extends string>(group: { platform: Pl
   return GROUP_DISPLAY_ICON_PLATFORMS.find(platform => platform === icon) ?? group.platform
 }
 
+/** 模型广场按前台分类挪动分组：分类设成 OpenAI、Anthropic、Gemini 时按该平台显示，其余按真实平台。 */
+export function groupPlazaPlatform(group: GroupWithCategory): string {
+  const category = group.display_category?.trim()
+  return category === 'openai' || category === 'anthropic' || category === 'gemini' ? category : group.platform
+}
+
 export function groupCategory(group: GroupWithCategory): Category {
   const displayCategory = group.display_category?.trim()
   const manual = GROUP_DISPLAY_CATEGORIES.find(category => category !== 'other' && category === displayCategory)

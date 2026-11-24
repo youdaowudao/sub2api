@@ -62,6 +62,8 @@ export interface ModelPlazaGroup {
   name: string
   description: string
   platform: string
+  display_icon?: string
+  display_category?: string
   /** 'standard' | 'subscription' */
   subscription_type: string
   rate_multiplier: number

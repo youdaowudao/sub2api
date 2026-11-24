@@ -359,6 +359,7 @@ const props = defineProps<{
   models: PlazaModel[]
   /** 分组平台;实付分区底色随平台着色,未知平台回退品牌青。 */
   platform?: string
+  accentPlatform?: string
   /** 分组默认倍率。 */
   rateMultiplier: number
   /** 用户专属倍率;与默认不同,实付价按此计算并划线展示原倍率。 */
@@ -382,7 +383,7 @@ const { t } = useI18n()
 const { copyToClipboard } = useClipboard()
 
 /** 实付分区只从平台拿一个主色,浅底/标题/下划线全部由 scoped CSS 用 color-mix 派生。 */
-const accentStyle = computed(() => ({ '--plaza-accent': platformAccentColor(props.platform ?? '') }))
+const accentStyle = computed(() => ({ '--plaza-accent': platformAccentColor(props.accentPlatform ?? props.platform ?? '') }))
 
 const PER_MILLION = 1_000_000
 
