@@ -154,8 +154,8 @@ export default {
           },
         },
       },
-      emailTabDisabledTitle: '邮箱验证未启用',
-      emailTabDisabledHint: '请在「安全与认证」选项卡中启用邮箱验证后，再配置 SMTP 设置。',
+      emailTabDisabledTitle: '邮箱验证和忘记密码均未启用',
+      emailTabDisabledHint: '请先在「安全与认证」选项卡中启用邮箱验证或忘记密码，再配置 SMTP 设置。',
       registration: {
         title: '注册设置',
         description: '控制用户注册和验证',
@@ -996,6 +996,12 @@ export default {
         emailsHint: '留空则不发送通知',
         addEmail: '添加邮箱',
         emailPlaceholder: '输入邮箱地址',
+      },
+      balanceRechargeNotify: {
+        title: '充值成功通知',
+        description: '控制用户充值到账后是否收到邮件通知。',
+        enabled: '启用充值成功通知',
+        enabledHint: '开启后，余额充值订单到账时向用户发送一封邮件；购买订阅的邮件不受此开关影响。'
       },
       subscriptionExpiryNotify: {
         title: '订阅到期提醒',

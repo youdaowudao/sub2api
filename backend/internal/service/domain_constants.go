@@ -225,7 +225,7 @@ const (
 	SettingKeyRegistrationEmailDomainQuotaEnabled = "registration_email_domain_quota_enabled"
 	SettingKeyRegistrationEmailBlacklist          = "registration_email_blacklist"     // 注册邮箱精确黑名单（JSON 数组，按收件箱身份匹配；不进 SystemSettings，由专用接口读写）
 	SettingKeyPromoCodeEnabled                    = "promo_code_enabled"               // 是否启用优惠码功能
-	SettingKeyPasswordResetEnabled                = "password_reset_enabled"           // 是否启用忘记密码功能（需要先开启邮件验证）
+	SettingKeyPasswordResetEnabled                = "password_reset_enabled"           // 是否启用忘记密码功能（与注册邮箱验证无关）
 	SettingKeyFrontendURL                         = "frontend_url"                     // 前端基础URL，用于生成邮件中的重置密码链接
 	SettingKeyInvitationCodeEnabled               = "invitation_code_enabled"          // 是否启用邀请码注册
 	SettingKeyAffiliateEnabled                    = "affiliate_enabled"                // 邀请返利功能总开关
@@ -727,6 +727,9 @@ const (
 	SettingKeyBalanceLowNotifyEnabled     = "balance_low_notify_enabled"      // 全局开关
 	SettingKeyBalanceLowNotifyThreshold   = "balance_low_notify_threshold"    // 默认阈值（USD）
 	SettingKeyBalanceLowNotifyRechargeURL = "balance_low_notify_recharge_url" // 充值页面 URL
+
+	// 充值到账通知
+	SettingKeyBalanceRechargeNotifyEnabled = "balance_recharge_notify_enabled" // 充值成功邮件全局开关，默认开启
 
 	// 订阅到期提醒
 	SettingKeySubscriptionExpiryNotifyEnabled = "subscription_expiry_notify_enabled" // 订阅到期提醒全局开关，默认开启

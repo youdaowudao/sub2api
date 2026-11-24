@@ -1544,9 +1544,8 @@
                 </div>
                 <Toggle v-model="form.invitation_code_enabled" />
               </div>
-              <!-- Password Reset - Only show when email verification is enabled -->
+              <!-- Password Reset -->
               <div
-                v-if="form.email_verify_enabled"
                 class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
               >
                 <div>
@@ -1561,7 +1560,7 @@
               </div>
               <!-- Frontend URL - Only show when password reset is enabled -->
               <div
-                v-if="form.email_verify_enabled && form.password_reset_enabled"
+                v-if="form.password_reset_enabled"
                 class="border-t border-gray-100 pt-4 dark:border-dark-700"
               >
                 <label
@@ -8488,8 +8487,11 @@
         </div>
 
         <div v-show="activeTab === 'email'" class="space-y-6">
-          <!-- Email disabled hint - show when email_verify_enabled is off -->
-          <div v-if="!form.email_verify_enabled" class="card">
+          <!-- Email disabled hint - show when neither email verification nor password reset is on -->
+          <div
+            v-if="!form.email_verify_enabled && !form.password_reset_enabled"
+            class="card"
+          >
             <div class="p-6">
               <div class="flex items-start gap-3">
                 <Icon
@@ -8509,8 +8511,11 @@
             </div>
           </div>
 
-          <!-- SMTP Settings - Only show when email verification is enabled -->
-          <div v-if="form.email_verify_enabled" class="card">
+          <!-- SMTP Settings - Only show when email verification or password reset is enabled -->
+          <div
+            v-if="form.email_verify_enabled || form.password_reset_enabled"
+            class="card"
+          >
             <div
               class="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
@@ -8672,8 +8677,11 @@
             </div>
           </div>
 
-          <!-- Send Test Email - Only show when email verification is enabled -->
-          <div v-if="form.email_verify_enabled" class="card">
+          <!-- Send Test Email - Only show when email verification or password reset is enabled -->
+          <div
+            v-if="form.email_verify_enabled || form.password_reset_enabled"
+            class="card"
+          >
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
@@ -8735,6 +8743,35 @@
                       : t("admin.settings.testEmail.sendTestEmail")
                   }}
                 </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 充值成功通知 -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h3 class="text-base font-medium text-gray-900 dark:text-white">
+                {{ t("admin.settings.balanceRechargeNotify.title") }}
+              </h3>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.balanceRechargeNotify.description") }}
+              </p>
+            </div>
+            <div class="px-6 py-6">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <label
+                    class="mb-0 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.balanceRechargeNotify.enabled") }}
+                  </label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.balanceRechargeNotify.enabledHint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.balance_recharge_notify_enabled" />
               </div>
             </div>
           </div>
@@ -10070,6 +10107,7 @@ const form = reactive<SettingsForm>({
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
   balance_low_notify_recharge_url: "",
+  balance_recharge_notify_enabled: true,
   subscription_expiry_notify_enabled: true,
   account_quota_notify_enabled: false,
   account_quota_notify_emails: [] as NotifyEmailEntry[],
@@ -11826,6 +11864,7 @@ async function saveSettings() {
         Number(form.balance_low_notify_threshold) || 0,
       balance_low_notify_recharge_url: (form.balance_low_notify_recharge_url =
         form.balance_low_notify_recharge_url || currentOrigin),
+      balance_recharge_notify_enabled: form.balance_recharge_notify_enabled,
       subscription_expiry_notify_enabled:
         form.subscription_expiry_notify_enabled,
       account_quota_notify_enabled: form.account_quota_notify_enabled,

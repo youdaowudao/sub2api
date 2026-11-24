@@ -298,6 +298,7 @@ type UpdateSettingsRequest struct {
 	BalanceLowNotifyEnabled         *bool                   `json:"balance_low_notify_enabled"`
 	BalanceLowNotifyThreshold       *float64                `json:"balance_low_notify_threshold"`
 	BalanceLowNotifyRechargeURL     *string                 `json:"balance_low_notify_recharge_url"`
+	BalanceRechargeNotifyEnabled    *bool                   `json:"balance_recharge_notify_enabled"`
 	SubscriptionExpiryNotifyEnabled *bool                   `json:"subscription_expiry_notify_enabled"`
 	AccountQuotaNotifyEnabled       *bool                   `json:"account_quota_notify_enabled"`
 	AccountQuotaNotifyEmails        *[]dto.NotifyEmailEntry `json:"account_quota_notify_emails"`
@@ -1928,6 +1929,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.BalanceLowNotifyRechargeURL
 		}(),
+		BalanceRechargeNotifyEnabled: func() bool {
+			if req.BalanceRechargeNotifyEnabled != nil {
+				return *req.BalanceRechargeNotifyEnabled
+			}
+			return previousSettings.BalanceRechargeNotifyEnabled
+		}(),
 		SubscriptionExpiryNotifyEnabled: func() bool {
 			if req.SubscriptionExpiryNotifyEnabled != nil {
 				return *req.SubscriptionExpiryNotifyEnabled
@@ -2430,6 +2437,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		BalanceLowNotifyEnabled:                                updatedSettings.BalanceLowNotifyEnabled,
 		BalanceLowNotifyThreshold:                              updatedSettings.BalanceLowNotifyThreshold,
 		BalanceLowNotifyRechargeURL:                            updatedSettings.BalanceLowNotifyRechargeURL,
+		BalanceRechargeNotifyEnabled:                           updatedSettings.BalanceRechargeNotifyEnabled,
 		SubscriptionExpiryNotifyEnabled:                        updatedSettings.SubscriptionExpiryNotifyEnabled,
 		AccountQuotaNotifyEnabled:                              updatedSettings.AccountQuotaNotifyEnabled,
 		AccountQuotaNotifyEmails:                               dto.NotifyEmailEntriesFromService(updatedSettings.AccountQuotaNotifyEmails),

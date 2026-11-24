@@ -372,7 +372,7 @@ const eventDisplayMeta: Record<string, EventDisplayMeta> = {
   },
   "balance.recharge_success": {
     label: "余额充值成功",
-    timing: "余额充值订单支付完成并入账后发送。",
+    timing: "余额充值订单支付完成并入账后发送，可通过邮件设置中的开关关闭。",
     categoryLabel: "计费",
   },
   "account.quota_alert": {
@@ -435,7 +435,7 @@ const eventDisplayMetaEn: Record<string, EventDisplayMeta> = {
   },
   "balance.recharge_success": {
     label: "Balance Recharge Success",
-    timing: "Sent after a balance recharge order is paid and credited.",
+    timing: "Sent after a balance recharge order is paid and credited. It can be disabled in Email settings.",
     categoryLabel: "Billing",
   },
   "account.quota_alert": {

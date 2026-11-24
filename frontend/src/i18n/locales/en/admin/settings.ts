@@ -154,8 +154,8 @@ export default {
           },
         },
       },
-      emailTabDisabledTitle: 'Email Verification Not Enabled',
-      emailTabDisabledHint: 'Enable email verification in the Security tab to configure SMTP settings.',
+      emailTabDisabledTitle: 'Email Verification and Password Reset Are Not Enabled',
+      emailTabDisabledHint: 'Enable email verification or password reset in the Security tab to configure SMTP settings.',
       registration: {
         title: 'Registration Settings',
         description: 'Control user registration and verification',
@@ -1001,6 +1001,12 @@ export default {
         emailsHint: 'Leave empty to disable notifications',
         addEmail: 'Add Email',
         emailPlaceholder: 'Enter email address',
+      },
+      balanceRechargeNotify: {
+        title: 'Recharge Success Notification',
+        description: 'Control whether users receive an email after a balance recharge is credited.',
+        enabled: 'Enable Recharge Success Notification',
+        enabledHint: 'When enabled, users receive an email once a balance recharge order is credited. Subscription purchase emails are not affected.'
       },
       subscriptionExpiryNotify: {
         title: 'Subscription Expiry Reminder',

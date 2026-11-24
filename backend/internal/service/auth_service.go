@@ -1546,13 +1546,9 @@ func (s *AuthService) RefreshToken(ctx context.Context, oldTokenString string) (
 }
 
 // IsPasswordResetEnabled 检查是否启用密码重置功能
-// 要求：必须同时开启邮件验证且 SMTP 配置正确
+// 与注册邮箱验证无关；发信依赖 SMTP 配置
 func (s *AuthService) IsPasswordResetEnabled(ctx context.Context) bool {
 	if s.settingService == nil {
-		return false
-	}
-	// Must have email verification enabled and SMTP configured
-	if !s.settingService.IsEmailVerifyEnabled(ctx) {
 		return false
 	}
 	return s.settingService.IsPasswordResetEnabled(ctx)

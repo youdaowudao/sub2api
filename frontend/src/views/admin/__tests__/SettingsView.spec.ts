@@ -539,6 +539,7 @@ const baseSettingsResponse = {
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
   balance_low_notify_recharge_url: "",
+  balance_recharge_notify_enabled: true,
   subscription_expiry_notify_enabled: true,
   account_quota_notify_enabled: false,
   account_quota_notify_emails: [],
@@ -611,6 +612,17 @@ async function openUsersTab(wrapper: ReturnType<typeof mountView>) {
   expect(usersTabButton).toBeDefined();
   await usersTabButton?.trigger("click");
   await flushPromises();
+}
+
+function toggleByLabel(wrapper: ReturnType<typeof mountView>, labelKey: string) {
+  const label = wrapper.findAll("label").find((node) => node.text() === labelKey);
+  expect(label).toBeDefined();
+  const row = label!.element.parentElement!.parentElement!;
+  const toggle = wrapper
+    .findAll("input.toggle-stub")
+    .find((node) => node.element.parentElement === row);
+  expect(toggle).toBeDefined();
+  return toggle!;
 }
 
 describe("admin SettingsView email domain quota copy", () => {
@@ -1252,6 +1264,47 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_source");
     expect(payload).not.toHaveProperty("payment_visible_method_alipay_enabled");
     expect(payload).not.toHaveProperty("payment_visible_method_wxpay_enabled");
+  });
+
+  it("关闭邮箱验证时仍可配置找回密码和 SMTP 并保存", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openSecurityTab(wrapper);
+
+    const smtpTitle = "admin.settings.smtp.title";
+    const frontendUrl = "admin.settings.registration.frontendUrl";
+    expect(wrapper.text()).toContain("admin.settings.emailTabDisabledTitle");
+    expect(wrapper.text()).not.toContain(smtpTitle);
+    expect(wrapper.text()).not.toContain(frontendUrl);
+
+    await toggleByLabel(wrapper, "admin.settings.registration.passwordReset").setValue(true);
+    expect(wrapper.text()).not.toContain("admin.settings.emailTabDisabledTitle");
+    expect(wrapper.text()).toContain(smtpTitle);
+    expect(wrapper.text()).toContain("admin.settings.testEmail.title");
+    expect(wrapper.text()).toContain(frontendUrl);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({
+      email_verify_enabled: false,
+      password_reset_enabled: true,
+    });
+  });
+
+  it("可关闭充值成功通知并保存", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    const toggle = toggleByLabel(wrapper, "admin.settings.balanceRechargeNotify.enabled");
+    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+    await toggle.setValue(false);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({
+      balance_recharge_notify_enabled: false,
+      subscription_expiry_notify_enabled: true,
+    });
   });
 
   it("submits the admin recharge affiliate rebate setting", async () => {
