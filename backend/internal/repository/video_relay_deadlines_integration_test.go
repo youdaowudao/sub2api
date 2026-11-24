@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -72,12 +73,20 @@ func (r videoRelaySettlementRepository) Settle(ctx context.Context, task *servic
 }
 
 func TestVideoRelayRepoTrackerShutdownAtRealCommitBoundary(t *testing.T) {
-	for _, committed := range []bool{false, true} {
-		name := "interrupted before COMMIT"
-		if committed {
-			name = "interrupted after PostgreSQL commits"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, test := range []struct {
+		name, status, billing string
+		committed, lostAck    bool
+		balance               float64
+		usage                 int
+	}{
+		{"charge interrupted before COMMIT", "completed", service.VideoRelayCharged, false, false, 5, 1},
+		{"charge interrupted after COMMIT", "completed", service.VideoRelayCharged, true, false, 5, 1},
+		{"charge COMMIT acknowledgement lost", "completed", service.VideoRelayCharged, true, true, 5, 1},
+		{"refund interrupted before COMMIT", "failed", service.VideoRelayRefunded, false, false, 10, 0},
+		{"refund interrupted after COMMIT", "failed", service.VideoRelayRefunded, true, false, 10, 0},
+		{"refund COMMIT acknowledgement lost", "failed", service.VideoRelayRefunded, true, true, 10, 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			var statusReads atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 				if req.Method != http.MethodGet || req.URL.Path != "/v1/videos/tracking-fixture-video" {
@@ -85,7 +94,7 @@ func TestVideoRelayRepoTrackerShutdownAtRealCommitBoundary(t *testing.T) {
 					return
 				}
 				statusReads.Add(1)
-				_, _ = io.WriteString(w, `{"id":"tracking-fixture-video","status":"completed","delivery_status":"ready"}`)
+				_, _ = io.WriteString(w, `{"id":"tracking-fixture-video","status":"`+test.status+`","delivery_status":"ready"}`)
 			}))
 			t.Cleanup(srv.Close)
 			ctx := context.Background()
@@ -95,14 +104,17 @@ func TestVideoRelayRepoTrackerShutdownAtRealCommitBoundary(t *testing.T) {
 			resume := make(chan struct{})
 			release := sync.OnceFunc(func() { close(resume) })
 			commitDB := sql.OpenDB(videoRelayCommitConnector{Connector: raw, commit: func(work context.Context, tx driver.Tx) error {
-				if committed {
+				if test.committed {
 					if err := tx.Commit(); err != nil {
 						return err
 					}
 				}
 				atCommit <- work
 				<-resume
-				if committed {
+				if test.lostAck {
+					return driver.ErrBadConn
+				}
+				if test.committed {
 					return nil
 				}
 				// The worker has reached its commit with all real SQL executed.
@@ -133,8 +145,8 @@ func TestVideoRelayRepoTrackerShutdownAtRealCommitBoundary(t *testing.T) {
 				t.Fatal("the settlement transaction never reached COMMIT")
 			}
 			restartedDB := videoRelayIndependentDB(t)
-			if committed {
-				assertVideoRelayFunds(t, restartedDB, task, 5, 0, 1)
+			if test.committed {
+				assertVideoRelayFunds(t, restartedDB, task, test.balance, 0, test.usage)
 			} else {
 				assertVideoRelayFunds(t, restartedDB, task, 5, 5, 0)
 			}
@@ -169,18 +181,40 @@ func TestVideoRelayRepoTrackerShutdownAtRealCommitBoundary(t *testing.T) {
 			gateway := newTrackingVideoRelayFixtureGateway(t, NewAccountRepository(testEntClient(t), restartedDB, nil),
 				trackingVideoRelayFixtureOptions{billingCache: freshCache})
 			worker := service.NewVideoRelayTracker(service.NewVideoRelayService(other, gateway, nil))
-			if committed {
-				_, err = redisCache.GetUserBalance(ctx, task.UserID)
-				require.ErrorIs(t, err, redis.Nil, "the old worker may finish the one committed settlement's cache cleanup")
-				require.NoError(t, redisCache.SetUserBalance(ctx, task.UserID, 5))
+			if test.committed {
+				cached, err = redisCache.GetUserBalance(ctx, task.UserID)
+				if test.lostAck {
+					require.NoError(t, err)
+					require.EqualValues(t, 5, cached, "an unacknowledged transaction must not claim a confirmed cache update")
+				} else {
+					require.ErrorIs(t, err, redis.Nil, "the old worker may finish the one committed settlement's cache cleanup")
+				}
+				require.NoError(t, redisCache.SetUserBalance(ctx, task.UserID, test.balance))
 				taskAfterRestart, err := other.ClaimDue(ctx)
 				require.NoError(t, err)
 				if taskAfterRestart != nil {
-					require.NotEqual(t, task.TaskID, taskAfterRestart.TaskID, "an already charged order must not be claimed on restart")
+					require.NotEqual(t, task.TaskID, taskAfterRestart.TaskID, "a settled order must not be claimed on restart")
+				}
+				key, err := NewAPIKeyRepository(testEntClient(t), restartedDB).GetByID(ctx, task.APIKeyID)
+				require.NoError(t, err)
+				reopened := newVideoRelayAuditRouter(t, restartedDB, other)
+				path := "/v1/videos/" + task.TaskID
+				lookup := videoRelayAuditRequest(reopened, key.Key, http.MethodGet, path, "")
+				require.Equal(t, http.StatusOK, lookup.Code, lookup.Body.String())
+				var public struct {
+					ID     string `json:"id"`
+					Status string `json:"status"`
+				}
+				require.NoError(t, json.Unmarshal(lookup.Body.Bytes(), &public))
+				require.Equal(t, task.TaskID, public.ID)
+				require.Equal(t, test.status, public.Status, "the original customer query after restarting must preserve the committed outcome")
+				if test.billing == service.VideoRelayRefunded {
+					download := videoRelayAuditRequest(reopened, key.Key, http.MethodGet, path+"/content", "")
+					require.Equal(t, http.StatusConflict, download.Code, download.Body.String())
 				}
 				cached, err = redisCache.GetUserBalance(ctx, task.UserID)
 				require.NoError(t, err)
-				require.EqualValues(t, 5, cached, "restart must preserve the newly filled balance cache")
+				require.EqualValues(t, test.balance, cached, "restart must preserve the newly filled balance cache")
 			} else {
 				assertVideoRelayFunds(t, restartedDB, task, 5, 5, 0)
 				cached, err = redisCache.GetUserBalance(ctx, task.UserID)
@@ -196,15 +230,16 @@ func TestVideoRelayRepoTrackerShutdownAtRealCommitBoundary(t *testing.T) {
 				require.ErrorIs(t, err, redis.Nil, "a successful recovery must invalidate the wallet once")
 			}
 			wantReads := int32(2)
-			if committed {
+			if test.committed {
 				wantReads = 1
 			}
 			require.Equal(t, wantReads, statusReads.Load())
 			final, err := repo.Get(ctx, task.TaskID, task.UserID, task.APIKeyID)
 			require.NoError(t, err)
-			require.Equal(t, service.VideoRelayCharged, final.BillingState)
+			require.Equal(t, test.billing, final.BillingState)
+			require.Equal(t, test.billing == service.VideoRelayCharged, final.CanDownload())
 			require.Nil(t, final.NextCheckAt)
-			assertVideoRelayFunds(t, restartedDB, task, 5, 0, 1)
+			assertVideoRelayFunds(t, restartedDB, task, test.balance, 0, test.usage)
 		})
 	}
 }

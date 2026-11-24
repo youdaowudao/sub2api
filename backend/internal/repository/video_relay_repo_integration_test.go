@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -305,8 +306,8 @@ func TestVideoRelayRepoPreDeadlineTicketCannotRefundAfterDeadline(t *testing.T) 
 	change := service.VideoRelaySettlement{FailureReason: service.VideoRelayUnconfirmed}
 	held, result, err := writes.Settle(ctx, ticket, change)
 	require.NoError(t, err)
+	require.Equal(t, service.VideoRelayHeld, held.BillingState, "a qualification taken before the deadline must preserve the hold")
 	require.Nil(t, result)
-	require.Equal(t, service.VideoRelayHeld, held.BillingState)
 	assertVideoRelayFunds(t, db, task, 5, 5, 0)
 
 	final, claimed, err := reads.ClaimLookup(ctx, task.TaskID)
@@ -318,6 +319,35 @@ func TestVideoRelayRepoPreDeadlineTicketCannotRefundAfterDeadline(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, service.VideoRelayRefunded, refunded.BillingState)
 	assertVideoRelayFunds(t, db, task, 10, 0, 0)
+}
+
+func TestVideoRelayRepoExactLookupRefusesAnotherRequest(t *testing.T) {
+	ctx := context.Background()
+	task := newVideoRelayTask(t, 10, 5)
+	repo := NewVideoRelayRepository(integrationDB)
+	require.NoError(t, repo.Reserve(ctx, &task))
+	sent, err := repo.AcquireSend(ctx, &task)
+	require.NoError(t, err)
+	_, err = repo.RecordSubmission(ctx, sent, "audit-exact-request", "")
+	require.NoError(t, err)
+	ticket, claimed, err := repo.ClaimLookup(ctx, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NotNil(t, ticket)
+	charge := service.VideoRelayChargeRecord{
+		RequestID: "another-request", TaskID: "another-provider-video", Path: "/v1/videos", Model: task.UpstreamModel,
+	}
+	current, err := repo.ConfirmLookup(ctx, ticket, "/v1/videos", []service.VideoRelayChargeRecord{charge})
+	require.NoError(t, err)
+	require.Empty(t, current.UpstreamTaskID, "another request's paid video must never be assigned to this order")
+	assertVideoRelayFunds(t, integrationDB, task, 5, 5, 0)
+	charge.RequestID = "audit-exact-request"
+	charge.TaskID = "audit-owned-provider-video"
+	matched, err := repo.ConfirmLookup(ctx, ticket, "/v1/videos", []service.VideoRelayChargeRecord{charge})
+	require.NoError(t, err)
+	require.Equal(t, charge.TaskID, matched.UpstreamTaskID)
+	require.Equal(t, service.VideoRelayHeld, matched.BillingState)
+	assertVideoRelayFunds(t, integrationDB, task, 5, 5, 0)
 }
 
 func TestVideoRelayRepoRejectionAndConfirmedChargeAreExclusive(t *testing.T) {
@@ -515,6 +545,32 @@ func TestVideoRelayRepoSettlementPersistsExactlyOneUsageRecord(t *testing.T) {
 		require.Equal(t, service.VideoRelayStatusQueued, uncommitted.Status)
 		assertVideoRelayFunds(t, db2, task, -2, hold, 0)
 
+		taskID := pq.QuoteLiteral(task.TaskID)
+		_, err = db2.ExecContext(ctx, fmt.Sprintf(`
+			CREATE FUNCTION video_relay_fixture_skip_terminal_update() RETURNS trigger AS $$
+			BEGIN RETURN NULL; END; $$ LANGUAGE plpgsql;
+			CREATE TRIGGER video_relay_fixture_skip_terminal_update
+			BEFORE UPDATE ON video_relay_tasks FOR EACH ROW
+			WHEN (NEW.task_id = %s AND NEW.billing_state = 'charged')
+			EXECUTE FUNCTION video_relay_fixture_skip_terminal_update()`, taskID))
+		require.NoError(t, err)
+		// A real PostgreSQL trigger can suppress a row without aborting the
+		// transaction. The repository must still roll back the partial writes.
+		_, _, missingTerminalError := repo1.Settle(ctx, accepted, change)
+		_, err = db2.ExecContext(ctx, `
+			DROP TRIGGER video_relay_fixture_skip_terminal_update ON video_relay_tasks;
+			DROP FUNCTION video_relay_fixture_skip_terminal_update()`)
+		require.NoError(t, err)
+		var afterSuppression float64
+		require.NoError(t, db2.QueryRowContext(ctx, "SELECT frozen_balance FROM users WHERE id=$1", task.UserID).Scan(&afterSuppression))
+		require.InDelta(t, hold, afterSuppression, 1e-8, "missing terminal update must roll back the earlier hold debit")
+		assertVideoRelayFunds(t, db2, task, -2, hold, 0)
+		require.ErrorIs(t, missingTerminalError, service.ErrVideoRelayNotFound)
+		uncommitted, err = repo2.Get(ctx, task.TaskID, task.UserID, task.APIKeyID)
+		require.NoError(t, err)
+		require.Equal(t, service.VideoRelayHeld, uncommitted.BillingState)
+		require.False(t, uncommitted.CanDownload())
+
 		done := make(chan error, 2)
 		for _, repo := range []service.VideoRelayRepository{repo1, repo2} {
 			go func() {
@@ -578,11 +634,20 @@ func TestVideoRelayRepoUpstreamFailureRefundsOriginalHoldOnce(t *testing.T) {
 	require.NotNil(t, first.SettledAt)
 	db2 := videoRelayIndependentDB(t)
 	reconnected := NewVideoRelayRepository(db2)
+	assertVideoRelayFunds(t, db2, task, 10, 0, 0)
+	other := task
+	other.TaskID = videoRelayFixtureID()
+	require.NoError(t, reconnected.Reserve(ctx, &other))
 	late, _, err := reconnected.Settle(ctx, accepted, service.VideoRelaySettlement{Completed: true})
+	current, readErr := reconnected.Get(ctx, task.TaskID, task.UserID, task.APIKeyID)
+	require.NoError(t, readErr)
+	require.Equal(t, service.VideoRelayRefunded, current.BillingState,
+		"late completion must leave the original refund even when another order has frozen funds")
+	require.False(t, current.CanDownload())
+	assertVideoRelayFunds(t, db2, task, 5, 5, 0)
 	require.NoError(t, err)
 	require.Equal(t, first.SettledAt.Truncate(time.Microsecond), late.SettledAt.Truncate(time.Microsecond))
 	require.Equal(t, service.VideoRelayRefunded, late.BillingState)
-	assertVideoRelayFunds(t, db2, task, 10, 0, 0)
 }
 
 func TestVideoRelayRepoRefundsDeletedUserEvenForFreeSettlement(t *testing.T) {
@@ -728,7 +793,7 @@ func TestVideoRelayRepoZeroRateSavedThroughGroupAPIAndChargedThroughGateway(t *t
 	groupRoutes := gin.New()
 	groupRoutes.PUT("/api/v1/admin/groups/:id", groupHandler.Update)
 	setPrice := httptest.NewRequest(http.MethodPut, "/api/v1/admin/groups/"+strconv.FormatInt(fixture.GroupID, 10), strings.NewReader(`{
-		"allow_image_generation":true,"video_rate_independent":true,"video_rate_multiplier":0,
+		"allow_image_generation":true,"rate_multiplier":1,"video_rate_independent":true,"video_rate_multiplier":0,
 		"model_pricing":[{"platform":"openai","billing_mode":"video","models":["video-public"],"per_request_price":0.1}]
 	}`))
 	setPrice.Header.Set("Content-Type", "application/json")
@@ -764,9 +829,9 @@ func TestVideoRelayRepoZeroRateSavedThroughGroupAPIAndChargedThroughGateway(t *t
 		return response
 	}
 	outside := submit("31")
+	require.Zero(t, posts.Load(), "an unsupported video duration must make zero collection POSTs")
 	require.Equal(t, http.StatusBadRequest, outside.Code, outside.Body.String())
 	require.Contains(t, outside.Body.String(), "No available video route supports these seconds and resolution")
-	require.Zero(t, posts.Load())
 	var count int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM video_relay_tasks WHERE user_id=$1`, fixture.UserID).Scan(&count))
 	require.Zero(t, count)
@@ -798,6 +863,14 @@ func TestVideoRelayRepoZeroRateSavedThroughGroupAPIAndChargedThroughGateway(t *t
 	require.NoError(t, err, "a real zero-fee order must leave the cached wallet intact")
 	require.Equal(t, 5.0, cached)
 
+	setPaidRate := httptest.NewRequest(http.MethodPut, "/api/v1/admin/groups/"+strconv.FormatInt(fixture.GroupID, 10),
+		strings.NewReader(`{"video_rate_multiplier":1}`))
+	setPaidRate.Header.Set("Content-Type", "application/json")
+	paidRate := httptest.NewRecorder()
+	groupRoutes.ServeHTTP(paidRate, setPaidRate)
+	require.Equal(t, http.StatusOK, paidRate.Code, paidRate.Body.String())
+	keys.InvalidateAuthCacheByUserID(ctx, fixture.UserID)
+
 	t.Run("recheck the real database when the refund response is lost", func(t *testing.T) {
 		reject.Store(true)
 		repo.loseRefundResult = true
@@ -806,27 +879,23 @@ func TestVideoRelayRepoZeroRateSavedThroughGroupAPIAndChargedThroughGateway(t *t
 			repo.loseRefundResult = false
 		})
 		rejected := submit("30")
-		require.Equal(t, http.StatusBadGateway, rejected.Code, rejected.Body.String())
-		require.Contains(t, rejected.Body.String(), "The frozen amount was returned.")
-		require.NotContains(t, rejected.Body.String(), "provider-only rejection")
 		require.Equal(t, int32(2), posts.Load())
 		secondDB := videoRelayIndependentDB(t)
-		var id string
-		require.NoError(t, secondDB.QueryRowContext(ctx, `
-			SELECT task_id FROM video_relay_tasks
-			WHERE user_id=$1 AND failure_reason='upstream_rejected' AND billing_state='refunded'`, fixture.UserID).Scan(&id))
 		refunded := fixture
-		refunded.TaskID = id
+		var state, reason string
+		require.NoError(t, secondDB.QueryRowContext(ctx, `
+			SELECT task_id,hold_amount,billing_state,failure_reason FROM video_relay_tasks
+			WHERE user_id=$1 AND task_id<>$2`, fixture.UserID, fixture.TaskID).
+			Scan(&refunded.TaskID, &refunded.HoldAmount, &state, &reason))
+		require.InDelta(t, 3, refunded.HoldAmount, 1e-8, "the rejected order must have originally frozen a nonzero amount")
 		assertVideoRelayFunds(t, secondDB, refunded, 5, 0, 0)
+		require.Equal(t, service.VideoRelayRefunded, state)
+		require.Equal(t, service.VideoRelayUpstreamRejected, reason)
+		require.Contains(t, rejected.Body.String(), "The frozen amount was returned.", "explicit rejection must report the persisted refund")
+		require.Equal(t, http.StatusBadGateway, rejected.Code, rejected.Body.String())
+		require.NotContains(t, rejected.Body.String(), "provider-only rejection")
 	})
 
-	setPaidRate := httptest.NewRequest(http.MethodPut, "/api/v1/admin/groups/"+strconv.FormatInt(fixture.GroupID, 10),
-		strings.NewReader(`{"video_rate_multiplier":1}`))
-	setPaidRate.Header.Set("Content-Type", "application/json")
-	paidRate := httptest.NewRecorder()
-	groupRoutes.ServeHTTP(paidRate, setPaidRate)
-	require.Equal(t, http.StatusOK, paidRate.Code, paidRate.Body.String())
-	keys.InvalidateAuthCacheByUserID(ctx, fixture.UserID)
 	for _, fault := range []struct {
 		name      string
 		committed bool

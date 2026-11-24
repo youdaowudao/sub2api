@@ -19,6 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -186,7 +187,7 @@ func TestVideoRelayRepoTrackingExpiredBodyTimeout(t *testing.T) {
 			}
 			got, err := repo.Get(context.Background(), task.TaskID, task.UserID, task.APIKeyID)
 			require.NoError(t, err)
-			require.Equal(t, test.want, got.FailureReason)
+			assert.Equal(t, test.want, got.FailureReason)
 			assertVideoRelayFunds(t, integrationDB, task, test.balance, test.frozen, test.usage)
 			require.EqualValues(t, 1, reads.Load())
 			if test.want != "" {
@@ -380,8 +381,11 @@ func TestVideoRelayRepoUnknownTrackingUsesOneQualifiedLookup(t *testing.T) {
 		{name: "expired terminal ticket confirms the original refund once", sentAge: 34 * time.Minute, previous: 3 * time.Minute, wantLookup: 1, wantRefund: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			var logs, states atomic.Int32
+			var posts, logs, states atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.Method == http.MethodPost && req.URL.Path == "/v1/videos" {
+					posts.Add(1)
+				}
 				if req.Method != http.MethodGet {
 					http.NotFound(w, req)
 					return
@@ -403,13 +407,19 @@ func TestVideoRelayRepoUnknownTrackingUsesOneQualifiedLookup(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 			ctx := context.Background()
-			task, repo, tracker := newTrackingVideoRelayFixture(t, srv.URL, 40*time.Minute)
+			task, _, _ := newTrackingVideoRelayFixture(t, srv.URL, 40*time.Minute)
 			_, err := integrationDB.ExecContext(ctx, `
 				UPDATE video_relay_tasks SET upstream_task_id='',status='unconfirmed',
 					sent_at=clock_timestamp()-make_interval(secs => $2),
 					last_lookup_at=CASE WHEN $3::double precision>0 THEN clock_timestamp()-make_interval(secs => $3) END
 				WHERE task_id=$1`, task.TaskID, test.sentAge.Seconds(), test.previous.Seconds())
 			require.NoError(t, err)
+			restartedDB := videoRelayIndependentDB(t)
+			repo := NewVideoRelayRepository(restartedDB)
+			accounts := NewAccountRepository(testEntClient(t), restartedDB, nil)
+			gateway := newTrackingVideoRelayFixtureGateway(t, accounts, trackingVideoRelayFixtureOptions{})
+			tracker := service.NewVideoRelayTracker(service.NewVideoRelayService(repo, gateway, nil))
+			t.Cleanup(func() { require.Zero(t, posts.Load(), "the replacement worker must never resubmit the order") })
 			claim, err := repo.ClaimDue(ctx)
 			require.NoError(t, err)
 			require.NotNil(t, claim)
@@ -676,6 +686,19 @@ func (f *lateVideoRelayFixtureLog) Do(request *http.Request, _ string, _ int64, 
 	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(trackingFixtureChargeLog))}, nil
 }
 
+func reserveVideoRelayOnOriginalLine(t *testing.T, repo service.VideoRelayRepository, original service.VideoRelayTask) *service.VideoRelayTask {
+	t.Helper()
+	next := original
+	next.TaskID = videoRelayFixtureID()
+	next.HoldAmount, next.RateMultiplier = 0, 0
+	require.NoError(t, repo.Reserve(context.Background(), &next))
+	t.Cleanup(func() {
+		_, err := integrationDB.ExecContext(context.Background(), "DELETE FROM video_relay_tasks WHERE task_id=$1", next.TaskID)
+		require.NoError(t, err)
+	})
+	return &next
+}
+
 func TestVideoRelayRepoRefundLookupStopsAtTwoHours(t *testing.T) {
 	for _, test := range []struct {
 		name         string
@@ -709,7 +732,11 @@ func TestVideoRelayRepoRefundLookupStopsAtTwoHours(t *testing.T) {
 			}
 			ctx := context.Background()
 			task, repo, tracker := newTrackingVideoRelayFixture(t, srv.URL, 6*time.Hour, options)
+			next := reserveVideoRelayOnOriginalLine(t, repo, task)
 			prepareVideoRelayRefundLookup(t, repo, task, test.refundAge)
+			assertVideoRelayFunds(t, integrationDB, task, 10, 0, 0)
+			_, err := repo.AcquireSend(ctx, next)
+			require.ErrorIs(t, err, service.ErrVideoRelaySendBlocked)
 			claim, err := repo.ClaimDue(ctx)
 			require.NoError(t, err)
 			require.NotNil(t, claim)
@@ -719,6 +746,13 @@ func TestVideoRelayRepoRefundLookupStopsAtTwoHours(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, test.wantRealGET, realGET.Load())
 			require.Equal(t, test.wantLateGET, late.calls.Load())
+			_, sendErr := repo.AcquireSend(ctx, next)
+			if test.wantProvider == "" {
+				assert.ErrorIs(t, sendErr, service.ErrVideoRelaySendBlocked,
+					"the original dedicated line must remain paused without timely evidence")
+			} else {
+				require.NoError(t, sendErr, "timely evidence must clear the original line's send pause")
+			}
 			require.Equal(t, test.wantProvider, current.UpstreamTaskID)
 			require.Equal(t, service.VideoRelayRefunded, current.BillingState)
 			require.Equal(t, service.VideoRelayUnconfirmed, current.FailureReason)
@@ -772,8 +806,12 @@ func TestVideoRelayRepoRefundLookupCanSaveEvidenceReceivedBeforeDeadline(t *test
 			}}
 		},
 	})
+	next := reserveVideoRelayOnOriginalLine(t, repo, task)
 	prepareVideoRelayRefundLookup(t, repo, task, 120*time.Minute-1200*time.Millisecond)
 	ctx := context.Background()
+	assertVideoRelayFunds(t, db2, task, 10, 0, 0)
+	_, err := repo.AcquireSend(ctx, next)
+	require.ErrorIs(t, err, service.ErrVideoRelaySendBlocked)
 	claim, err := repo.ClaimDue(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, claim)
@@ -788,6 +826,8 @@ func TestVideoRelayRepoRefundLookupCanSaveEvidenceReceivedBeforeDeadline(t *test
 	require.False(t, current.CanDownload())
 	require.Nil(t, current.NextCheckAt)
 	assertVideoRelayFunds(t, db2, task, 10, 0, 0)
+	_, err = repo.AcquireSend(ctx, next)
+	require.NoError(t, err, "timely evidence saved after the cutoff must clear the original line's send pause")
 }
 
 func TestVideoRelayRepoRefundedDeletedSourcesCanRecoverNumber(t *testing.T) {

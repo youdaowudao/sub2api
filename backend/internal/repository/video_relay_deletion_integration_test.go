@@ -36,6 +36,10 @@ func TestVideoRelayRepoOriginalSourceDeletionSettlement(t *testing.T) {
 			_, err = connection.ExecContext(ctx, "UPDATE "+test.table+" SET deleted_at=clock_timestamp() WHERE id=$1", sourceID)
 			require.NoError(t, err)
 			refunded, result, err := repo.Settle(ctx, sent, service.VideoRelaySettlement{Completed: true})
+			current, readErr := NewVideoRelayRepository(connection).Get(ctx, task.TaskID, task.UserID, task.APIKeyID)
+			require.NoError(t, readErr)
+			require.Equal(t, service.VideoRelayRefunded, current.BillingState,
+				"deleting an original source must free the real hold")
 			require.NoError(t, err)
 			require.True(t, result.Applied)
 			require.Equal(t, test.reason, refunded.FailureReason)

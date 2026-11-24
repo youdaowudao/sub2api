@@ -5,7 +5,11 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -68,19 +72,18 @@ func TestVideoRelayRepoTrackingLeaseAndCustomerSettlement(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, fresh)
 	require.Equal(t, task.TaskID, fresh.TaskID)
-	_, err = first.FinishClaim(ctx, stale, service.VideoRelayTrackingFinish{Status: service.VideoRelayStatusInProgress, Progress: 85})
-	require.Error(t, err, "an expired worker must not write progress or clear a new worker's lease")
+	_, staleFinishErr := first.FinishClaim(ctx, stale, service.VideoRelayTrackingFinish{Status: service.VideoRelayStatusInProgress, Progress: 85})
 	current, err := second.Get(ctx, task.TaskID, task.UserID, task.APIKeyID)
 	require.NoError(t, err)
-	require.Zero(t, current.Progress)
+	require.Zero(t, current.Progress, "an expired worker must leave the current progress untouched")
+	require.Error(t, staleFinishErr, "an expired worker must not write progress or clear a new worker's lease")
 	late, result, err := first.Settle(ctx, stale, service.VideoRelaySettlement{Completed: true})
+	assertVideoRelayFunds(t, db2, task, 5, 5, 0)
 	require.Error(t, err, "an expired worker must not settle funds")
 	require.Nil(t, result)
 	if late != nil {
 		require.Equal(t, service.VideoRelayHeld, late.BillingState)
 	}
-	assertVideoRelayFunds(t, db2, task, 5, 5, 0)
-
 	settled, result, err := second.Settle(ctx, current, service.VideoRelaySettlement{Completed: true})
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -116,8 +119,8 @@ func TestVideoRelayRepoNoSendRefundRacesPermissionToSubmit(t *testing.T) {
 		if age < 10*time.Minute {
 			current, applied, err := first.Settle(ctx, claim, service.VideoRelaySettlement{FailureReason: service.VideoRelayNotSent})
 			require.NoError(t, err)
+			require.Equal(t, service.VideoRelayHeld, current.BillingState, "an unsent order younger than ten minutes must remain frozen")
 			require.Nil(t, applied)
-			require.Equal(t, service.VideoRelayHeld, current.BillingState)
 			assertVideoRelayFunds(t, db2, task, 5, 5, 0)
 			continue
 		}
@@ -148,4 +151,91 @@ func TestVideoRelayRepoNoSendRefundRacesPermissionToSubmit(t *testing.T) {
 			assertVideoRelayFunds(t, db2, task, 10, 0, 0)
 		}
 	}
+	t.Run("restarted worker refunds before the original gateway can send", testVideoRelayRefundBeforeGatewaySend)
+}
+
+type videoRelayPauseBeforeSend struct {
+	service.VideoRelayRepository
+	reserved chan<- service.VideoRelayTask
+	resume   <-chan struct{}
+}
+
+func (r videoRelayPauseBeforeSend) AcquireSend(ctx context.Context, task *service.VideoRelayTask) (*service.VideoRelayTask, error) {
+	r.reserved <- *task
+	select {
+	case <-r.resume:
+		return r.VideoRelayRepository.AcquireSend(ctx, task)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func testVideoRelayRefundBeforeGatewaySend(t *testing.T) {
+	ctx := context.Background()
+	fixture := newVideoRelayTask(t, 10, 0.5)
+	var posts atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/videos" {
+			posts.Add(1)
+			_, _ = io.WriteString(w, `{"id":"unexpected-p1-video","status":"queued"}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(provider.Close)
+	setupVideoRelayAuditRoute(t, fixture, provider.URL, "audit-p1-provider")
+	key, err := NewAPIKeyRepository(testEntClient(t), integrationDB).GetByID(ctx, fixture.APIKeyID)
+	require.NoError(t, err)
+	reserved := make(chan service.VideoRelayTask, 1)
+	resume := make(chan struct{})
+	release := sync.OnceFunc(func() { close(resume) })
+	defer release()
+	old := newVideoRelayAuditRouter(t, integrationDB, videoRelayPauseBeforeSend{
+		VideoRelayRepository: NewVideoRelayRepository(integrationDB), reserved: reserved, resume: resume,
+	})
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		result <- videoRelayAuditRequest(old, key.Key, http.MethodPost, "/v1/videos",
+			`{"model":"video-public","prompt":"pending before send","seconds":5,"resolution":"480p"}`)
+	}()
+	var task service.VideoRelayTask
+	select {
+	case task = <-reserved:
+	case response := <-result:
+		t.Fatalf("the original request did not reach the send decision: %s", response.Body.String())
+	case <-time.After(5 * time.Second):
+		t.Fatal("the original request did not reserve before the send decision")
+	}
+	restartedDB := videoRelayIndependentDB(t)
+	repo := NewVideoRelayRepository(restartedDB)
+	assertVideoRelayFunds(t, restartedDB, task, 9.5, 0.5, 0)
+	_, err = restartedDB.ExecContext(ctx, `UPDATE video_relay_tasks
+		SET created_at=clock_timestamp()-interval '11 minutes' WHERE task_id=$1`, task.TaskID)
+	require.NoError(t, err)
+	makeVideoRelayTaskDue(t, restartedDB, task.TaskID)
+	accounts := NewAccountRepository(testEntClient(t), restartedDB, nil)
+	gateway := newTrackingVideoRelayFixtureGateway(t, accounts, trackingVideoRelayFixtureOptions{})
+	tracker := service.NewVideoRelayTracker(service.NewVideoRelayService(repo, gateway, nil))
+	claim, err := repo.ClaimDue(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, claim)
+	require.Equal(t, task.TaskID, claim.TaskID)
+	require.Nil(t, claim.SentAt)
+	tracker.ProcessClaim(ctx, claim)
+	assertVideoRelayFunds(t, restartedDB, task, 10, 0, 0)
+	release()
+	select {
+	case response := <-result:
+		require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
+		require.Contains(t, response.Body.String(), "The frozen amount was returned.")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the original request did not finish after the restart settled its order")
+	}
+	fresh, err := repo.Get(ctx, task.TaskID, task.UserID, task.APIKeyID)
+	require.NoError(t, err)
+	require.Equal(t, service.VideoRelayRefunded, fresh.BillingState)
+	require.Equal(t, service.VideoRelayNotSent, fresh.FailureReason)
+	require.Nil(t, fresh.SentAt)
+	require.Zero(t, posts.Load(), "the original request must make zero POSTs after the restart's refund")
+	assertVideoRelayFunds(t, restartedDB, task, 10, 0, 0)
 }
