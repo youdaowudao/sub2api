@@ -67,7 +67,7 @@ func TestVideoRelayRepoDeletionLocksAvoidWaitingAndPermitForeignKeys(t *testing.
 	require.NoError(t, err)
 	tx, err := connection.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	_, err = tx.ExecContext(ctx, "SELECT id FROM api_keys WHERE id=$1 FOR NO KEY UPDATE", task.APIKeyID)
 	require.NoError(t, err)
 	_, applied, err := repo.Settle(ctx, accepted, service.VideoRelaySettlement{Completed: true})
@@ -80,7 +80,7 @@ func TestVideoRelayRepoDeletionLocksAvoidWaitingAndPermitForeignKeys(t *testing.
 
 	foreignKey, err := connection.BeginTx(ctx, nil)
 	require.NoError(t, err)
-	defer foreignKey.Rollback()
+	defer func() { _ = foreignKey.Rollback() }()
 	for table, id := range map[string]int64{"users": task.UserID, "api_keys": task.APIKeyID, "accounts": task.AccountID} {
 		_, err = foreignKey.ExecContext(ctx, "SELECT id FROM "+table+" WHERE id=$1 FOR KEY SHARE", id)
 		require.NoError(t, err)

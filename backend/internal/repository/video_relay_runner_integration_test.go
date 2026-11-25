@@ -238,7 +238,7 @@ func TestVideoRelayRepoKnownDeadlineRecoversThroughPersistedSchedule(t *testing.
 			if scheduled {
 				tx, err := db2.BeginTx(ctx, nil)
 				require.NoError(t, err)
-				defer tx.Rollback()
+				defer func() { _ = tx.Rollback() }()
 				var id int64
 				require.NoError(t, tx.QueryRowContext(ctx,
 					"SELECT id FROM users WHERE id=$1 FOR NO KEY UPDATE", task.UserID).Scan(&id))

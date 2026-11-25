@@ -102,7 +102,7 @@ func ValidVideoRelayTaskID(id string) bool {
 	}
 	for i := len(prefix); i < len(id); i++ {
 		c := id[i]
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}
@@ -140,8 +140,8 @@ func ValidVideoRelayUpstreamTaskID(id string) bool {
 	}
 	for i := range len(id) {
 		c := id[i]
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' ||
-			c == '_' || c == '-' || c == '.') {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') &&
+			c != '_' && c != '-' && c != '.' {
 			return false
 		}
 	}

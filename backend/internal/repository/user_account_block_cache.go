@@ -42,7 +42,7 @@ func (c *userAccountBlockCache) SetUserAccountBlock(ctx context.Context, record 
 		return err
 	}
 	if result != 1 {
-		return fmt.Errorf("Redis did not confirm user account block write: %d", result)
+		return fmt.Errorf("redis did not confirm user account block write: %d", result)
 	}
 	return nil
 }

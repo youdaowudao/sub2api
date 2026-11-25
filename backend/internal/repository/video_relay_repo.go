@@ -54,7 +54,7 @@ func (r *videoRelayRepository) Reserve(ctx context.Context, task *service.VideoR
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := reserveUsageBillingBatchImageBalance(ctx, tx, videoRelayAmount(task)); err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func (r *videoRelayRepository) AcquireSend(ctx context.Context, task *service.Vi
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err := lockVideoRelaySiteCredential(ctx, tx, task); err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func (r *videoRelayRepository) RecordSubmission(ctx context.Context, sent *servi
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	current, err := lockVideoRelayTask(ctx, tx, sent.TaskID)
 	if err != nil {
 		return nil, err
@@ -220,7 +220,7 @@ func (r *videoRelayRepository) claimVideoRelayLookup(ctx context.Context, expect
 	if err != nil {
 		return nil, false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	task, now, err := lockObservedVideoRelayTask(ctx, tx, expected)
 	if err != nil {
 		return task, false, err
@@ -281,7 +281,7 @@ func (r *videoRelayRepository) ConfirmLookup(ctx context.Context, ticket *servic
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if err := lockVideoRelaySiteCredential(ctx, tx, ticket); err != nil {
 		return nil, err
 	}
@@ -342,7 +342,7 @@ func videoRelayLookupCandidate(ctx context.Context, tx *sql.Tx, current *service
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	known := make(map[string]string, len(taskIDs))
 	for rows.Next() {
 		var id, credential string
@@ -391,7 +391,7 @@ func (r *videoRelayRepository) Settle(ctx context.Context, task *service.VideoRe
 	if err != nil {
 		return nil, nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	current, now, err := lockObservedVideoRelayTask(ctx, tx, task)
 	if err != nil {
 		return current, nil, err

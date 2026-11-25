@@ -306,7 +306,7 @@ func canonicalVideoRelayEscapedPath(path string) string {
 	normalized.Grow(len(path))
 	for i := 0; i < len(path); i++ {
 		if path[i] != '%' {
-			normalized.WriteByte(path[i])
+			_ = normalized.WriteByte(path[i])
 			continue
 		}
 		// EscapedPath supplies valid escapes. Decode unreserved bytes while
@@ -316,10 +316,10 @@ func canonicalVideoRelayEscapedPath(path string) string {
 		b := byte(value)
 		if b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' ||
 			b >= '0' && b <= '9' || b == '-' || b == '.' || b == '_' || b == '~' {
-			normalized.WriteByte(b)
+			_ = normalized.WriteByte(b)
 		} else {
-			normalized.WriteByte('%')
-			normalized.WriteString(strings.ToUpper(escaped))
+			_ = normalized.WriteByte('%')
+			_, _ = normalized.WriteString(strings.ToUpper(escaped))
 		}
 		i += 2
 	}
@@ -560,7 +560,7 @@ func (r *videoRelayRoute) queryCharges(ctx context.Context, upstream HTTPUpstrea
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("upstream video billing log returned HTTP %d", resp.StatusCode)
 	}

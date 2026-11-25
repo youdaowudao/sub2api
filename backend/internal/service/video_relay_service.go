@@ -253,7 +253,7 @@ func (s *VideoRelayService) submitSelected(c *gin.Context, input VideoRelayReque
 		}
 		return s.recordSubmission(ctx, sent, "", ""), nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	requestID := videoRelayRequestID(resp)
 	current := sent
 	if requestID != "" {
@@ -431,7 +431,7 @@ func (s *VideoRelayService) lookupStatusOnRoute(ctx context.Context, c *gin.Cont
 		_ = s.gateway.handleOpenAIUpstreamTransportError(ctx, c, route.account, err, false)
 		return task
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := readVideoRelayBody(resp.Body, videoRelayResponseLimit)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		s.recordUpstreamError(ctx, c, route, resp, body, task.UpstreamModel, "http_error")

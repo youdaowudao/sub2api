@@ -549,8 +549,8 @@ func TestVideoRelayRepoGatewayHTTP2SubmitBodyCannotReplay(t *testing.T) {
 	task := newVideoRelayTask(t, 10, 0.5)
 	setupVideoRelayAuditRoute(t, task, "http://video-transport-fixture.invalid", "audit-transport-provider")
 	clientConn, serverConn := net.Pipe()
-	defer clientConn.Close()
-	defer serverConn.Close()
+	defer func() { _ = clientConn.Close() }()
+	defer func() { _ = serverConn.Close() }()
 	var posts atomic.Int32
 	peerDone := make(chan error, 1)
 	go func() { peerDone <- serveVideoRelayRefusingPeer(serverConn, &posts) }()

@@ -79,7 +79,7 @@ func (r *videoRelayRepository) FinishClaim(ctx context.Context, claim *service.V
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	current, now, err := lockObservedVideoRelayTask(ctx, tx, claim)
 	if err != nil {
 		return current, err
@@ -234,7 +234,7 @@ func (r *videoRelayRepository) ListAdmin(ctx context.Context, filter service.Vid
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	result := make([]service.VideoRelayAdminRow, 0, limit)
 	for rows.Next() {
 		var item service.VideoRelayAdminRow

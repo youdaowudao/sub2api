@@ -244,7 +244,7 @@ func (t *VideoRelayTracker) readStatus(ctx context.Context, route *videoRelayRou
 	if err != nil {
 		return videoRelayReply{}, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return videoRelayReply{}, errors.New("video status request did not return success")
 	}
