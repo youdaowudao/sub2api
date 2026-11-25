@@ -33,6 +33,9 @@ type videoRelayCommitConnection interface {
 	driver.ConnBeginTx
 	driver.QueryerContext
 	driver.ExecerContext
+	// Keep the real driver's pool validation and session reset behavior.
+	driver.Validator
+	driver.SessionResetter
 }
 
 func (c videoRelayCommitConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -73,6 +76,8 @@ func (r videoRelaySettlementRepository) Settle(ctx context.Context, task *servic
 }
 
 func TestVideoRelayRepoTrackerShutdownAtRealCommitBoundary(t *testing.T) {
+	require.Implements(t, (*driver.Validator)(nil), videoRelayBeginCommitHook{}, "commit hook must preserve driver connection validation")
+	require.Implements(t, (*driver.SessionResetter)(nil), videoRelayBeginCommitHook{}, "commit hook must preserve driver session reset")
 	for _, test := range []struct {
 		name, status, billing string
 		committed, lostAck    bool
