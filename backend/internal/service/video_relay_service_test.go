@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/model"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -99,7 +100,10 @@ func TestVideoRelayRouteFingerprintTiesRequestsToOriginalConfiguration(t *testin
 	require.NoError(t, err)
 	require.Equal(t, "https://fixture.test/provider/v1/videos", bound.collection.String())
 	require.Equal(t, "https://fixture.test/provider/api/log/token", bound.logURL)
-	require.Empty(t, bound.headers.Get("Idempotency-Key"))
+	req, err := bound.request(context.Background(), http.MethodGet, bound.collection.String(), nil)
+	require.NoError(t, err)
+	require.Empty(t, req.Header.Get("Idempotency-Key"))
+	require.Equal(t, []string{"original"}, req.Header["x-partner"])
 	task := &VideoRelayTask{SiteFingerprint: bound.site, CredentialFingerprint: bound.credential, RouteFingerprint: bound.fingerprint}
 	account.Credentials["base_url"] = "https://fixture.test/provider"
 	account.Schedulable = false
@@ -151,6 +155,220 @@ func TestVideoRelayRouteUsesEffectiveBearerAndDropsIdempotencyOverrides(t *testi
 			require.False(t, strings.EqualFold(name, "Idempotency-Key") || strings.EqualFold(name, "X-Idempotency-Key"), name)
 		}
 	})
+}
+
+func TestVideoRelayRequestsReportIdentityPerRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	received := make(chan http.Header, 8)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		received <- req.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"success":true,"data":[]}`)
+	}))
+	t.Cleanup(upstream.Close)
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Security.URLAllowlist.AllowPrivateHosts = true
+	account := &Account{ID: 21, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"base_url": upstream.URL, "api_key": "fixture-video-key",
+		credKeyHeaderOverrideEnabled: true,
+		credKeyHeaderOverrides: map[string]any{
+			"x-end-user": "{{user_id}}", "x-key": "{{api_key_id}}", "x-group": "{{group_id}}",
+			"x-trace": "{{request_id}}", "x-combined": "private-fixture-{{user_id}}", "x-static": "constant",
+			"accept": "{{user_id}}", "idempotency-key": "{{request_id}}", "x-idempotency-key": "{{request_id}}",
+		},
+	}}
+	gateway := &OpenAIGatewayService{cfg: cfg}
+	route, err := gateway.videoRelayRoute(account)
+	require.NoError(t, err)
+	task := &VideoRelayTask{UpstreamModel: "fixture-video", Seconds: 5, Resolution: "480p"}
+	for _, identity := range []struct {
+		userID, keyID, groupID             int64
+		requestID, user, key, group, trace string
+	}{
+		{7, 31, 9, "req-a;unsafe", "7", "31", "9", "req-a_unsafe"},
+		{8, 32, 10, "req-b", "8", "32", "10", "req-b"},
+	} {
+		ctx := context.WithValue(context.Background(), ctxkey.RequestID, identity.requestID)
+		ctx = WithHeaderOverrideRequestScope(ctx, identity.userID, identity.keyID, &identity.groupID)
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequestWithContext(ctx, http.MethodGet, "/v1/videos/owned", nil)
+		for _, operation := range []string{"submit", "status", "download", "charges"} {
+			t.Run(identity.requestID+"/"+operation, func(t *testing.T) {
+				if operation == "charges" {
+					_, err = route.queryCharges(ctx, videoRelayTestTransport{client: upstream.Client()})
+					require.NoError(t, err)
+				} else {
+					var req *http.Request
+					if operation == "submit" {
+						req, err = route.submitRequest(ctx, VideoRelayRequest{Prompt: "Waves"}, task)
+					} else {
+						req, err = route.taskRequest(ctx, "provider-fixture", operation == "download")
+					}
+					require.NoError(t, err)
+					resp, sendErr := upstream.Client().Do(req)
+					require.NoError(t, sendErr)
+					require.NoError(t, resp.Body.Close())
+				}
+				headers := <-received
+				require.Equal(t, identity.user, headers.Get("X-End-User"), "actual upstream user identity")
+				require.Equal(t, identity.key, headers.Get("X-Key"))
+				require.Equal(t, identity.group, headers.Get("X-Group"))
+				require.Equal(t, identity.trace, headers.Get("X-Trace"))
+				require.Equal(t, "private-fixture-"+identity.user, headers.Get("X-Combined"))
+				require.Equal(t, "constant", headers.Get("X-Static"))
+				require.Equal(t, "application/json", headers.Get("Accept"))
+				require.Equal(t, "Bearer fixture-video-key", headers.Get("Authorization"))
+				require.Empty(t, headers.Get("Idempotency-Key"))
+				require.Empty(t, headers.Get("X-Idempotency-Key"))
+				for _, values := range headers {
+					for _, value := range values {
+						require.NotContains(t, value, "{{", "never send an unresolved template")
+					}
+				}
+				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{AccountID: account.ID})
+				events, ok := c.Get(OpsUpstreamErrorsKey)
+				require.True(t, ok)
+				reported := events.([]*OpsUpstreamErrorEvent)
+				actual := reported[len(reported)-1].ReportedHeaders
+				require.Equal(t, identity.user, actual["x-end-user"])
+				require.Equal(t, "…user_id="+identity.user, actual["x-combined"])
+				require.NotContains(t, actual, "accept", "fixed priority replaced this variable")
+				require.NotContains(t, actual, "idempotency-key")
+				require.NotContains(t, actual, "x-idempotency-key")
+				require.NotContains(t, actual, "x-static")
+			})
+		}
+		rebuilt, rebuildErr := gateway.videoRelayRoute(account)
+		require.NoError(t, rebuildErr)
+		require.Equal(t, route.fingerprint, rebuilt.fingerprint, "identity is not account configuration")
+	}
+}
+
+func TestVideoRelayRouteRetainsLegacyFixedHeaderFingerprint(t *testing.T) {
+	gateway := &OpenAIGatewayService{cfg: &config.Config{}}
+	account := &Account{ID: 21, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"base_url": "https://FIXTURE.test:443/provider/v1/", "api_key": "local-original",
+		credKeyHeaderOverrideEnabled: true,
+		credKeyHeaderOverrides: map[string]any{
+			"user-agent": "gold-agent", "aaa": "a", "X-Partner": "b",
+			"Idempotency-Key": "ignored", "X-IDEMPOTENCY-KEY": "ignored", "Authorization": "blocked",
+		},
+	}}
+	route, err := gateway.videoRelayRoute(account)
+	require.NoError(t, err)
+	// Captures the pre-upgrade length-prefixed SHA256 including wire-case sort
+	// (User-Agent sorts before aaa), normalized URL and excluded headers.
+	require.Equal(t, "c27aa20d5193820e098a2fdf224642f18037fc3b853ea453721acddf806dd0e9", route.fingerprint)
+	task := &VideoRelayTask{SiteFingerprint: route.site, CredentialFingerprint: route.credential, RouteFingerprint: route.fingerprint}
+	require.True(t, route.matches(task))
+	account.Credentials[credKeyHeaderOverrides] = map[string]any{"x-user": "{{user_id}}"}
+	templated, err := gateway.videoRelayRoute(account)
+	require.NoError(t, err)
+	require.False(t, templated.matches(task))
+	task.RouteFingerprint = templated.fingerprint
+	account.Credentials[credKeyHeaderOverrides] = map[string]any{"x-user": "{{api_key_id}}"}
+	changed, err := gateway.videoRelayRoute(account)
+	require.NoError(t, err)
+	require.False(t, changed.matches(task), "changing template semantics changes configuration")
+}
+
+func TestVideoRelayRequestSkipsUnavailableVariables(t *testing.T) {
+	gateway := &OpenAIGatewayService{cfg: &config.Config{}}
+	account := &Account{ID: 21, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"base_url": "https://fixture.test", "api_key": "fixture",
+		credKeyHeaderOverrideEnabled: true,
+		credKeyHeaderOverrides: map[string]any{
+			"x-user": "prefix-{{user_id}}", "x-group": "{{group_id}}", "x-unknown": "{{unknown}}", "x-static": "constant",
+		},
+	}}
+	route, err := gateway.videoRelayRoute(account)
+	require.NoError(t, err)
+	for _, ctx := range []context.Context{context.Background(), WithHeaderOverrideRequestScope(context.Background(), 7, 31, nil)} {
+		req, err := route.taskRequest(ctx, "provider-task", false)
+		require.NoError(t, err)
+		require.NotContains(t, req.Header, "x-group")
+		require.NotContains(t, req.Header, "x-unknown")
+		require.Equal(t, []string{"constant"}, req.Header["x-static"])
+		if headerOverrideScopeFromContext(ctx) == nil {
+			require.NotContains(t, req.Header, "x-user")
+		} else {
+			require.Equal(t, []string{"prefix-7"}, req.Header["x-user"])
+		}
+	}
+}
+
+type videoRelayIdentityAccounts struct {
+	AccountRepository
+	account *Account
+	reads   int
+}
+
+func (r *videoRelayIdentityAccounts) GetByID(_ context.Context, id int64) (*Account, error) {
+	r.reads++
+	if r.account == nil || r.account.ID != id {
+		return nil, ErrAccountNotFound
+	}
+	return r.account, nil
+}
+
+func TestVideoRelayDownloadReportsOnlySentVariableHeaders(t *testing.T) {
+	received := make(chan http.Header, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		received <- req.Header.Clone()
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":{"message":"fixture unavailable"}}`)
+	}))
+	t.Cleanup(upstream.Close)
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Security.URLAllowlist.AllowPrivateHosts = true
+	account := &Account{ID: 21, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{
+		"base_url": upstream.URL, "api_key": "fixture",
+		credKeyHeaderOverrideEnabled: true,
+		credKeyHeaderOverrides:       map[string]any{"x-user": "{{user_id}}", "accept": "{{user_id}}", "range": "{{user_id}}"},
+	}}
+	accounts := &videoRelayIdentityAccounts{account: account}
+	gateway := &OpenAIGatewayService{cfg: cfg, accountRepo: accounts, httpUpstream: videoRelayTestTransport{client: upstream.Client()}}
+	route, err := gateway.videoRelayRoute(account)
+	require.NoError(t, err)
+	store := &videoRelaySubmissionStore{task: VideoRelayTask{
+		TaskID: "video_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", UserID: 7, APIKeyID: 31, AccountID: account.ID,
+		UpstreamTaskID: "provider-task", Status: VideoRelayStatusCompleted, BillingState: VideoRelayCharged,
+		SiteFingerprint: route.site, CredentialFingerprint: route.credential, RouteFingerprint: route.fingerprint,
+	}}
+	svc := NewVideoRelayService(store, gateway, nil)
+	key := &APIKey{ID: 31, UserID: 7}
+	for _, wanted := range []string{"", "bytes=0-11"} {
+		t.Run(wanted, func(t *testing.T) {
+			ctx := WithHeaderOverrideRequestScope(context.Background(), 7, 31, nil)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequestWithContext(ctx, http.MethodGet, "/v1/videos/"+store.task.TaskID+"/content", nil)
+			c.Request.Header.Set("X-User", "forged-client-identity")
+			var ranges []string
+			if wanted != "" {
+				ranges = []string{wanted}
+			}
+			download, failure := svc.Download(c, key, store.task.TaskID, ranges)
+			require.Nil(t, download)
+			require.NotNil(t, failure)
+			headers := <-received
+			require.Equal(t, wanted, headers.Get("Range"))
+			require.Equal(t, "video/mp4", headers.Get("Accept"))
+			require.Equal(t, "identity", headers.Get("Accept-Encoding"))
+			require.Equal(t, "7", headers.Get("X-User"))
+			events, exists := c.Get(OpsUpstreamErrorsKey)
+			require.True(t, exists)
+			require.Len(t, events, 1)
+			reported := events.([]*OpsUpstreamErrorEvent)[0].ReportedHeaders
+			require.Equal(t, "7", reported["x-user"])
+			require.NotContains(t, reported, "range")
+			require.NotContains(t, reported, "accept")
+			require.Equal(t, VideoRelayCharged, store.task.BillingState)
+		})
+	}
+	require.Equal(t, 2, accounts.reads, "only the existing original-account read per download")
+	require.Equal(t, 2, store.reads, "only the existing ownership read per download")
 }
 
 func TestVideoRelayRouteRecognizesEscapedVersionPath(t *testing.T) {
@@ -507,7 +725,7 @@ func TestVideoRelayRefundsOnlyWhenTransportNeverGetsConnection(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			collection, err := canonicalVideoRelayCollectionURL(test.url)
 			require.NoError(t, err)
-			route := &videoRelayRoute{collection: collection, headers: make(http.Header), bearer: "fixture-only",
+			route := &videoRelayRoute{collection: collection, bearer: "fixture-only",
 				account: &Account{ID: 51, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}}
 			client := &http.Client{Timeout: time.Second}
 			upstream := videoRelayTracedTestTransport{videoRelayTestTransport{client: client}}
@@ -590,7 +808,7 @@ func TestVideoRelaySubmitEvidenceAndRequestContract(t *testing.T) {
 			collection, err := canonicalVideoRelayCollectionURL(server.URL + "/tenant/v1/")
 			require.NoError(t, err)
 			account := &Account{ID: 30, Type: AccountTypeAPIKey, Platform: PlatformOpenAI}
-			route := &videoRelayRoute{collection: collection, bearer: "fixture", headers: make(http.Header), account: account}
+			route := &videoRelayRoute{collection: collection, bearer: "fixture", account: account}
 			repo := &videoRelaySubmissionStore{}
 			client := server.Client()
 			client.CheckRedirect = func(req *http.Request, _ []*http.Request) error {
@@ -661,7 +879,7 @@ func TestVideoRelaySubmitKeepsAccountSlotAfterClientDisconnect(t *testing.T) {
 	c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/videos", nil)
 	collection, err := canonicalVideoRelayCollectionURL(server.URL)
 	require.NoError(t, err)
-	route := &videoRelayRoute{collection: collection, bearer: "fixture", headers: make(http.Header),
+	route := &videoRelayRoute{collection: collection, bearer: "fixture",
 		account: &Account{ID: 30, Type: AccountTypeAPIKey, Platform: PlatformOpenAI}}
 	store := &videoRelaySubmissionStore{}
 	svc := NewVideoRelayService(store, &OpenAIGatewayService{httpUpstream: videoRelayTestTransport{client: server.Client()}}, nil)

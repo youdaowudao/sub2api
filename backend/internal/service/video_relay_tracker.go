@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/google/uuid"
 )
 
 const (
@@ -193,6 +195,11 @@ func (t *VideoRelayTracker) originalTrackingRoute(ctx, cleanup context.Context, 
 	return route, slot.ReleaseFunc, nil
 }
 
+func videoRelayTrackingRequestContext(ctx context.Context, task *VideoRelayTask) context.Context {
+	ctx = WithHeaderOverrideRequestScope(ctx, task.UserID, task.APIKeyID, &task.GroupID)
+	return context.WithValue(ctx, ctxkey.RequestID, uuid.NewString())
+}
+
 func (t *VideoRelayTracker) trackKnown(work, upstream, cleanup context.Context, claim *VideoRelayTask) {
 	expired := !claim.TrackingStartedAt.Before(claim.CreatedAt.Add(VideoRelayTrackingWindow))
 	route, release, err := t.originalTrackingRoute(upstream, cleanup, claim)
@@ -209,7 +216,7 @@ func (t *VideoRelayTracker) trackKnown(work, upstream, cleanup context.Context, 
 	}
 	var reply videoRelayReply
 	if route != nil && VideoRelayTrackingCanceled(upstream) == nil {
-		reply, err = t.readStatus(upstream, route, claim.UpstreamTaskID)
+		reply, err = t.readStatus(videoRelayTrackingRequestContext(upstream, claim), route, claim.UpstreamTaskID)
 	}
 	if err == nil && VideoRelayTrackingCanceled(upstream) == nil {
 		switch reply.Status {
@@ -296,7 +303,7 @@ func (t *VideoRelayTracker) trackUnknown(work, upstream, cleanup context.Context
 		return
 	}
 	if route != nil && VideoRelayTrackingCanceled(upstream) == nil {
-		logs, readErr := route.queryCharges(upstream, t.relay.gateway.httpUpstream)
+		logs, readErr := route.queryCharges(videoRelayTrackingRequestContext(upstream, ticket), t.relay.gateway.httpUpstream)
 		if readErr == nil && len(logs) != 0 && VideoRelayTrackingCanceled(upstream) == nil && VideoRelayTrackingCanceled(work) == nil {
 			updated, err := t.relay.repo.ConfirmLookup(work, ticket, route.collection.EscapedPath(), logs)
 			if err != nil {
