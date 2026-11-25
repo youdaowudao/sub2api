@@ -1,18 +1,23 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
 
@@ -251,6 +256,48 @@ func TestOpsWSHelpers(t *testing.T) {
 	addr := netip.MustParseAddr("10.0.0.1")
 	require.True(t, isAddrInTrustedProxies(addr, prefixes))
 	require.False(t, isAddrInTrustedProxies(netip.MustParseAddr("192.168.0.1"), prefixes))
+}
+
+// Exercise the production upgrader and close helper with a real local connection,
+// without starting the ops refresh worker or accessing a database.
+func TestOpsWebSocketUpgradeAndClose(t *testing.T) {
+	const payload = `{"qps":7}`
+	result := make(chan error, 1)
+	router := gin.New()
+	router.GET("/fixture", func(c *gin.Context) {
+		conn, err := upgrader.Upgrade(c.Writer, c.Request, servermiddleware.ServerTimingResponseHeader(c))
+		if err != nil {
+			result <- err
+			return
+		}
+		err = conn.WriteMessage(websocket.TextMessage, []byte(payload))
+		closeWS(conn, opsWSCloseRealtimeDisabled, "realtime_disabled")
+		result <- err
+	})
+	server := httptest.NewServer(router)
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, response, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/fixture", &coderws.DialOptions{
+		Subprotocols: []string{"fixture-only", "sub2api-admin"},
+		HTTPHeader:   http.Header{"Origin": {server.URL}},
+	})
+	require.NoError(t, err)
+	defer func() { _ = conn.CloseNow() }()
+	require.Equal(t, http.StatusSwitchingProtocols, response.StatusCode)
+	require.Equal(t, "sub2api-admin", conn.Subprotocol())
+	messageType, message, err := conn.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, coderws.MessageText, messageType)
+	require.Equal(t, payload, string(message))
+	_, _, err = conn.Read(ctx)
+	require.Equal(t, coderws.StatusCode(opsWSCloseRealtimeDisabled), coderws.CloseStatus(err))
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("local WebSocket handler did not finish")
+	}
 }
 
 // TestOpenAIFastPolicySettingsFromDTO_NormalizesServiceTier 验证 admin
