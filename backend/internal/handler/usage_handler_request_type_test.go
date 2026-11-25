@@ -366,3 +366,17 @@ func TestUserUsageSnapshotRejectsInvalidIncludeFlags(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, rec.Code, query)
 	}
 }
+
+func TestVideoRelayUsageRecoveryReturnsOwnedRequestID(t *testing.T) {
+	mode := string(service.BillingModeVideo)
+	task := service.VideoRelayTask{TaskID: "video_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+	repo := &userUsageRepoCapture{listRows: []service.UsageLog{{
+		UserID: 42, RequestID: task.UsageRequestID(), BillingMode: &mode,
+	}}}
+	recorder := httptest.NewRecorder()
+	newUserUsageRequestTypeTestRouter(repo).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/usage?billing_mode=video", nil))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.EqualValues(t, 42, repo.listFilters.UserID)
+	require.Equal(t, mode, repo.listFilters.BillingMode)
+	require.Contains(t, recorder.Body.String(), `"request_id":"`+task.UsageRequestID()+`"`)
+}

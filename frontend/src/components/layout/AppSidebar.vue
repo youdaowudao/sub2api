@@ -818,6 +818,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true, featureFlag: flagSubscription },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
+    { path: '/admin/video-tasks', label: t('nav.videoTasks'), icon: OrderListIcon, hideInSimpleMode: true },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
@@ -1009,9 +1010,9 @@ if (
 
 // Fetch admin settings (for feature-gated nav items like Ops).
 watch(
-  isAdmin,
-  (v) => {
-    if (v) {
+  [isAdmin, () => route.meta.skipAdminCompliance],
+  ([admin, skipCompliance]) => {
+    if (admin && !skipCompliance) {
       adminSettingsStore.fetch()
     }
   },
@@ -1020,10 +1021,13 @@ watch(
 
 onMounted(() => {
   window.addEventListener('storage', promoPreference.applyStorageEvent)
-  void refreshBatchImageAccess()
-  if (isAdmin.value) {
-    adminSettingsStore.fetch()
-  }
+  watch(
+    () => route.meta.skipAdminCompliance,
+    (skip) => {
+      if (!skip) void refreshBatchImageAccess()
+    },
+    { immediate: true }
+  )
   // Restore sidebar scroll position after route change re-mounts the component
   if (appStore.sidebarScrollTop > 0 && sidebarNavRef.value) {
     void nextTick(() => {

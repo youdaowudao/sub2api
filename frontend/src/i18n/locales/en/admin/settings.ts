@@ -1,5 +1,32 @@
 export default {
     settings: {
+      userAccountBlock: {
+        title: "User account blocks",
+        description: "After you click \"Block this account\" in a failure record, this account is skipped when choosing an account for that user during the set duration. Other users can still use it. Blocks lift automatically when they expire, or you can remove them below.",
+        duration: "Block duration",
+        hours: "{n} hours",
+        durationHint: "Only applies to new blocks. Existing blocks keep their expiry time.",
+        listTitle: "Current blocks",
+        user: "User",
+        account: "Account",
+        createdAt: "Blocked at",
+        expiresAt: "Expires at",
+        action: "Action",
+        empty: "No account blocks right now",
+        remove: "Remove",
+        removed: "Removed",
+        removeFailed: "Remove failed: {reason}",
+        refresh: "Refresh",
+        retry: "Retry",
+        errors: {
+          loadFailed: "Couldn’t load the block list. Please try again.",
+          readRateLimit: "Too many requests. The block list couldn’t be loaded. Try again later.",
+          writeRateLimit: "Too many requests. The action wasn’t performed. Try again later.",
+          invalidID: "Invalid user or account ID",
+          durationReadFailed: "Couldn’t read the block duration. No block was applied. Please try again later.",
+          unconfirmedWrite: "We couldn’t confirm the result. Refresh User account blocks to check.",
+        },
+      },
       title: 'System Settings',
       description: 'Manage registration, email verification, default values, and SMTP settings',
       tabs: {
@@ -154,8 +181,8 @@ export default {
           },
         },
       },
-      emailTabDisabledTitle: 'Email Verification Not Enabled',
-      emailTabDisabledHint: 'Enable email verification in the Security tab to configure SMTP settings.',
+      emailTabDisabledTitle: 'Email Verification and Password Reset Are Not Enabled',
+      emailTabDisabledHint: 'Enable email verification or password reset in the Security tab to configure SMTP settings.',
       registration: {
         title: 'Registration Settings',
         description: 'Control user registration and verification',
@@ -1001,6 +1028,12 @@ export default {
         emailsHint: 'Leave empty to disable notifications',
         addEmail: 'Add Email',
         emailPlaceholder: 'Enter email address',
+      },
+      balanceRechargeNotify: {
+        title: 'Recharge Success Notification',
+        description: 'Control whether users receive an email after a balance recharge is credited.',
+        enabled: 'Enable Recharge Success Notification',
+        enabledHint: 'When enabled, users receive an email once a balance recharge order is credited. Subscription purchase emails are not affected.'
       },
       subscriptionExpiryNotify: {
         title: 'Subscription Expiry Reminder',

@@ -352,6 +352,16 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyCompactHomeEnabled] = strconv.FormatBool(settings.CompactHomeEnabled)
 	updates[SettingKeyHideCcsImportButton] = strconv.FormatBool(settings.HideCcsImportButton)
 	updates[SettingKeyQuickImportImageGroupID] = strconv.FormatInt(settings.QuickImportImageGroupID, 10)
+	if hours := settings.UserAccountBlockDurationHours; hours != nil {
+		if !validUserAccountBlockDuration(*hours) {
+			return nil, ErrUserAccountBlockInvalidDuration
+		}
+		payload, err := json.Marshal(UserAccountBlockSettings{DurationHours: *hours})
+		if err != nil {
+			return nil, err
+		}
+		updates[SettingKeyUserAccountBlockSettings] = string(payload)
+	}
 	updates[SettingKeyPurchaseSubscriptionEnabled] = strconv.FormatBool(settings.PurchaseSubscriptionEnabled)
 	updates[SettingKeyPurchaseSubscriptionURL] = strings.TrimSpace(settings.PurchaseSubscriptionURL)
 	tableDefaultPageSize, tablePageSizeOptions := normalizeTablePreferences(
@@ -538,6 +548,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyBalanceLowNotifyEnabled] = strconv.FormatBool(settings.BalanceLowNotifyEnabled)
 	updates[SettingKeyBalanceLowNotifyThreshold] = strconv.FormatFloat(settings.BalanceLowNotifyThreshold, 'f', 8, 64)
 	updates[SettingKeyBalanceLowNotifyRechargeURL] = settings.BalanceLowNotifyRechargeURL
+	updates[SettingKeyBalanceRechargeNotifyEnabled] = strconv.FormatBool(settings.BalanceRechargeNotifyEnabled)
 	updates[SettingKeySubscriptionExpiryNotifyEnabled] = strconv.FormatBool(settings.SubscriptionExpiryNotifyEnabled)
 	updates[SettingKeyAccountQuotaNotifyEnabled] = strconv.FormatBool(settings.AccountQuotaNotifyEnabled)
 	updates[SettingKeyAccountQuotaNotifyEmails] = MarshalNotifyEmails(settings.AccountQuotaNotifyEmails)

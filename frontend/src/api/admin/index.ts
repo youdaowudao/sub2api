@@ -15,6 +15,7 @@ import settingsAPI from './settings'
 import systemAPI from './system'
 import subscriptionsAPI from './subscriptions'
 import usageAPI from './usage'
+import videoTasksAPI from './videoTasks'
 import geminiAPI from './gemini'
 import antigravityAPI from './antigravity'
 import grokAPI from './grok'
@@ -53,6 +54,7 @@ export const adminAPI = {
   system: systemAPI,
   subscriptions: subscriptionsAPI,
   usage: usageAPI,
+  videoTasks: videoTasksAPI,
   gemini: geminiAPI,
   antigravity: antigravityAPI,
   grok: grokAPI,

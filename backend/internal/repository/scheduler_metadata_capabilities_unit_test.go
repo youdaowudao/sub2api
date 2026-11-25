@@ -51,3 +51,23 @@ func TestSchedulerMetadataDropsUnlistedCredentials(t *testing.T) {
 	require.Equal(t, map[string]string{"seedance-2-5": "doubao-seedance-2-5-260628"}, projected.Credentials["model_mapping"])
 	require.NotContains(t, projected.Credentials, "unlisted_secret")
 }
+
+func TestSchedulerMetadataKeepsDisabledVideoAccountDedicated(t *testing.T) {
+	account := service.Account{ID: 3, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	account.Credentials = map[string]any{
+		"base_url":            "https://fixture.test",
+		"openai_capabilities": []string{"videos"},
+		service.OpenAIVideoRelayCredentialsKey: map[string]any{
+			"resolutions": []string{"480p"}, "min_seconds": 5, "max_seconds": 30, "default_seconds": 5,
+		},
+	}
+	projected := buildSchedulerMetadataAccount(account)
+	require.True(t, projected.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityVideos))
+	require.False(t, projected.SupportsOpenAIEndpointCapability(""))
+	delete(account.Credentials, "openai_capabilities")
+	projected = buildSchedulerMetadataAccount(account)
+	require.True(t, projected.IsOpenAIVideoRelayDedicated())
+	require.False(t, projected.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityVideos))
+	require.False(t, projected.SupportsOpenAIEndpointCapability(""))
+	require.False(t, projected.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityResponses))
+}

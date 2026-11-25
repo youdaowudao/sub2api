@@ -1502,6 +1502,9 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 			filtered[key] = value
 		}
 	}
+	if settings, present := credentials[service.OpenAIVideoRelayCredentialsKey]; present {
+		filtered[service.OpenAIVideoRelayCredentialsKey] = settings
+	}
 	if len(filtered) == 0 {
 		return nil
 	}
@@ -1535,6 +1538,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"quota_weekly_reset_hour",
 		"quota_reset_timezone",
 		"mixed_scheduling",
+		"privacy_mode",
 		"window_cost_limit",
 		"window_cost_sticky_reserve",
 		// RPM 门与窗口费用门一样跑在本投影上：isAccountSchedulableForRPM 读 base_rpm，

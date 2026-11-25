@@ -108,3 +108,22 @@ func TestRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestRecoveryPreservesHTTPAbortAfterResponseHasStarted(t *testing.T) {
+	router := gin.New()
+	router.Use(Recovery())
+	router.GET("/content", func(c *gin.Context) {
+		c.Header("Content-Type", "video/mp4")
+		c.Header("Content-Length", "32")
+		c.Status(http.StatusPartialContent)
+		c.Writer.WriteHeaderNow()
+		_, _ = c.Writer.Write([]byte("partial body"))
+		panic(http.ErrAbortHandler)
+	})
+	response := httptest.NewRecorder()
+	require.PanicsWithValue(t, http.ErrAbortHandler, func() {
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/content", nil))
+	})
+	require.Equal(t, http.StatusPartialContent, response.Code)
+	require.Equal(t, "partial body", response.Body.String())
+}

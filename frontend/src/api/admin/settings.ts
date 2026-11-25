@@ -403,6 +403,7 @@ export function deriveWeChatConnectStoredMode(
  * System settings interface
  */
 export interface SystemSettings {
+  user_account_block_duration_hours?: number;
   // Registration settings
   registration_enabled: boolean;
   email_verify_enabled: boolean;
@@ -728,6 +729,7 @@ export interface SystemSettings {
   balance_low_notify_enabled: boolean;
   balance_low_notify_threshold: number;
   balance_low_notify_recharge_url: string;
+  balance_recharge_notify_enabled: boolean;
   subscription_expiry_notify_enabled: boolean;
   account_quota_notify_enabled: boolean;
   account_quota_notify_emails: NotifyEmailEntry[];
@@ -765,6 +767,7 @@ export interface SystemSettings {
 }
 
 export interface UpdateSettingsRequest {
+  user_account_block_duration_hours?: number;
   registration_enabled?: boolean;
   email_verify_enabled?: boolean;
   registration_email_suffix_whitelist?: string[];
@@ -1043,6 +1046,7 @@ export interface UpdateSettingsRequest {
   balance_low_notify_enabled?: boolean;
   balance_low_notify_threshold?: number;
   balance_low_notify_recharge_url?: string;
+  balance_recharge_notify_enabled?: boolean;
   subscription_expiry_notify_enabled?: boolean;
   account_quota_notify_enabled?: boolean;
   account_quota_notify_emails?: NotifyEmailEntry[];
@@ -1621,9 +1625,38 @@ export async function resetWebSearchUsage(payload: {
   );
 }
 
+export interface UserAccountBlockItem {
+  user_id: number;
+  account_id: number;
+  created_at: string;
+  expires_at: string;
+}
+
+const userAccountBlocksPath = "/admin/settings/user-account-blocks";
+
+export async function listUserAccountBlocks(): Promise<UserAccountBlockItem[]> {
+  const { data } = await apiClient.get<{ items: UserAccountBlockItem[] }>(userAccountBlocksPath);
+  return data.items;
+}
+
+export async function createUserAccountBlock(userId: number, accountId: number): Promise<UserAccountBlockItem> {
+  const { data } = await apiClient.post<UserAccountBlockItem>(userAccountBlocksPath, {
+    user_id: userId,
+    account_id: accountId,
+  });
+  return data;
+}
+
+export async function deleteUserAccountBlock(userId: number, accountId: number): Promise<void> {
+  await apiClient.delete(`${userAccountBlocksPath}/${userId}/${accountId}`);
+}
+
 export const settingsAPI = {
   getSettings,
   updateSettings,
+  listUserAccountBlocks,
+  createUserAccountBlock,
+  deleteUserAccountBlock,
   testSmtpConnection,
   sendTestEmail,
   getEmailTemplates,

@@ -12,6 +12,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 type SystemSettings struct {
+	UserAccountBlockDurationHours       *int
 	RegistrationEnabled                 bool
 	EmailVerifyEnabled                  bool
 	RegistrationEmailSuffixWhitelist    []string
@@ -305,6 +306,9 @@ type SystemSettings struct {
 	BalanceLowNotifyEnabled     bool
 	BalanceLowNotifyThreshold   float64
 	BalanceLowNotifyRechargeURL string
+
+	// 充值到账通知
+	BalanceRechargeNotifyEnabled bool
 
 	// 订阅到期提醒
 	SubscriptionExpiryNotifyEnabled bool

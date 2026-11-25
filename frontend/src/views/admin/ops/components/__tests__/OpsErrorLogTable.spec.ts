@@ -5,6 +5,8 @@ import zhLocale from '@/i18n/locales/zh'
 import enLocale from '@/i18n/locales/en'
 import type { OpsErrorLog } from '@/api/admin/ops'
 
+vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showSuccess: vi.fn(), showError: vi.fn() }) }))
+
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
   return {

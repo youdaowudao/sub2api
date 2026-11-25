@@ -28,6 +28,7 @@ type CustomEndpoint struct {
 
 // SystemSettings represents the admin settings API response payload.
 type SystemSettings struct {
+	UserAccountBlockDurationHours       *int                     `json:"user_account_block_duration_hours"`
 	RegistrationEnabled                 bool                     `json:"registration_enabled"`
 	EmailVerifyEnabled                  bool                     `json:"email_verify_enabled"`
 	RegistrationEmailSuffixWhitelist    []string                 `json:"registration_email_suffix_whitelist"`
@@ -307,6 +308,7 @@ type SystemSettings struct {
 	BalanceLowNotifyEnabled         bool               `json:"balance_low_notify_enabled"`
 	BalanceLowNotifyThreshold       float64            `json:"balance_low_notify_threshold"`
 	BalanceLowNotifyRechargeURL     string             `json:"balance_low_notify_recharge_url"`
+	BalanceRechargeNotifyEnabled    bool               `json:"balance_recharge_notify_enabled"`
 	SubscriptionExpiryNotifyEnabled bool               `json:"subscription_expiry_notify_enabled"`
 	AccountQuotaNotifyEnabled       bool               `json:"account_quota_notify_enabled"`
 	AccountQuotaNotifyEmails        []NotifyEmailEntry `json:"account_quota_notify_emails"`

@@ -179,6 +179,20 @@ func ProvideOpenAITokenProvider(
 	return p
 }
 
+func ProvideUserAccountBlockService(cache UserAccountBlockCache, settings *SettingService, gateway *GatewayService, openAI *OpenAIGatewayService, cfg *config.Config) *UserAccountBlockService {
+	blocks := NewUserAccountBlockService(cache, settings)
+	gateway.SetUserAccountBlockService(blocks)
+	openAI.SetUserAccountBlockService(blocks)
+	blocks.StartRecovery(time.Duration(cfg.Redis.ReadTimeoutSeconds) * time.Second)
+	return blocks
+}
+
+func ProvideBatchImagePublicService(repo BatchImageRepository, accountRepo AccountRepository, groupRepo GroupRepository, userGroupRateRepo UserGroupRateRepository, queue BatchImageQueue, pricing *BatchImageModelPricingResolver, billingRepo UsageBillingRepository, authCache APIKeyAuthCacheInvalidator, cfg *config.Config, blocks *UserAccountBlockService) *BatchImagePublicService {
+	svc := NewBatchImagePublicService(repo, accountRepo, groupRepo, userGroupRateRepo, queue, pricing, billingRepo, authCache, cfg)
+	svc.SetUserAccountBlockService(blocks)
+	return svc
+}
+
 // ProvidePluginManager preserves account-directory wiring when regenerating Wire.
 func ProvidePluginManager(repo PluginRepository, encryptor SecretEncryptor, cfg *config.Config, hostInfo PluginHostInfo, kvStore PluginKVStore, gateway *OpenAIGatewayService, creations PluginUserCreationStore, users UserRepository, leader LeaderLockCache) *PluginManager {
 	manager := NewPluginManager(repo, encryptor, cfg, hostInfo, kvStore)
@@ -885,10 +899,13 @@ var ProviderSet = wire.NewSet(
 	NewAdminService,
 	NewGatewayService,
 	NewOpenAIGatewayService,
+	ProvideUserAccountBlockService,
+	NewVideoRelayService,
+	ProvideVideoRelayTracker,
 	ProvideImageStorageSettingService,
 	ProvideImageTaskService,
 	ProvideBatchImageModelPricingResolver,
-	NewBatchImagePublicService,
+	ProvideBatchImagePublicService,
 	NewBatchImageDownloadService,
 	ProvideBatchImageCleanupService,
 	ProvideBatchImageWorkerRuntime,

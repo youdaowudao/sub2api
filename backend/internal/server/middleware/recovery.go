@@ -14,6 +14,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const abortHTTPResponseKey = "sub2api.abort-http-response"
+
+// AbortHTTPResponse stops a response whose headers have already been sent.
+func AbortHTTPResponse(c *gin.Context) {
+	c.Set(abortHTTPResponseKey, true)
+	c.Abort()
+}
+
 // Recovery converts panics into the project's standard JSON error envelope.
 //
 // It preserves Gin's broken-pipe handling by not attempting to write a response
@@ -23,8 +31,11 @@ func Recovery() gin.HandlerFunc {
 	if writer != nil {
 		writer = pluginAssetRedactingWriter{writer: writer}
 	}
-	return gin.CustomRecoveryWithWriter(writer, func(c *gin.Context, recovered any) {
+	recoverWithGin := gin.CustomRecoveryWithWriter(writer, func(c *gin.Context, recovered any) {
 		recoveredErr, _ := recovered.(error)
+		if recoveredErr == http.ErrAbortHandler {
+			panic(recoveredErr)
+		}
 
 		if isBrokenPipe(recoveredErr) {
 			if recoveredErr != nil {
@@ -48,6 +59,13 @@ func Recovery() gin.HandlerFunc {
 		)
 		c.Abort()
 	})
+	return func(c *gin.Context) {
+		recoverWithGin(c)
+		if c.GetBool(abortHTTPResponseKey) {
+			// Let net/http end the stream without Gin dumping request headers.
+			panic(http.ErrAbortHandler)
+		}
+	}
 }
 
 type pluginAssetRedactingWriter struct {

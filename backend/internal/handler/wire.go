@@ -47,15 +47,18 @@ func ProvideAdminHandlers(
 	affiliateHandler *admin.AffiliateHandler,
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
+	videoTaskHandler *admin.VideoTaskHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	ollamaCloudUsage *service.OllamaCloudUsageService,
 	opencodeGoUsage *service.OpenCodeGoUsageService,
 	claudeResetCredits *service.ClaudeResetCreditService,
+	userAccountBlocks *service.UserAccountBlockService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
 	accountHandler.SetOllamaCloudUsageService(ollamaCloudUsage)
 	accountHandler.SetOpenCodeGoUsageService(opencodeGoUsage)
 	accountHandler.SetClaudeResetCreditService(claudeResetCredits)
+	settingHandler.SetUserAccountBlockService(userAccountBlocks)
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,
@@ -93,6 +96,7 @@ func ProvideAdminHandlers(
 		Affiliate:              affiliateHandler,
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
+		VideoTask:              videoTaskHandler,
 	}
 }
 
@@ -194,6 +198,7 @@ func ProvideHandlers(
 	adminHandlers *AdminHandlers,
 	gatewayHandler *GatewayHandler,
 	openaiGatewayHandler *OpenAIGatewayHandler,
+	videoRelayHandler *VideoRelayHandler,
 	settingHandler *SettingHandler,
 	totpHandler *TotpHandler,
 	passkeyHandler *PasskeyHandler,
@@ -221,6 +226,7 @@ func ProvideHandlers(
 		Admin:            adminHandlers,
 		Gateway:          gatewayHandler,
 		OpenAIGateway:    openaiGatewayHandler,
+		VideoRelay:       videoRelayHandler,
 		Setting:          settingHandler,
 		Totp:             totpHandler,
 		Passkey:          passkeyHandler,
@@ -248,6 +254,7 @@ var ProviderSet = wire.NewSet(
 	NewChannelMonitorV2Handler,
 	ProvideGatewayHandler,
 	ProvideOpenAIGatewayHandler,
+	NewVideoRelayHandler,
 	NewTotpHandler,
 	NewPasskeyHandler,
 	ProvideSettingHandler,
@@ -294,6 +301,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAffiliateHandler,
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
+	admin.NewVideoTaskHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

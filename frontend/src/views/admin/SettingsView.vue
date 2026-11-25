@@ -551,6 +551,11 @@
             </div>
           </div>
 
+          <UserAccountBlockSettings
+            v-model="form.user_account_block_duration_hours"
+            :active="activeTab === 'gateway'"
+          />
+
           <!-- Request Rectifier Settings -->
           <div class="card">
             <div
@@ -1544,9 +1549,8 @@
                 </div>
                 <Toggle v-model="form.invitation_code_enabled" />
               </div>
-              <!-- Password Reset - Only show when email verification is enabled -->
+              <!-- Password Reset -->
               <div
-                v-if="form.email_verify_enabled"
                 class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
               >
                 <div>
@@ -1561,7 +1565,7 @@
               </div>
               <!-- Frontend URL - Only show when password reset is enabled -->
               <div
-                v-if="form.email_verify_enabled && form.password_reset_enabled"
+                v-if="form.password_reset_enabled"
                 class="border-t border-gray-100 pt-4 dark:border-dark-700"
               >
                 <label
@@ -8488,8 +8492,11 @@
         </div>
 
         <div v-show="activeTab === 'email'" class="space-y-6">
-          <!-- Email disabled hint - show when email_verify_enabled is off -->
-          <div v-if="!form.email_verify_enabled" class="card">
+          <!-- Email disabled hint - show when neither email verification nor password reset is on -->
+          <div
+            v-if="!form.email_verify_enabled && !form.password_reset_enabled"
+            class="card"
+          >
             <div class="p-6">
               <div class="flex items-start gap-3">
                 <Icon
@@ -8509,8 +8516,11 @@
             </div>
           </div>
 
-          <!-- SMTP Settings - Only show when email verification is enabled -->
-          <div v-if="form.email_verify_enabled" class="card">
+          <!-- SMTP Settings - Only show when email verification or password reset is enabled -->
+          <div
+            v-if="form.email_verify_enabled || form.password_reset_enabled"
+            class="card"
+          >
             <div
               class="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
@@ -8672,8 +8682,11 @@
             </div>
           </div>
 
-          <!-- Send Test Email - Only show when email verification is enabled -->
-          <div v-if="form.email_verify_enabled" class="card">
+          <!-- Send Test Email - Only show when email verification or password reset is enabled -->
+          <div
+            v-if="form.email_verify_enabled || form.password_reset_enabled"
+            class="card"
+          >
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
@@ -8735,6 +8748,35 @@
                       : t("admin.settings.testEmail.sendTestEmail")
                   }}
                 </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 充值成功通知 -->
+          <div class="card">
+            <div
+              class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <h3 class="text-base font-medium text-gray-900 dark:text-white">
+                {{ t("admin.settings.balanceRechargeNotify.title") }}
+              </h3>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.balanceRechargeNotify.description") }}
+              </p>
+            </div>
+            <div class="px-6 py-6">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <label
+                    class="mb-0 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.balanceRechargeNotify.enabled") }}
+                  </label>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.balanceRechargeNotify.enabledHint") }}
+                  </p>
+                </div>
+                <Toggle v-model="form.balance_recharge_notify_enabled" />
               </div>
             </div>
           </div>
@@ -9057,6 +9099,7 @@ import {
 } from "@/utils/rechargeBonus";
 import RegistrationEmailBlacklistEditor from "@/components/admin/settings/RegistrationEmailBlacklistEditor.vue";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
+import UserAccountBlockSettings from "@/views/admin/settings/UserAccountBlockSettings.vue";
 import ForkEmailSignupFilterSettings from "@/views/admin/settings/ForkEmailSignupFilterSettings.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import {
@@ -9785,6 +9828,7 @@ type SettingsForm = Omit<
   payment_recharge_bonus_mode: RechargeBonusMode;
   payment_recharge_bonus_notice: string;
   // 系统全局平台限额 map；form 内始终归一化为全部平台对象（模板非空绑定依赖此不变量）
+  user_account_block_duration_hours: number;
   default_platform_quotas: DefaultPlatformQuotasMap;
   account_scheduling_thresholds: ReturnType<typeof normalizeAccountSchedulingThresholdsMap>;
 };
@@ -9841,6 +9885,7 @@ const form = reactive<SettingsForm>({
   backend_mode_enabled: false,
   hide_ccs_import_button: false,
   quick_import_image_group_id: 0,
+  user_account_block_duration_hours: 12,
   payment_enabled: false,
   risk_control_enabled: false,
   cyber_policy_user_allowlist: "",
@@ -10070,6 +10115,7 @@ const form = reactive<SettingsForm>({
   balance_low_notify_enabled: false,
   balance_low_notify_threshold: 0,
   balance_low_notify_recharge_url: "",
+  balance_recharge_notify_enabled: true,
   subscription_expiry_notify_enabled: true,
   account_quota_notify_enabled: false,
   account_quota_notify_emails: [] as NotifyEmailEntry[],
@@ -10496,6 +10542,7 @@ async function saveWebSearchConfig(): Promise<boolean> {
 }
 
 const savedQuickImportImageGroupId = ref(0);
+const savedUserAccountBlockDuration = ref(12);
 const quickImportImageGroups = computed(() =>
   sortGroupsForDisplay(eligibleGroups.value.filter((group) => group.platform === "openai")),
 );
@@ -11095,6 +11142,8 @@ async function loadSettings() {
     const settings = await adminAPI.settings.getSettings();
     savedQuickImportImageGroupId.value = settings.quick_import_image_group_id ?? 0;
     form.quick_import_image_group_id = savedQuickImportImageGroupId.value;
+    savedUserAccountBlockDuration.value = settings.user_account_block_duration_hours ?? 12;
+    form.user_account_block_duration_hours = savedUserAccountBlockDuration.value;
     settings.payment_load_balance_strategy =
       settings.payment_load_balance_strategy || "round-robin";
     // Only assign non-null values from backend (null means unconfigured, keep defaults)
@@ -11573,6 +11622,9 @@ async function saveSettings() {
       ...(form.quick_import_image_group_id !== savedQuickImportImageGroupId.value
         ? { quick_import_image_group_id: form.quick_import_image_group_id }
         : {}),
+      ...(form.user_account_block_duration_hours !== savedUserAccountBlockDuration.value
+        ? { user_account_block_duration_hours: form.user_account_block_duration_hours }
+        : {}),
       table_default_page_size: form.table_default_page_size,
       table_page_size_options: form.table_page_size_options,
       custom_menu_items: form.custom_menu_items,
@@ -11826,6 +11878,7 @@ async function saveSettings() {
         Number(form.balance_low_notify_threshold) || 0,
       balance_low_notify_recharge_url: (form.balance_low_notify_recharge_url =
         form.balance_low_notify_recharge_url || currentOrigin),
+      balance_recharge_notify_enabled: form.balance_recharge_notify_enabled,
       subscription_expiry_notify_enabled:
         form.subscription_expiry_notify_enabled,
       account_quota_notify_enabled: form.account_quota_notify_enabled,
@@ -11897,6 +11950,9 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
+    if (updated.user_account_block_duration_hours !== undefined) {
+      savedUserAccountBlockDuration.value = updated.user_account_block_duration_hours;
+    }
     if (updated.quick_import_image_group_id !== undefined) {
       savedQuickImportImageGroupId.value = updated.quick_import_image_group_id;
     }

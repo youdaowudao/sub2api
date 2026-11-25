@@ -149,6 +149,26 @@ func TestGetUserErrorRequestDetail_NotFound(t *testing.T) {
 	}
 }
 
+func TestVideoRelayUserErrorDetailMatchesRecoveredVisibility(t *testing.T) {
+	ownerID := int64(25)
+	detail := &OpsErrorLogDetail{OpsErrorLog: OpsErrorLog{
+		ID: 1, UserID: &ownerID, Phase: "upstream", Type: "upstream_error", Platform: PlatformOpenAI,
+		RequestPath: "/v1/videos/video_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/content",
+		StatusCode:  200, Message: "provider-only diagnostic",
+	}}
+	svc := &OpsService{opsRepo: &stubOpsRepoForUserErr{detailToReturn: detail}}
+	got, err := svc.GetUserErrorRequestDetail(context.Background(), ownerID, 1)
+	if !infraerrors.IsNotFound(err) || got != nil {
+		t.Fatalf("expected recovered video request to be hidden, got detail=%+v err=%v", got, err)
+	}
+	detail.StatusCode = 502
+	detail.Message = "Video content is temporarily unavailable. Retry the download later."
+	got, err = svc.GetUserErrorRequestDetail(context.Background(), ownerID, 1)
+	if err != nil || got == nil || got.Message != detail.Message {
+		t.Fatalf("expected safe failed-video detail, got detail=%+v err=%v", got, err)
+	}
+}
+
 func TestGetUserErrorRequestDetail_InvalidID(t *testing.T) {
 	stub := &stubOpsRepoForUserErr{}
 	svc := &OpsService{opsRepo: stub}

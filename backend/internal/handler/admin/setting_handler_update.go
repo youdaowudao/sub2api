@@ -298,6 +298,7 @@ type UpdateSettingsRequest struct {
 	BalanceLowNotifyEnabled         *bool                   `json:"balance_low_notify_enabled"`
 	BalanceLowNotifyThreshold       *float64                `json:"balance_low_notify_threshold"`
 	BalanceLowNotifyRechargeURL     *string                 `json:"balance_low_notify_recharge_url"`
+	BalanceRechargeNotifyEnabled    *bool                   `json:"balance_recharge_notify_enabled"`
 	SubscriptionExpiryNotifyEnabled *bool                   `json:"subscription_expiry_notify_enabled"`
 	AccountQuotaNotifyEnabled       *bool                   `json:"account_quota_notify_enabled"`
 	AccountQuotaNotifyEmails        *[]dto.NotifyEmailEntry `json:"account_quota_notify_emails"`
@@ -498,6 +499,16 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if err := c.ShouldBindBodyWith(&sentFields, binding.JSON); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
+	}
+	var durationHours *int
+	if value, sent := sentFields["user_account_block_duration_hours"]; sent {
+		var hours int
+		if err := json.Unmarshal(value, &hours); err != nil ||
+			(hours != service.UserAccountBlockDurationShortHours && hours != service.UserAccountBlockDurationLongHours) {
+			response.ErrorFrom(c, service.ErrUserAccountBlockInvalidDuration)
+			return
+		}
+		durationHours = &hours
 	}
 	var req UpdateSettingsRequest
 	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
@@ -1537,6 +1548,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 
 	settings := &service.SystemSettings{
+		UserAccountBlockDurationHours: durationHours,
 		// 系统全局 platform quota 默认值（整体替换语义）
 		DefaultPlatformQuotas:       req.DefaultPlatformQuotas,
 		AccountSchedulingThresholds: req.AccountSchedulingThresholds,
@@ -1928,6 +1940,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.BalanceLowNotifyRechargeURL
 		}(),
+		BalanceRechargeNotifyEnabled: func() bool {
+			if req.BalanceRechargeNotifyEnabled != nil {
+				return *req.BalanceRechargeNotifyEnabled
+			}
+			return previousSettings.BalanceRechargeNotifyEnabled
+		}(),
 		SubscriptionExpiryNotifyEnabled: func() bool {
 			if req.SubscriptionExpiryNotifyEnabled != nil {
 				return *req.SubscriptionExpiryNotifyEnabled
@@ -2219,6 +2237,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
 
 	payload := dto.SystemSettings{
+		UserAccountBlockDurationHours:                          updatedSettings.UserAccountBlockDurationHours,
 		RegistrationEnabled:                                    updatedSettings.RegistrationEnabled,
 		EmailVerifyEnabled:                                     updatedSettings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       updatedSettings.RegistrationEmailSuffixWhitelist,
@@ -2430,6 +2449,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		BalanceLowNotifyEnabled:                                updatedSettings.BalanceLowNotifyEnabled,
 		BalanceLowNotifyThreshold:                              updatedSettings.BalanceLowNotifyThreshold,
 		BalanceLowNotifyRechargeURL:                            updatedSettings.BalanceLowNotifyRechargeURL,
+		BalanceRechargeNotifyEnabled:                           updatedSettings.BalanceRechargeNotifyEnabled,
 		SubscriptionExpiryNotifyEnabled:                        updatedSettings.SubscriptionExpiryNotifyEnabled,
 		AccountQuotaNotifyEnabled:                              updatedSettings.AccountQuotaNotifyEnabled,
 		AccountQuotaNotifyEmails:                               dto.NotifyEmailEntriesFromService(updatedSettings.AccountQuotaNotifyEmails),

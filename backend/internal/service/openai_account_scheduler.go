@@ -1821,6 +1821,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if !accountSupportsOpenAICapabilities(account, req.RequiredCapability, req.RequiredImageCapability) {
 		return false, "capability_mismatch"
 	}
+	if req.RequiredCapability == OpenAIEndpointCapabilityVideos && videoRelaySpecsMismatch(ctx, account) {
+		return false, "video_specs_mismatch"
+	}
 	if vetoed, reason := openAIImageSizeVetoReason(ctx, account); vetoed {
 		return false, reason
 	}
@@ -2176,6 +2179,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	excludedIDs = s.userAccountBlocks.withExcludedAccounts(ctx, excludedIDs)
 	selection, decision, err := s.selectAccountWithSchedulerBySize(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 	if err == nil || openAIProxyStreamQuarantineBypassed(ctx) {
 		return selection, decision, err

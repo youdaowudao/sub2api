@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -76,7 +79,7 @@ func TestFetchChatGPTAccountInfo_SkipsExpiredWorkspaceCandidate(t *testing.T) {
 
 	got := fetchChatGPTAccountInfo(context.Background(), func(proxyURL string) (*req.Client, error) {
 		return req.C().SetTimeout(5 * time.Second), nil
-	}, "access-token", "", "org-expired-workspace")
+	}, "access-token", "", "org-expired-workspace", chatGPTPersonalSubscriptionIdentity{})
 
 	require.NotNil(t, got)
 	require.Equal(t, "free", got.PlanType)
@@ -113,7 +116,7 @@ func TestFetchChatGPTAccountInfo_SkipsDeactivatedWorkspaceCandidate(t *testing.T
 
 	got := fetchChatGPTAccountInfo(context.Background(), func(proxyURL string) (*req.Client, error) {
 		return req.C().SetTimeout(5 * time.Second), nil
-	}, "access-token", "", "org-deactivated-workspace")
+	}, "access-token", "", "org-deactivated-workspace", chatGPTPersonalSubscriptionIdentity{})
 
 	require.NotNil(t, got)
 	require.Equal(t, "pro", got.PlanType)
@@ -163,7 +166,7 @@ func TestFetchChatGPTAccountInfo_ReportsAccountID(t *testing.T) {
 	chatGPTAccountsCheckURL = server.URL + "/backend-api/accounts/check/v4-2023-04-27"
 	t.Cleanup(func() { chatGPTAccountsCheckURL = oldURL })
 
-	got := fetchChatGPTAccountInfo(context.Background(), newTestPrivacyClientFactory(), "access-token", "", "")
+	got := fetchChatGPTAccountInfo(context.Background(), newTestPrivacyClientFactory(), "access-token", "", "", chatGPTPersonalSubscriptionIdentity{})
 	require.NotNil(t, got)
 	require.Equal(t, "plus", got.PlanType)
 	require.Equal(t, "personal-account-a", got.AccountID, "应优先取 account.account_id 而不是 map key")
@@ -211,7 +214,7 @@ func TestEnrichTokenInfo_WorkspaceEntitlementDoesNotOverridePersonalSubscription
 		PlanType:         "pro", // 来自 id_token 的个人套餐
 	}
 	svc := &OpenAIOAuthService{privacyClientFactory: newTestPrivacyClientFactory()}
-	svc.enrichTokenInfo(context.Background(), tokenInfo, "")
+	svc.enrichTokenInfo(context.Background(), tokenInfo, "", chatGPTPersonalSubscriptionIdentity{})
 
 	require.Equal(t, "pro", tokenInfo.PlanType)
 	require.Equal(t, personalActiveUntil, tokenInfo.SubscriptionExpiresAt,
@@ -254,7 +257,7 @@ func TestEnrichTokenInfo_KeepsEntitlementWhenAccountMatches(t *testing.T) {
 		PlanType:         "plus",
 	}
 	svc := &OpenAIOAuthService{privacyClientFactory: newTestPrivacyClientFactory()}
-	svc.enrichTokenInfo(context.Background(), tokenInfo, "")
+	svc.enrichTokenInfo(context.Background(), tokenInfo, "", chatGPTPersonalSubscriptionIdentity{})
 
 	require.Equal(t, entitlementExpiresAt, tokenInfo.SubscriptionExpiresAt)
 	require.Zero(t, subscriptionCalls, "账号一致时不应额外请求订阅端点")
@@ -294,7 +297,7 @@ func TestEnrichTokenInfo_WorkspacePlanTypeKeepsItsOwnExpiry(t *testing.T) {
 		// id_token 没带 chatgpt_plan_type
 	}
 	svc := &OpenAIOAuthService{privacyClientFactory: newTestPrivacyClientFactory()}
-	svc.enrichTokenInfo(context.Background(), tokenInfo, "")
+	svc.enrichTokenInfo(context.Background(), tokenInfo, "", chatGPTPersonalSubscriptionIdentity{})
 
 	require.Equal(t, "self_serve_business_usage_based", tokenInfo.PlanType)
 	require.Equal(t, workspaceExpiresAt, tokenInfo.SubscriptionExpiresAt,
@@ -336,11 +339,114 @@ func newChatGPTBackendTestServer(t *testing.T, cfg chatGPTBackendTestServerConfi
 	return server
 }
 
-// enrichTokenInfo 收尾还会调用 disableOpenAITraining，它的 URL 是常量、指向真实
-// chatgpt.com，测试无法接管。给客户端一个短超时让它快速失败——该调用只写
-// PrivacyMode，不影响本组用例的断言。
-func newTestPrivacyClientFactory() PrivacyClientFactory {
+func newTestPrivacyClientFactory(observers ...func(*req.Request)) PrivacyClientFactory {
 	return func(string) (*req.Client, error) {
-		return req.C().SetTimeout(time.Second), nil
+		return req.C().SetTimeout(time.Second).WrapRoundTripFunc(func(next req.RoundTripper) req.RoundTripFunc {
+			return func(request *req.Request) (*req.Response, error) {
+				for _, observe := range observers {
+					observe(request)
+				}
+				if request.URL.Hostname() == "127.0.0.1" {
+					return next.RoundTrip(request)
+				}
+				if request.URL.Hostname() == "chatgpt.com" && request.Method == http.MethodPatch {
+					return &req.Response{Request: request, Response: &http.Response{StatusCode: http.StatusOK}}, nil
+				}
+				return nil, errors.New("unexpected endpoint in subscription test")
+			}
+		}), nil
+	}
+}
+
+type openAISubscriptionRefreshClient struct {
+	openaiOAuthClientRefreshStub
+	idToken string
+}
+
+func (c openAISubscriptionRefreshClient) RefreshTokenWithClientID(context.Context, string, string, string) (*openai.TokenResponse, error) {
+	return &openai.TokenResponse{AccessToken: "access-token", RefreshToken: "refresh-token", ExpiresIn: 3600, IDToken: c.idToken}, nil
+}
+
+func TestRefreshTokenWithClientID_ReusesPersonalSubscriptionExpiry(t *testing.T) {
+	expiry := time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)
+	later := time.Now().Add(72 * time.Hour).UTC().Format(time.RFC3339)
+	fallback := time.Now().Add(96 * time.Hour).UTC().Format(time.RFC3339)
+	for _, tc := range []struct {
+		name, plan, accountID, accountPlan, entitlementPlan, expiresAt, duplicate string
+		wantReuse                                                                 bool
+	}{
+		{"default_alias", "plus", "personal", "plus", "plus", expiry, "", true},
+		{"two_consistent_aliases", "pro", "personal", "pro", "pro", expiry, expiry, true},
+		{"different_dates", "plus", "personal", "plus", "plus", expiry, later, false},
+		{"case_variant_conflicting_date", "plus", "personal", "plus", "plus", expiry, "", false},
+		{"entitlement_mismatch", "plus", "personal", "plus", "pro", expiry, "", false},
+		{"entitlement_missing", "plus", "personal", "plus", "", expiry, "", false},
+		{"account_plan_mismatch", "plus", "personal", "pro", "plus", expiry, "", false},
+		{"missing_id", "plus", "", "plus", "plus", expiry, "", false},
+		{"map_key_is_not_the_embedded_id", "plus", "", "plus", "plus", expiry, "", false},
+		{"different_id", "plus", "someone-else", "plus", "plus", expiry, "", false},
+		{"invalid_date", "plus", "personal", "plus", "plus", "invalid", "", false},
+		{"expired_date", "plus", "personal", "plus", "plus", "2020-01-01T00:00:00Z", "", false},
+		{"workspace_plan_is_not_personal", "team", "personal", "team", "team", expiry, "", false},
+		{"unknown_plan_is_not_personal", "unknown", "personal", "unknown", "unknown", expiry, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entry := func(accountID, plan, subscriptionPlan, expiresAt string) map[string]any {
+				return map[string]any{
+					"account":     map[string]any{"account_id": accountID, "plan_type": plan},
+					"entitlement": map[string]any{"subscription_plan": subscriptionPlan, "expires_at": expiresAt},
+				}
+			}
+			entryKey := "default"
+			if tc.name == "map_key_is_not_the_embedded_id" {
+				entryKey = "personal"
+			}
+			accounts := map[string]any{
+				"workspace": entry("workspace", "team", "team", later),
+				entryKey:    entry(tc.accountID, tc.accountPlan, tc.entitlementPlan, tc.expiresAt),
+			}
+			if tc.duplicate != "" {
+				accounts["alias"] = entry(tc.accountID, tc.accountPlan, tc.entitlementPlan, tc.duplicate)
+			}
+			if tc.name == "case_variant_conflicting_date" {
+				accounts["case-variant"] = entry("PERSONAL", "plus", "plus", later)
+			}
+			server := newChatGPTBackendTestServer(t, chatGPTBackendTestServerConfig{
+				accountsCheck: map[string]any{"accounts": accounts},
+				onSubscription: func(string) map[string]any {
+					return map[string]any{"active_until": fallback}
+				},
+			})
+			defer server.Close()
+			claims, err := json.Marshal(map[string]any{"https://api.openai.com/auth": map[string]any{
+				"chatgpt_account_id": "personal",
+				"chatgpt_plan_type":  tc.plan,
+				"organizations":      []map[string]any{{"id": "workspace", "is_default": true}},
+			}})
+			require.NoError(t, err)
+			idToken := "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".fixture"
+			svc := NewOpenAIOAuthService(nil, &openAISubscriptionRefreshClient{idToken: idToken})
+			defer svc.Stop()
+			calls := make(map[string]int)
+			svc.SetPrivacyClientFactory(newTestPrivacyClientFactory(func(request *req.Request) {
+				calls[request.Method+" "+request.URL.Path]++
+			}))
+
+			got, err := svc.RefreshTokenWithClientID(context.Background(), "refresh-token", "", "")
+			require.NoError(t, err)
+			require.Equal(t, "personal", got.ChatGPTAccountID)
+			require.Equal(t, "workspace", got.OrganizationID)
+			require.Equal(t, 1, calls["GET /backend-api/accounts/check/v4-2023-04-27"])
+			require.Equal(t, 1, calls["PATCH /backend-api/settings/account_user_setting"])
+			require.Equal(t, PrivacyModeTrainingOff, got.PrivacyMode)
+			subscriptionCalls := calls["GET /backend-api/subscriptions"]
+			if tc.wantReuse {
+				require.Zero(t, subscriptionCalls)
+				require.Equal(t, expiry, got.SubscriptionExpiresAt)
+			} else {
+				require.Equal(t, 1, subscriptionCalls)
+				require.Equal(t, fallback, got.SubscriptionExpiresAt)
+			}
+		})
 	}
 }

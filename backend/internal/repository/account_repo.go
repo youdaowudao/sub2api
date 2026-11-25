@@ -270,9 +270,9 @@ func (r *accountRepository) GetByID(ctx context.Context, id int64) (*service.Acc
 	if scoped := r.accountTransactionScope(ctx); scoped != r {
 		return scoped.GetByID(ctx, id)
 	}
-	m, err := r.client.Account.Query().Where(dbaccount.IDEQ(id)).Only(ctx)
+	m, err := r.getAccountByID(ctx, id)
 	if err != nil {
-		return nil, translatePersistenceError(err, service.ErrAccountNotFound, nil)
+		return nil, err
 	}
 
 	accounts, err := r.accountsToService(ctx, []*dbent.Account{m})
@@ -283,6 +283,47 @@ func (r *accountRepository) GetByID(ctx context.Context, id int64) (*service.Acc
 		return nil, service.ErrAccountNotFound
 	}
 	return &accounts[0], nil
+}
+
+// GetAccountForTokenVersion reads credential state without loading scheduling relations.
+func (r *accountRepository) GetAccountForTokenVersion(ctx context.Context, id int64) (*service.Account, error) {
+	account, err := r.accountTransactionScope(ctx).getAccountByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return accountEntityToService(account), nil
+}
+
+func (r *accountRepository) getAccountByID(ctx context.Context, id int64) (*dbent.Account, error) {
+	account, err := r.client.Account.Query().Where(dbaccount.IDEQ(id)).Only(ctx)
+	if err != nil {
+		return nil, translatePersistenceError(err, service.ErrAccountNotFound, nil)
+	}
+	return account, nil
+}
+
+// GetVideoRelayAccount follows an already selected route. Group membership
+// and fallback proxy metadata are used for selection, not for this lookup.
+func (r *accountRepository) GetVideoRelayAccount(ctx context.Context, id int64) (*service.Account, error) {
+	if scoped := r.accountTransactionScope(ctx); scoped != r {
+		return scoped.GetVideoRelayAccount(ctx, id)
+	}
+	entity, err := r.getAccountByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	account := accountEntityToService(entity)
+	if account.ProxyID != nil {
+		if err := service.VideoRelayTrackingCanceled(ctx); err != nil {
+			return nil, err
+		}
+		proxies, err := r.loadProxies(ctx, []int64{*account.ProxyID})
+		if err != nil {
+			return nil, err
+		}
+		account.Proxy = proxies[*account.ProxyID]
+	}
+	return account, nil
 }
 
 func (r *accountRepository) GetByIDs(ctx context.Context, ids []int64) ([]*service.Account, error) {

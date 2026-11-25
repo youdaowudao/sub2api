@@ -313,6 +313,9 @@ func (h *ConcurrencyHelper) withAPIKeySlotFromGin(c *gin.Context, releaseFunc fu
 	if !ok || apiKey == nil {
 		return releaseFunc
 	}
+	if service.IsOpenAIVideoRelayRoute(apiKey, c.Request.Method, c.FullPath()) {
+		return releaseFunc
+	}
 	return h.withAPIKeySlot(c.Request.Context(), apiKey.ID, releaseFunc)
 }
 

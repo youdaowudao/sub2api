@@ -510,7 +510,27 @@ func (s *PaymentService) dispatchPaymentFulfillmentNotification(o *dbent.Payment
 	}()
 }
 
+// balanceRechargeNotifyEnabled 充值成功邮件开关：未设置默认开启，读取失败时不发信。
+func (s *PaymentService) balanceRechargeNotifyEnabled(ctx context.Context) bool {
+	settingRepo := s.notificationEmailService.settingRepo
+	if settingRepo == nil {
+		return true
+	}
+	value, err := settingRepo.GetValue(ctx, SettingKeyBalanceRechargeNotifyEnabled)
+	if err != nil {
+		if errors.Is(err, ErrSettingNotFound) {
+			return true
+		}
+		slog.Warn("read balance recharge notify switch failed", "err", err.Error())
+		return false
+	}
+	return !isFalseSettingValue(value)
+}
+
 func (s *PaymentService) sendBalanceRechargeSuccessNotification(ctx context.Context, o *dbent.PaymentOrder) error {
+	if !s.balanceRechargeNotifyEnabled(ctx) {
+		return nil
+	}
 	currentBalance := ""
 	if s.userRepo != nil {
 		if user, err := s.userRepo.GetByID(ctx, o.UserID); err == nil && user != nil {

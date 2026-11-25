@@ -6,7 +6,7 @@
     ]"
   >
     <!-- Platform logo -->
-    <PlatformIcon v-if="platform" :platform="platform" size="sm" />
+    <PlatformIcon v-if="iconSource" :platform="iconSource" size="sm" />
     <!-- Group name -->
     <span :class="truncate ? 'truncate' : 'min-w-0 whitespace-normal [overflow-wrap:anywhere]'">{{ name }}</span>
     <!-- Right side label -->
@@ -37,6 +37,7 @@ import PlatformIcon from './PlatformIcon.vue'
 interface Props {
   name: string
   platform?: GroupPlatform
+  iconPlatform?: GroupPlatform
   subscriptionType?: SubscriptionType
   rateMultiplier?: number
   userRateMultiplier?: number | null // 用户专属倍率
@@ -68,6 +69,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const { t } = useI18n()
 
+const iconSource = computed(() => props.iconPlatform ?? props.platform)
 const isSubscription = computed(() => props.subscriptionType === 'subscription')
 
 // 是否有专属倍率（且与默认倍率不同）

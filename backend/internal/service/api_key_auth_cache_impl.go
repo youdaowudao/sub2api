@@ -262,6 +262,9 @@ func (s *APIKeyService) deleteAuthCache(ctx context.Context, cacheKey string) {
 		return
 	}
 	_ = s.cache.DeleteAuthCache(ctx, cacheKey)
+	if VideoRelayTrackingCanceled(ctx) != nil {
+		return
+	}
 	// Publish invalidation message to other instances
 	_ = s.cache.PublishAuthCacheInvalidation(ctx, cacheKey)
 }

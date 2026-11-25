@@ -86,7 +86,15 @@ func CheckTokenVersion(ctx context.Context, account *Account, repo AccountReposi
 
 	currentVersion := account.GetCredentialAsInt64("_token_version")
 
-	latestAccount, err := repo.GetByID(ctx, account.ID)
+	lookup := repo.GetByID
+	if account.IsOpenAIOAuth() && !account.IsOpenAIPersonalAccessToken() && !account.IsOpenAIAgentIdentity() {
+		if rowRepo, ok := repo.(interface {
+			GetAccountForTokenVersion(context.Context, int64) (*Account, error)
+		}); ok {
+			lookup = rowRepo.GetAccountForTokenVersion
+		}
+	}
+	latestAccount, err := lookup(ctx, account.ID)
 	if err != nil || latestAccount == nil {
 		// 查询失败，默认允许缓存，不返回 latestAccount
 		return nil, false

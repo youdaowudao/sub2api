@@ -51,7 +51,14 @@ func NewPanelRateLimiter(redisClient *redis.Client, settingService *service.Sett
 // Global 认证面板接口的全局按用户限流（宽松档，覆盖所有登录后端点）。
 // 受限管理密钥不享管理员豁免，变更类请求额外消耗严格档额度。
 func (p *PanelRateLimiter) Global() gin.HandlerFunc {
-	return p.userScoped("global", func(s service.PanelRateLimitSettings) int { return s.UserRPM })
+	limit := p.userScoped("global", func(s service.PanelRateLimitSettings) int { return s.UserRPM })
+	return func(c *gin.Context) {
+		if isVideoTaskListRequest(c) {
+			c.Next()
+			return
+		}
+		limit(c)
+	}
 }
 
 // MCPTransport bounds protocol requests, including discovery, separately from

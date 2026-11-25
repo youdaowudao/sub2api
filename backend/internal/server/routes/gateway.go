@@ -109,6 +109,10 @@ func RegisterGatewayRoutes(
 		}
 	}
 	videoGenerationHandler := func(c *gin.Context) {
+		if key, _ := middleware.GetAPIKeyFromContext(c); service.IsOpenAIVideoRelayRoute(key, c.Request.Method, c.FullPath()) {
+			h.VideoRelay.Submit(c)
+			return
+		}
 		// Video status/content lookups below already allow Composite groups; keep
 		// task creation aligned so composite keys that route to Grok accounts can
 		// submit video generation jobs.
@@ -125,6 +129,10 @@ func RegisterGatewayRoutes(
 		})
 	}
 	videoStatusHandler := func(c *gin.Context) {
+		if key, _ := middleware.GetAPIKeyFromContext(c); service.IsOpenAIVideoRelayRoute(key, c.Request.Method, c.FullPath()) {
+			h.VideoRelay.Lookup(c)
+			return
+		}
 		// Video status requests do not carry a model, so composite groups cannot
 		// be resolved by compositeTargetPlatformMiddleware. Route them through
 		// the Grok handler and let scheduler/account selection enforce capacity.
@@ -141,6 +149,10 @@ func RegisterGatewayRoutes(
 		})
 	}
 	videoContentHandler := func(c *gin.Context) {
+		if key, _ := middleware.GetAPIKeyFromContext(c); service.IsOpenAIVideoRelayRoute(key, c.Request.Method, c.FullPath()) {
+			h.VideoRelay.Download(c)
+			return
+		}
 		// Video content requests do not carry a model, so composite groups cannot
 		// be resolved by compositeTargetPlatformMiddleware. Route them through
 		// the Grok handler just like video status lookups.

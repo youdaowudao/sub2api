@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import {
   BUILTIN_PLATFORM_CATALOG,
   resetPlatformCatalog,
@@ -1505,6 +1505,30 @@ describe('EditAccountModal', () => {
 	  expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.auto_pause_5h_disabled).toBe(true)
 	  expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.auto_pause_7d_disabled).toBeUndefined()
 	})
+
+  it('turns off video submissions while keeping dedicated settings for the account', async () => {
+    const account = buildAccount()
+    const settings = { resolutions: ['720p'], min_seconds: 5, max_seconds: 45, default_seconds: 10 }
+    account.credentials.openai_capabilities = ['videos']
+    account.credentials.openai_videos = settings
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const video = wrapper.get<HTMLInputElement>('[data-testid="openai-endpoint-capability-videos"]')
+    expect(video.element.checked).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="openai-video-resolution-720p"]').element.checked).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[data-testid="openai-video-default-seconds"]').element.value).toBe('10')
+    expect(wrapper.get('[data-testid="openai-video-requirements"] li:nth-child(4)').exists()).toBe(true)
+    await video.setValue(false)
+    expect(wrapper.find('[data-testid="openai-video-requirements"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="openai-video-min-seconds"]').exists()).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const credentials = updateAccountMock.mock.calls[0]?.[1]?.credentials
+    expect(credentials?.openai_capabilities ?? []).toEqual([])
+    expect(credentials?.openai_videos).toEqual(settings)
+    wrapper.unmount()
+  })
 
   it('preserves Seedance when exactly two endpoint capabilities are selected', async () => {
     const account = buildAccount()

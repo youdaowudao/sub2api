@@ -217,10 +217,14 @@ func (r *usageLogRepository) CreateBestEffort(ctx context.Context, log *service.
 }
 
 func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor, log *service.UsageLog) (bool, error) {
-	prepared := prepareUsageLogInsert(log)
 	if sqlq == nil {
 		sqlq = r.sql
 	}
+	return insertSingleUsageLog(ctx, sqlq, log)
+}
+
+func insertSingleUsageLog(ctx context.Context, sqlq sqlExecutor, log *service.UsageLog) (bool, error) {
+	prepared := prepareUsageLogInsert(log)
 	if ctx != nil && ctx.Err() != nil {
 		return false, service.MarkUsageLogCreateNotPersisted(ctx.Err())
 	}

@@ -177,6 +177,7 @@ type grokMediaEligibilityProber interface {
 }
 
 const maxOpenAIFirstOutputTimeoutSwitches = 1
+const maxOpenAIRouteCapabilitySwitches = 3
 
 func openAIForwardSucceededForScheduling(result *service.OpenAIForwardResult) bool {
 	return result.SucceededForScheduling()
@@ -943,6 +944,13 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					if openAIFirstOutputFailoverExhausted(failoverErr, &firstOutputTimeoutSwitchCount) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
+					}
+					if failoverErr.StatusCode == http.StatusBadRequest && service.IsOpenAIRouteCapabilityUnsupported400(failoverErr.ResponseBody) {
+						if previousResponseID != "" {
+							h.handleFailoverExhausted(c, failoverErr, streamStarted)
+							return
+						}
+						maxAccountSwitches = min(maxAccountSwitches, switchCount+maxOpenAIRouteCapabilitySwitches)
 					}
 					// 池模式：同账号重试
 					if failoverErr.RetryableOnSameAccount {
@@ -3699,7 +3707,8 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	}
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
-	if statusCode == http.StatusBadRequest && service.IsOpenAICompatibleModelNotFound400(responseBody) && !streamStarted {
+	if statusCode == http.StatusBadRequest && !streamStarted &&
+		(service.IsOpenAICompatibleModelNotFound400(responseBody) || service.IsOpenAIRouteCapabilityUnsupported400(responseBody)) {
 		upstreamMsg := service.SanitizeUpstreamErrorMessage(service.ExtractUpstreamErrorMessage(responseBody))
 		service.SetOpsUpstreamError(c, statusCode, upstreamMsg, "")
 		service.WriteOpenAIUpstreamClientError(c, statusCode, responseBody, upstreamMsg)

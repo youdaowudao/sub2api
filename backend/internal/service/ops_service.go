@@ -783,7 +783,9 @@ func (s *OpsService) GetUserErrorRequestDetail(ctx context.Context, userID, id i
 	}
 	// 归属只能由通过鉴权时写入的 user_id 确定。
 	ownedDirectly := detail.UserID != nil && *detail.UserID == userID
-	if !ownedDirectly {
+	recoveredVideo := detail.Platform == PlatformOpenAI && isVideoRelayRequestPath(detail.RequestPath) &&
+		detail.StatusCode < 400 && detail.Type != "cyber_policy"
+	if !ownedDirectly || recoveredVideo {
 		return nil, infraerrors.NotFound("OPS_ERROR_NOT_FOUND", "ops error log not found")
 	}
 	return ToUserErrorRequestDetail(detail), nil

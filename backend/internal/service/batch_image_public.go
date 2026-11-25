@@ -82,6 +82,7 @@ type BatchImageOwner struct {
 }
 
 type BatchImagePublicService struct {
+	userAccountBlocks *UserAccountBlockService
 	Repo              BatchImageRepository
 	AccountRepo       BatchImageAccountSelectionRepository
 	GroupRepo         BatchImageGroupPricingRepository
@@ -934,35 +935,44 @@ func maxBatchImageReferenceImagesForModel(model string) int {
 }
 
 func (s *BatchImagePublicService) selectProviderAndAccount(ctx context.Context, owner BatchImageOwner, requestedProvider, model string) (BatchImageProvider, *Account, error) {
-	providers := batchImageProviderSelectionOrder(requestedProvider)
-	for _, providerName := range providers {
+	blocked := s.userAccountBlocks.BlockedAccountIDs(owner.UserID)
+	var reusableAccounts []Account
+	var reusablePlatform string
+	for _, providerName := range batchImageProviderSelectionOrder(requestedProvider) {
 		provider, ok := s.ProviderRegistry.Get(providerName)
 		if !ok || provider == nil {
 			continue
 		}
-		accounts, err := s.listCandidateAccounts(ctx, owner.GroupID, batchImageProviderPlatform(providerName))
-		if err != nil {
-			return nil, nil, err
-		}
-		// 与普通账号调度一致：priority 数值越小越优先，同优先级按 ID 排序。
-		sort.SliceStable(accounts, func(i, j int) bool {
-			if accounts[i].Priority != accounts[j].Priority {
-				return accounts[i].Priority < accounts[j].Priority
+		platform := batchImageProviderPlatform(providerName)
+		accounts := reusableAccounts
+		if accounts == nil || reusablePlatform != platform {
+			var err error
+			accounts, err = s.listCandidateAccounts(ctx, owner.GroupID, platform)
+			if err != nil {
+				return nil, nil, err
 			}
-			return accounts[i].ID < accounts[j].ID
-		})
+			// 与普通账号调度一致：priority 数值越小越优先，同优先级按 ID 排序。
+			sort.SliceStable(accounts, func(i, j int) bool {
+				if accounts[i].Priority != accounts[j].Priority {
+					return accounts[i].Priority < accounts[j].Priority
+				}
+				return accounts[i].ID < accounts[j].ID
+			})
+		}
+		reusableAccounts = nil
 		for i := range accounts {
 			account := accounts[i]
-			if !account.IsSchedulable() || !account.IsModelSupported(model) {
+			if !account.IsSchedulable() || !account.IsModelSupported(model) || !provider.SupportsAccount(&account) {
 				continue
 			}
-			if provider.SupportsAccount(&account) {
-				return provider, &account, nil
+			if _, excluded := blocked[account.ID]; excluded {
+				// The next provider can reuse the list only when the block
+				// caused this provider to miss an otherwise usable account.
+				reusableAccounts, reusablePlatform = accounts, platform
+				continue
 			}
+			return provider, &account, nil
 		}
-	}
-	if requestedProvider != "" {
-		return nil, nil, ErrBatchImageNoAccountAvailable
 	}
 	return nil, nil, ErrBatchImageNoAccountAvailable
 }

@@ -340,6 +340,10 @@ type UserLoadInfo struct {
 // If the account is at max concurrency, it waits until a slot is available or timeout.
 // Returns a release function that MUST be called when the request completes.
 func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
+	return s.acquireAccountSlot(ctx, context.Background(), accountID, maxConcurrency)
+}
+
+func (s *ConcurrencyService) acquireAccountSlot(ctx, release context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
 	// If maxConcurrency is 0 or negative, no limit
 	if maxConcurrency <= 0 {
 		return &AcquireResult{
@@ -360,8 +364,12 @@ func (s *ConcurrencyService) AcquireAccountSlot(ctx context.Context, accountID i
 		return &AcquireResult{
 			Acquired: true,
 			ReleaseFunc: func() {
-				bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				bgCtx, cancel := context.WithTimeout(release, 5*time.Second)
 				defer cancel()
+				if VideoRelayTrackingCanceled(bgCtx) != nil {
+					logger.LegacyPrintf("service.concurrency", "video tracking slot release deadline reached for account %d", accountID)
+					return
+				}
 				if err := s.cache.ReleaseAccountSlot(bgCtx, accountID, requestID); err != nil {
 					logger.LegacyPrintf("service.concurrency", "Warning: failed to release account slot for %d (req=%s): %v", accountID, requestID, err)
 				}

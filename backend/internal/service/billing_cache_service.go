@@ -716,13 +716,17 @@ func (s *BillingCacheService) QueueUpdateAPIKeyRateLimitUsage(apiKeyID int64, co
 //
 // Redis 写失败用 ALERT 级 log；DB 持久化由计费 worker 内同步执行或批量 flusher 处理。
 func (s *BillingCacheService) IncrementUserPlatformQuotaUsage(userID int64, platform string, cost float64) {
-	if s.cache == nil {
+	s.incrementUserPlatformQuotaUsage(context.Background(), userID, platform, cost)
+}
+
+func (s *BillingCacheService) incrementUserPlatformQuotaUsage(parent context.Context, userID int64, platform string, cost float64) {
+	if s.cache == nil || VideoRelayTrackingCanceled(parent) != nil {
 		return
 	}
 	if platform == "" || cost <= 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
+	ctx, cancel := context.WithTimeout(parent, cacheWriteTimeout)
 	defer cancel()
 	ttl := time.Duration(s.cfg.Billing.UserPlatformQuotaCacheTTLSeconds) * time.Second
 	markDirty := s.cfg.Database.UserPlatformQuotaFlusherEnabled

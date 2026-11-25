@@ -671,6 +671,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/video-tasks',
+    name: 'AdminVideoTasks',
+    component: () => import('@/views/admin/VideoTasksView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      skipAdminCompliance: true,
+      title: 'Video Tasks',
+      titleKey: 'admin.videoTasks.title'
+    }
+  },
+  {
     path: '/admin/affiliates',
     redirect: '/admin/affiliates/invites'
   },
@@ -928,7 +940,7 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
-  if (requiresAdmin && authStore.isAdmin) {
+  if (requiresAdmin && authStore.isAdmin && !to.meta.skipAdminCompliance) {
     const adminComplianceStore = useAdminComplianceStore()
     if (!adminComplianceStore.initialized) {
       try {

@@ -4,6 +4,7 @@ package middleware
 import (
 	"crypto/subtle"
 	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -128,6 +129,10 @@ func extractJWTFromWebSocketSubprotocol(c *gin.Context) string {
 	return ""
 }
 
+func isVideoTaskListRequest(c *gin.Context) bool {
+	return c.Request.Method == http.MethodGet && c.FullPath() == "/api/v1/admin/video-tasks"
+}
+
 // validateAdminAPIKey 验证管理员 API Key
 func validateAdminAPIKey(
 	c *gin.Context,
@@ -148,7 +153,12 @@ func validateAdminAPIKey(
 	}
 
 	// 获取真实的管理员用户
-	admin, err := userService.GetFirstAdmin(c.Request.Context())
+	var admin *service.User
+	if isVideoTaskListRequest(c) {
+		admin, _, err = userService.GetVideoTaskAdmin(c.Request.Context(), nil, false)
+	} else {
+		admin, err = userService.GetFirstAdmin(c.Request.Context())
+	}
 	if err != nil {
 		AbortWithError(c, 500, "INTERNAL_ERROR", "No admin user found")
 		return false
@@ -184,8 +194,16 @@ func validateJWTForAdmin(
 		return false
 	}
 
-	// 从数据库获取用户
-	user, err := userService.GetByID(c.Request.Context(), claims.UserID)
+	// The video list only needs authorization fields and the existing
+	// session option. Other admin routes keep using the profile lookup.
+	var user *service.User
+	var bindingEnabled bool
+	videoList := isVideoTaskListRequest(c)
+	if videoList {
+		user, bindingEnabled, err = userService.GetVideoTaskAdmin(c.Request.Context(), &claims.UserID, true)
+	} else {
+		user, err = userService.GetByID(c.Request.Context(), claims.UserID)
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
 			AbortWithError(c, 401, "USER_NOT_FOUND", "User not found")
@@ -208,7 +226,11 @@ func validateJWTForAdmin(
 	}
 
 	// 会话绑定校验：IP/UA 任一变化即撤销会话（功能可在系统设置中关闭）
-	if !enforceSessionBinding(c, authService, settingService, auditService, claims) {
+	if videoList {
+		if bindingEnabled && settingService != nil && !enforceEnabledSessionBinding(c, authService, auditService, claims) {
+			return false
+		}
+	} else if !enforceSessionBinding(c, authService, settingService, auditService, claims) {
 		return false
 	}
 
@@ -244,7 +266,12 @@ func authenticateScopedAdminRequest(c *gin.Context, key string, settings *servic
 		AbortWithError(c, 401, "INVALID_ADMIN_KEY", "Invalid admin API key")
 		return
 	}
-	user, err := users.GetByID(c.Request.Context(), item.CreatedBy)
+	var user *service.User
+	if isVideoTaskListRequest(c) {
+		user, _, err = users.GetVideoTaskAdmin(c.Request.Context(), &item.CreatedBy, false)
+	} else {
+		user, err = users.GetByID(c.Request.Context(), item.CreatedBy)
+	}
 	if err != nil || user == nil || !user.IsActive() || !user.IsAdmin() {
 		AbortWithError(c, 401, "INVALID_ADMIN_KEY", "Invalid admin API key")
 		return

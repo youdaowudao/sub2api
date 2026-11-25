@@ -164,12 +164,8 @@ func (s *SettingService) GetAffiliateRebatePerInviteeCap(ctx context.Context) fl
 }
 
 // IsPasswordResetEnabled 检查是否启用密码重置功能
-// 要求：必须同时开启邮件验证
+// 只看找回密码开关，与注册邮箱验证无关
 func (s *SettingService) IsPasswordResetEnabled(ctx context.Context) bool {
-	// Password reset requires email verification to be enabled
-	if !s.IsEmailVerifyEnabled(ctx) {
-		return false
-	}
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyPasswordResetEnabled)
 	if err != nil {
 		return false // 默认关闭
@@ -1228,4 +1224,24 @@ func mergePlatformQuotaDefaults(dst, src *DefaultPlatformQuotaSetting) {
 	if src.MonthlyLimitUSD != nil {
 		dst.MonthlyLimitUSD = src.MonthlyLimitUSD
 	}
+}
+
+func validUserAccountBlockDuration(hours int) bool {
+	return hours == UserAccountBlockDurationShortHours || hours == UserAccountBlockDurationLongHours
+}
+
+func parseUserAccountBlockSettings(raw string) UserAccountBlockSettings {
+	var settings UserAccountBlockSettings
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil || !validUserAccountBlockDuration(settings.DurationHours) {
+		settings.DurationHours = DefaultUserAccountBlockDurationHours
+	}
+	return settings
+}
+
+func (s *SettingService) GetUserAccountBlockSettings(ctx context.Context) (UserAccountBlockSettings, error) {
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyUserAccountBlockSettings)
+	if err != nil && !errors.Is(err, ErrSettingNotFound) {
+		return UserAccountBlockSettings{}, err
+	}
+	return parseUserAccountBlockSettings(raw), nil
 }

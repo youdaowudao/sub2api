@@ -454,6 +454,12 @@ func persistPostUsagePlatformQuota(ctx context.Context, repo UserPlatformQuotaRe
 	base := context.Background()
 	if ctx != nil {
 		base = context.WithoutCancel(ctx)
+		if ctx.Value(videoRelayTrackingContextKey{}) != nil {
+			base = ctx
+			if VideoRelayTrackingCanceled(ctx) != nil {
+				return
+			}
+		}
 	}
 	dbCtx, cancel := context.WithTimeout(base, 5*time.Second)
 	defer cancel()

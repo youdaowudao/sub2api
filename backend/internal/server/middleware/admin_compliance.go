@@ -11,7 +11,7 @@ import (
 
 func AdminComplianceGuard(settingService *service.SettingService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if settingService == nil || isAdminComplianceBypassPath(c.Request.URL.Path) {
+		if settingService == nil || isVideoTaskListRequest(c) || isAdminComplianceBypassPath(c.Request.URL.Path) {
 			c.Next()
 			return
 		}

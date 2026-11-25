@@ -118,6 +118,33 @@ describe('LoginView registration entry', () => {
   })
 })
 
+describe('LoginView password reset entry', () => {
+  beforeEach(() => {
+    getPublicSettingsMock.mockReset()
+  })
+
+  it.each([
+    [true, false, true],
+    [false, false, false],
+    [true, true, false]
+  ])(
+    'password reset %s and backend mode %s shows entry: %s',
+    async (passwordResetEnabled, backendModeEnabled, visible) => {
+      getPublicSettingsMock.mockResolvedValue({
+        ...publicSettings,
+        email_verify_enabled: false,
+        password_reset_enabled: passwordResetEnabled,
+        backend_mode_enabled: backendModeEnabled
+      })
+
+      const wrapper = mountLogin()
+      await flushPromises()
+
+      expect(wrapper.text().includes('auth.forgotPassword')).toBe(visible)
+    }
+  )
+})
+
 describe('LoginView QQ group row', () => {
   beforeEach(() => {
     getPublicSettingsMock.mockReset()

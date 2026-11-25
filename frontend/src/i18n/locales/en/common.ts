@@ -170,6 +170,7 @@ export default {
     apiKeys: 'API Keys',
     batchImage: 'Batch Images',
     usage: 'Usage',
+    videoTasks: 'Video Tasks',
     redeem: 'Redeem',
     affiliate: 'Affiliate Rebates',
     affiliatePromo: {

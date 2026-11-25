@@ -310,6 +310,9 @@ export default {
       },
       // Error Log
       errorLog: {
+        blockAccount: "Block account {account} for user {user}",
+        blockAccountSuccess: "Blocked until {time}",
+        blockAccountFailed: "Block failed: {reason}",
         timeId: 'Time / ID',
         commonErrors: {
           contextDeadlineExceeded: 'context deadline exceeded',

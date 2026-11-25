@@ -310,6 +310,9 @@ export default {
       },
       // Error Log
       errorLog: {
+        blockAccount: "为用户 {user} 屏蔽账号 {account}",
+        blockAccountSuccess: "已屏蔽，{time} 到期",
+        blockAccountFailed: "屏蔽失败：{reason}",
         timeId: '时间 / ID',
         commonErrors: {
           contextDeadlineExceeded: '请求超时',

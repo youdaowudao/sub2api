@@ -1058,6 +1058,10 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 			filterStats.exclude("channel_restricted")
 			continue
 		}
+		if requiredCapability == OpenAIEndpointCapabilityVideos && videoRelaySpecsMismatch(ctx, fresh) {
+			filterStats.exclude("video_specs_mismatch")
+			continue
+		}
 		if vetoed, reason := openAIProfitControlVetoReason(ctx, fresh); vetoed {
 			filterStats.exclude(reason)
 			continue
@@ -1301,6 +1305,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, acc, requestedModel, requireCompact) {
 			filterStats.exclude("channel_upstream_restricted")
+			continue
+		}
+		if requiredCapability == OpenAIEndpointCapabilityVideos && videoRelaySpecsMismatch(ctx, acc) {
+			filterStats.exclude("video_specs_mismatch")
 			continue
 		}
 		baseCandidateCount++

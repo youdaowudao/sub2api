@@ -51,6 +51,7 @@ func firstNonEmpty(values ...string) string {
 
 // SettingHandler 系统设置处理器
 type SettingHandler struct {
+	userAccountBlocks        *service.UserAccountBlockService
 	settingService           *service.SettingService
 	emailService             *service.EmailService
 	turnstileService         *service.TurnstileService
@@ -133,6 +134,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 	passkeyConfigured, passkeyRPID, passkeyRPOrigins := h.settingService.PasskeyConfiguration()
 
 	payload := dto.SystemSettings{
+		UserAccountBlockDurationHours:                          settings.UserAccountBlockDurationHours,
 		RegistrationEnabled:                                    settings.RegistrationEnabled,
 		EmailVerifyEnabled:                                     settings.EmailVerifyEnabled,
 		RegistrationEmailSuffixWhitelist:                       settings.RegistrationEmailSuffixWhitelist,
@@ -350,6 +352,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		BalanceLowNotifyEnabled:                                settings.BalanceLowNotifyEnabled,
 		BalanceLowNotifyThreshold:                              settings.BalanceLowNotifyThreshold,
 		BalanceLowNotifyRechargeURL:                            settings.BalanceLowNotifyRechargeURL,
+		BalanceRechargeNotifyEnabled:                           settings.BalanceRechargeNotifyEnabled,
 		SubscriptionExpiryNotifyEnabled:                        settings.SubscriptionExpiryNotifyEnabled,
 		AccountQuotaNotifyEnabled:                              settings.AccountQuotaNotifyEnabled,
 		AccountQuotaNotifyEmails:                               dto.NotifyEmailEntriesFromService(settings.AccountQuotaNotifyEmails),

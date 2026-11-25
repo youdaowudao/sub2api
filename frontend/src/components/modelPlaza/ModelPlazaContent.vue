@@ -64,6 +64,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { groupPlazaPlatform } from '@/utils/groupDisplay'
 import { comparePlatformsForDisplay, sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
@@ -104,15 +105,21 @@ function effectiveRate(g: ModelPlazaGroup): number {
   return g.user_rate_multiplier ?? g.rate_multiplier
 }
 
+function sortForPlaza<T extends ModelPlazaGroup>(groups: readonly T[]): T[] {
+  return sortGroupsForDisplay(
+    groups.map(group => ({ id: group.id, sort_order: group.sort_order, platform: groupPlazaPlatform(group), group }))
+  ).map(item => item.group)
+}
+
 const platforms = computed(() =>
-  [...new Set((props.response?.groups ?? []).map((g) => g.platform).filter(Boolean))].sort(comparePlatformsForDisplay)
+  [...new Set((props.response?.groups ?? []).map(groupPlazaPlatform).filter(Boolean))].sort(comparePlatformsForDisplay)
 )
 
 const groupOptions = computed(() =>
-  sortGroupsForDisplay(props.response?.groups ?? []).map((g) => ({
+  sortForPlaza(props.response?.groups ?? []).map((g) => ({
     id: g.id,
     name: g.name,
-    platform: g.platform,
+    platform: groupPlazaPlatform(g),
     rate: effectiveRate(g)
   }))
 )
@@ -132,7 +139,7 @@ watch(rates, (list) => {
 const filteredGroups = computed(() => {
   let groups = props.response?.groups ?? []
   if (selectedPlatform.value !== 'all') {
-    groups = groups.filter((g) => g.platform === selectedPlatform.value)
+    groups = groups.filter((g) => groupPlazaPlatform(g) === selectedPlatform.value)
   }
   if (selectedGroupId.value !== 'all') {
     groups = groups.filter((g) => g.id === selectedGroupId.value)
@@ -147,7 +154,7 @@ const filteredGroups = computed(() => {
       .map((g) => ({ ...g, models: g.models.filter((m) => m.name.toLowerCase().includes(q)) }))
       .filter((g) => g.models.length > 0)
   }
-  return sortGroupsForDisplay(groups)
+  return sortForPlaza(groups)
 })
 </script>
 

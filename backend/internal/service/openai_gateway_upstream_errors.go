@@ -370,6 +370,19 @@ func IsOpenAICompatibleModelNotFound400(respBody []byte) bool {
 	return isOpenAICompatibleModelNotFound400(respBody)
 }
 
+// IsOpenAIRouteCapabilityUnsupported400 reports whether a relay's 400 says the
+// selected upstream route lacks a capability the request needs.
+func IsOpenAIRouteCapabilityUnsupported400(respBody []byte) bool {
+	return gjson.GetBytes(respBody, "error.code").String() == "unsupported_parameter" &&
+		strings.Contains(strings.ToLower(gjson.GetBytes(respBody, "error.message").String()), "upstream route does not support") &&
+		!isOpenAIContextWindowError(extractUpstreamErrorMessage(respBody), respBody)
+}
+
+func (s *OpenAIGatewayService) shouldFailoverOpenAIRouteCapability400(statusCode int, upstreamMsg string, respBody []byte) bool {
+	return s != nil && s.accountRepo != nil && statusCode == http.StatusBadRequest &&
+		!isOpenAIContextWindowError(upstreamMsg, nil) && IsOpenAIRouteCapabilityUnsupported400(respBody)
+}
+
 // OpenAIRequestBodyTooLargeClientMessage is the fixed downstream message used
 // after all account-specific request body limit failovers are exhausted.
 const OpenAIRequestBodyTooLargeClientMessage = "Request payload is too large"

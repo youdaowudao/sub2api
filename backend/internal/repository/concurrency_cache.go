@@ -443,6 +443,9 @@ func (c *concurrencyCache) touchActiveIndexAt(ctx context.Context, indexKey stri
 	if c == nil || c.rdb == nil || id <= 0 || expireAt <= 0 {
 		return
 	}
+	if service.VideoRelayTrackingCanceled(ctx) != nil {
+		return
+	}
 	if err := c.rdb.ZAdd(ctx, indexKey, redis.Z{
 		Score:  float64(expireAt),
 		Member: strconv.FormatInt(id, 10),
@@ -466,15 +469,24 @@ func (c *concurrencyCache) refreshActiveIndex(ctx context.Context, indexKey stri
 	if c == nil || c.rdb == nil || id <= 0 {
 		return
 	}
+	if service.VideoRelayTrackingCanceled(ctx) != nil {
+		return
+	}
 	now, err := c.redisUnixSeconds(ctx)
 	if err != nil {
 		logger.LegacyPrintf("repository.concurrency", "Warning: refresh active index %s for %d failed: %v", indexKey, id, err)
+		return
+	}
+	if service.VideoRelayTrackingCanceled(ctx) != nil {
 		return
 	}
 
 	load, err := c.readActiveLoadForKey(ctx, id, slotKey, waitKey, now)
 	if err != nil {
 		logger.LegacyPrintf("repository.concurrency", "Warning: refresh active index %s for %d failed: %v", indexKey, id, err)
+		return
+	}
+	if service.VideoRelayTrackingCanceled(ctx) != nil {
 		return
 	}
 	member := strconv.FormatInt(id, 10)
@@ -629,6 +641,9 @@ func runScriptInt64Pair(ctx context.Context, rdb *redis.Client, script *redis.Sc
 // Account slot operations
 
 func (c *concurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+	if err := service.VideoRelayTrackingCanceled(ctx); err != nil {
+		return false, err
+	}
 	key := accountSlotKey(accountID)
 	// 时间戳在 Lua 脚本内使用 Redis TIME 命令获取，确保多实例时钟一致
 	result, now, err := runScriptInt64Pair(ctx, c.rdb, acquireScript, []string{key, liveAccountSlotKey(accountID)}, maxConcurrency, c.slotTTLSeconds, requestID)
@@ -643,6 +658,9 @@ func (c *concurrencyCache) AcquireAccountSlot(ctx context.Context, accountID int
 }
 
 func (c *concurrencyCache) ReleaseAccountSlot(ctx context.Context, accountID int64, requestID string) error {
+	if err := service.VideoRelayTrackingCanceled(ctx); err != nil {
+		return err
+	}
 	key := accountSlotKey(accountID)
 	if err := c.rdb.ZRem(ctx, key, requestID).Err(); err != nil {
 		return err

@@ -347,6 +347,13 @@ func releaseUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *
 		logger.LegacyPrintf("repository.usage_billing", "[BatchImage] release skipped, hold was never reserved: batch=%s", cmd.BatchID)
 		return &service.BatchImageBalanceHoldResult{}, nil
 	}
+	return releaseUsageBillingHeldBalance(ctx, tx, cmd)
+}
+
+func releaseUsageBillingHeldBalance(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
+	if cmd.HoldAmount <= 0 {
+		return &service.BatchImageBalanceHoldResult{}, nil
+	}
 	var balance, frozen float64
 	err := tx.QueryRowContext(ctx, `
 		UPDATE users
