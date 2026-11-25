@@ -215,7 +215,6 @@ type videoRelayRoute struct {
 	collection  *url.URL
 	logURL      string
 	bearer      string
-	headers     http.Header
 	proxyURL    string
 	site        string
 	credential  string
@@ -242,7 +241,12 @@ func (s *OpenAIGatewayService) videoRelayRoute(account *Account) (*videoRelayRou
 		return nil, errors.New("video route credential is unavailable")
 	}
 	headers := make(http.Header)
-	account.ApplyHeaderOverrides(headers)
+	// Bind persisted tasks to configuration, never to a particular user's
+	// expanded identity. Keep the original wire casing and ordering so fixed
+	// header configurations retain their existing fingerprints.
+	for name, value := range account.GetHeaderOverrides() {
+		headers[resolveWireCasing(name)] = []string{value}
+	}
 	deleteHeaderAllForms(headers, "idempotency-key")
 	deleteHeaderAllForms(headers, "x-idempotency-key")
 	names := make([]string, 0, len(headers))
@@ -257,7 +261,7 @@ func (s *OpenAIGatewayService) videoRelayRoute(account *Account) (*videoRelayRou
 		routeParts = append(routeParts, headers[name]...)
 	}
 	route := &videoRelayRoute{
-		account: account, collection: collection, bearer: bearer, headers: headers,
+		account: account, collection: collection, bearer: bearer,
 		logURL: strings.TrimSuffix(collection.String(), videoRelayCollectionPath) + "/api/log/token",
 		site:   site, credential: credential, fingerprint: videoRelayFingerprint(routeParts...),
 	}
@@ -348,14 +352,31 @@ func (r *videoRelayRoute) request(ctx context.Context, method, target string, bo
 	if err != nil {
 		return nil, err
 	}
-	req.Header = r.headers.Clone()
+	r.account.ApplyHeaderOverrides(req.Context(), req.Header)
+	deleteHeaderAllForms(req.Header, "idempotency-key")
+	deleteHeaderAllForms(req.Header, "x-idempotency-key")
 	req.Header.Set("Authorization", "Bearer "+r.bearer)
 	req.Header.Set("Accept", "application/json")
+	videoRelayForgetReportedHeaders(req.Context(), r.account.ID, "idempotency-key", "x-idempotency-key", "accept")
 	if method == http.MethodPost {
 		req.Header.Set("Content-Type", "application/json")
 		req.GetBody = nil
 	}
 	return req, nil
+}
+
+// These overrides were removed or replaced by the existing video protocol
+// rules. They must not be presented as values actually sent to the upstream.
+func videoRelayForgetReportedHeaders(ctx context.Context, accountID int64, names ...string) {
+	scope := headerOverrideScopeFromContext(ctx)
+	if scope == nil {
+		return
+	}
+	scope.mu.Lock()
+	defer scope.mu.Unlock()
+	for _, name := range names {
+		delete(scope.reported[accountID], name)
+	}
 }
 
 func (r *videoRelayRoute) submitRequest(ctx context.Context, input VideoRelayRequest, task *VideoRelayTask) (*http.Request, error) {
@@ -381,7 +402,12 @@ func (r *videoRelayRoute) taskRequest(ctx context.Context, upstreamID string, do
 	if download {
 		target += "/content"
 	}
-	return r.request(ctx, http.MethodGet, target, nil)
+	req, err := r.request(ctx, http.MethodGet, target, nil)
+	if err == nil && download {
+		// Download replaces this header with the caller's validated range.
+		videoRelayForgetReportedHeaders(req.Context(), r.account.ID, "range")
+	}
+	return req, err
 }
 
 func readVideoRelayBody(body io.Reader, maxBytes int64) ([]byte, error) {
