@@ -37,6 +37,7 @@ export default {
       step3HelperImportTitle: '助手打开后，回来导入',
       step3HelperImport: '助手会下载到桌面并打开。回本页点「一键导入 {app}」，浏览器询问时点「打开」。',
       step3Hint: '打开助手后，点击按钮导入{app}。浏览器询问时点「打开」。',
+      step3AntigravityHint: '请下载并打开新版接入助手，使用 Antigravity App 2.15 或更高版本。点击导入后，浏览器询问时点「打开」。',
       step3ConfigurationNeeded: '暂无可导入的密钥。请刷新重试，或联系管理员检查一键导入设置。',
       step3ImageMac: '在 Mac 上，请先打开工具合集中的「2.UseGoodAI生图工具」。',
       step3Trust: 'Windows 保护阻止运行时，点「更多信息」→「仍要运行」。',
@@ -49,6 +50,7 @@ export default {
       step1MockTodo: '待创建',
       step4Sample: '测试',
       step4HintClaude: '打开 Claude，一定要新开空白窗口，选择模型，发送“测试”',
+      step4HintAntigravity: '导入成功后打开 Antigravity，新建会话，选择可用的 Gemini 模型，发送“测试”。',
       step4Image: '试着生成一张图片',
       step4HintImage: '在生图工具确认导入成功后，重新打开 Codex，新建任务并发送下面的画图指令。',
       step4SampleImage: '画一张白底红苹果',
@@ -197,8 +199,10 @@ export default {
     importToCodex: '一键导入 Codex',
     importToClaude: '一键导入 Claude',
     importToImage: '一键导入生图工具',
+    importToAntigravity: '一键导入 Antigravity',
     importImageApp: '生图工具',
     importAssistantHint: '先从群文件下载并打开接入助手，再点此导入{app}。',
+    importAntigravityAssistantHint: '请从群文件下载并打开新版接入助手，再导入 Antigravity（App 2.15 或更高版本）。',
     importChanged: '密钥或导入目标已变化，本次未打开助手。请刷新页面，确认目标后重试。',
     importCheckFailed: '暂时无法核对密钥和导入目标，本次未打开助手。请刷新页面后重试。',
     importToClaudeHint: '一键导入 Claude（需要 Windows 版 UseGoodAI 接入助手）',
@@ -280,6 +284,7 @@ export default {
       cliTabs: {
         claudeCode: 'Claude Code',
         geminiCli: 'Gemini CLI',
+        antigravityApp: 'Antigravity App',
         codexCli: 'Codex CLI',
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
@@ -304,6 +309,11 @@ export default {
           '将以下环境变量添加到您的终端配置文件或直接在终端中运行，以配置 Gemini CLI 访问。',
         modelComment: '如果你有 Gemini 3 权限可以填：gemini-3-pro-preview',
         note: '这些环境变量将在当前终端会话中生效。如需永久配置，请将其添加到 ~/.bashrc、~/.zshrc 或相应的配置文件中。'
+      },
+      antigravityApp: {
+        description: 'Antigravity App 2.15 或更高版本支持 Gemini 原生网关模式。请为启动 App 的进程设置以下环境变量（不是终端命令）。',
+        environment: 'Antigravity App 环境变量',
+        note: '模型 ID 只是示例，请替换为此 Gemini 密钥实际可用的模型 ID；多个模型用英文逗号分隔，不带 models/ 前缀。设置后完全退出并重新启动 App，确保新进程加载了这些变量。此配置包含密钥，请勿分享。'
       },
       grok: {
         description:

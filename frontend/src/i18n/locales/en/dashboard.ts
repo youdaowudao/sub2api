@@ -37,6 +37,7 @@ export default {
       step3HelperImportTitle: 'Return here after the helper opens',
       step3HelperImport: 'The helper downloads to your desktop and opens. Return here, click "Import to {app}", and choose "Open" if the browser asks.',
       step3Hint: 'Open the helper, then click to import your key to {app}. Choose “Open” if your browser asks.',
+      step3AntigravityHint: 'Download and open the latest helper and use Antigravity App 2.15 or later. Click Import, then choose “Open” if the browser asks.',
       step3ConfigurationNeeded: 'No key is ready to import. Refresh the page or ask an administrator to check one-click import settings.',
       step3ImageMac: 'On Mac, open “2.UseGoodAI生图工具” from the tools bundle first.',
       step3Trust: 'If Windows Security blocks the helper, click "More info" → "Run anyway".',
@@ -49,6 +50,7 @@ export default {
       step1MockTodo: 'Not yet',
       step4Sample: 'test',
       step4HintClaude: 'Open Claude, be sure to open a new blank window, pick a model and send "test"',
+      step4HintAntigravity: 'After importing, open Antigravity, start a new conversation, select an available Gemini model, and send "test".',
       step4Image: 'Generate your first image',
       step4HintImage: 'After the Image Tool confirms the import, restart Codex, start a new task and send the prompt below.',
       step4SampleImage: 'Draw a red apple on a white background',
@@ -197,8 +199,10 @@ export default {
     importToCodex: 'Import to Codex',
     importToClaude: 'Import to Claude',
     importToImage: 'Import to Image Tool',
+    importToAntigravity: 'Import to Antigravity',
     importImageApp: 'Image Tool',
     importAssistantHint: 'Download and open the helper from the group files, then click to import to {app}.',
+    importAntigravityAssistantHint: 'Download and open the latest helper from the group files, then import to Antigravity (App 2.15 or later).',
     importChanged: 'The key or import destination changed. The helper was not opened. Refresh the page and confirm the destination before retrying.',
     importCheckFailed: 'The key and destination could not be verified, so the helper was not opened. Refresh the page and try again.',
     importToClaudeHint: 'Import to Claude (requires the Windows UseGoodAI helper)',
@@ -279,6 +283,7 @@ export default {
       cliTabs: {
         claudeCode: 'Claude Code',
         geminiCli: 'Gemini CLI',
+        antigravityApp: 'Antigravity App',
         codexCli: 'Codex CLI',
         codexCliWs: 'Codex CLI (WebSocket)',
         grokCli: 'Grok CLI',
@@ -300,6 +305,11 @@ export default {
         description: 'Add the following environment variables to your terminal profile or run directly in terminal to configure Gemini CLI access.',
         modelComment: 'If you have Gemini 3 access, you can use: gemini-3-pro-preview',
         note: 'These environment variables will be active in the current terminal session. For permanent configuration, add them to ~/.bashrc, ~/.zshrc, or the appropriate configuration file.',
+      },
+      antigravityApp: {
+        description: 'Antigravity App 2.15 or later supports native Gemini gateway mode. Set these variables in the environment of the process launching the App (these are not terminal commands).',
+        environment: 'Antigravity App environment variables',
+        note: 'Replace the example model ID with IDs available to this Gemini key. Separate multiple models with commas and omit the models/ prefix. Fully quit and relaunch the App so the new process loads these variables. Do not share this configuration containing your key.'
       },
       grok: {
         description:

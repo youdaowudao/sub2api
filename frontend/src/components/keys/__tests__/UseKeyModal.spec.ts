@@ -40,6 +40,43 @@ describe('UseKeyModal', () => {
     saveAsMock.mockClear()
   })
 
+  it('offers Antigravity App native gateway instructions only for Gemini keys', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: { show: true, apiKey: 'sk-test-gemini', baseUrl: 'https://example.com/v1', platform: 'gemini' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' }, Icon: true } }
+    })
+    const tabs = () => wrapper.get('nav[aria-label="Client"]')
+    expect(wrapper.get('pre code').text()).toContain('GEMINI_API_KEY')
+    expect(wrapper.get('pre code').text()).not.toContain('AGY_LLM_GATEWAY')
+    expect(tabs().text()).toContain('keys.useKeyModal.cliTabs.geminiCli')
+    expect(tabs().text()).toContain('keys.useKeyModal.cliTabs.codexCli')
+    expect(tabs().text()).toContain('keys.useKeyModal.cliTabs.opencode')
+    const app = () => tabs().findAll('button').find(b => b.text() === 'keys.useKeyModal.cliTabs.antigravityApp')
+    expect(app()).toBeDefined()
+    await app()!.trigger('click')
+    const content = wrapper.get('pre code').text()
+    expect(content).toBe([
+      'AGY_LLM_GATEWAY_URL=https://api.usegoodai.com',
+      'AGY_LLM_GATEWAY_API_KEY=sk-test-gemini',
+      'AGY_LLM_GATEWAY_WIRE_PROTOCOL=genai',
+      'AGY_LLM_GATEWAY_MODELS=gemini-2.5-flash'
+    ].join('\n'))
+    expect(wrapper.text()).toContain('keys.useKeyModal.antigravityApp.description')
+    expect(wrapper.text()).toContain('keys.useKeyModal.antigravityApp.note')
+    expect(wrapper.find('nav[aria-label="Tabs"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="codex-model-catalog"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('keys.useKeyModal.gemini.note')
+
+    await wrapper.setProps({ platform: 'antigravity' })
+    expect(app()).toBeUndefined()
+    expect(wrapper.text()).not.toContain('AGY_LLM_GATEWAY')
+    await wrapper.setProps({ platform: 'openai' })
+    expect(app()).toBeUndefined()
+    await wrapper.setProps({ platform: 'gemini' })
+    expect(wrapper.get('pre code').text()).toContain('GEMINI_API_KEY')
+    wrapper.unmount()
+  })
+
   it('shows only Claude Code for Claude Code-only groups', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {

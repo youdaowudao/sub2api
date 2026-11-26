@@ -400,7 +400,7 @@
             <!-- 一行操作：一键导入（双行字，强调色）+ 手动配置 + 导入到 CC Switch + 编辑 + 删除 -->
             <div data-tour="key-actions" class="flex items-stretch">
               <!-- 没有可导入目标的行保留同宽空位，各行按钮对齐 -->
-              <div class="mr-0.5 flex w-[3.6rem] flex-none items-center">
+              <div class="mr-0.5 flex w-[4.75rem] flex-none items-center">
                 <CodexImportButton
                   v-if="canQuickImport(row.group, publicSettings?.quick_import_image_group_id) && row.status === 'active'"
                   :api-key="row"
