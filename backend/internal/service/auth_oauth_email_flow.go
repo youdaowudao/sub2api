@@ -113,8 +113,8 @@ func (s *AuthService) RegisterOAuthEmailAccount(
 	if s == nil {
 		return nil, nil, ErrServiceUnavailable
 	}
-	if s.settingService == nil || (!s.settingService.IsRegistrationEnabled(ctx) && !s.canBypassRegistrationDisabledForOAuth(ctx, signupSource)) {
-		return nil, nil, ErrRegDisabled
+	if err := s.checkRegistrationAllowed(ctx, signupSource, true); err != nil {
+		return nil, nil, err
 	}
 
 	email = strings.TrimSpace(strings.ToLower(email))
@@ -195,8 +195,8 @@ func (s *AuthService) RegisterVerifiedOAuthEmailAccount(
 	if s == nil {
 		return nil, nil, ErrServiceUnavailable
 	}
-	if s.settingService == nil || (!s.settingService.IsRegistrationEnabled(ctx) && !s.canBypassRegistrationDisabledForOAuth(ctx, signupSource)) {
-		return nil, nil, ErrRegDisabled
+	if err := s.checkRegistrationAllowed(ctx, signupSource, true); err != nil {
+		return nil, nil, err
 	}
 
 	email = strings.TrimSpace(strings.ToLower(email))

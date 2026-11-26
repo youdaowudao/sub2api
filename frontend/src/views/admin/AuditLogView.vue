@@ -27,7 +27,7 @@
 
               <div class="w-full sm:w-auto sm:min-w-[200px]">
                 <label class="input-label">{{ t('admin.audit.filters.actorEmail') }}</label>
-                <input v-model.trim="filters.actor_email" type="text" class="input" @keyup.enter="search" />
+                <input v-model.trim="filters.actor_email" type="text" class="input" :placeholder="t('admin.audit.filters.actorEmailPlaceholder')" @keyup.enter="search" />
               </div>
 
               <div class="w-full sm:w-auto sm:min-w-[180px]">
@@ -84,6 +84,7 @@
 
       <!-- Table -->
       <template #table>
+        <IpGeoBatchToolbar :ips="logs.map(row => row.client_ip)" @failed="appStore.showError(t('usage.ipGeo.batchFailed'))" />
         <DataTable :columns="columns" :data="logs" :loading="loading" row-key="id">
           <template #cell-created_at="{ value }">
             <span class="whitespace-nowrap text-gray-600 dark:text-gray-300">{{ formatTime(value) }}</span>
@@ -124,6 +125,7 @@
 
           <template #cell-client_ip="{ value }">
             <span class="whitespace-nowrap font-mono text-gray-600 dark:text-gray-300">{{ value || '—' }}</span>
+            <IpGeoCell v-if="value" :ip="value" />
           </template>
 
           <template #cell-actions="{ row }">
@@ -238,6 +240,7 @@
             <div class="mt-1 break-all font-mono text-sm font-medium text-gray-900 dark:text-white">
               {{ detail.client_ip || '—' }}
             </div>
+            <IpGeoCell v-if="detail.client_ip" :ip="detail.client_ip" />
           </div>
         </div>
 
@@ -362,6 +365,8 @@ import DataTable from '@/components/common/DataTable.vue'
 import type { Column } from '@/components/common/types'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
+import IpGeoCell from '@/components/common/IpGeoCell.vue'
+import IpGeoBatchToolbar from '@/components/common/IpGeoBatchToolbar.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
