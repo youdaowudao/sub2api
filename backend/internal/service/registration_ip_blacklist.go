@@ -106,7 +106,7 @@ func (s *AuthService) checkRegistrationAllowed(ctx context.Context, signupSource
 		return ErrRegDisabled
 	}
 	enabled, blacklist := s.settingService.GetRegistrationAccessSettings(ctx)
-	if !enabled && !(allowDingTalkBypass && s.canBypassRegistrationDisabledForOAuth(ctx, signupSource)) {
+	if !enabled && (!allowDingTalkBypass || !s.canBypassRegistrationDisabledForOAuth(ctx, signupSource)) {
 		return ErrRegDisabled
 	}
 	if len(blacklist) == 0 {
