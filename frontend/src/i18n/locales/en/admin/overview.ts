@@ -78,6 +78,18 @@ export default {
       groupPricingDesc: 'Configure batch discount and hold ratio',
       systemSettings: 'System Settings',
       configureSystem: 'Configure system settings',
+      lastHour: 'Last hour',
+      todayAvgResponse: 'Avg response today',
+      userUsageRanking: 'User usage ranking',
+      totalUsersInRange: '{count} users',
+      share: 'Share',
+      vsYesterday: 'vs. yesterday',
+      newUser: 'New',
+      groupCacheHitRate: 'Group cache hit rate',
+      groupCacheHitRateHint: 'Top 5 groups by requests in the selected range',
+      todayConsumption: 'Consumption today',
+      todayRequestsCard: 'Requests today',
+      otherUsers: 'Other users',
       failedToLoad: 'Failed to load dashboard statistics'
     },
 

@@ -64,6 +64,32 @@ func parseTimeRange(c *gin.Context) (time.Time, time.Time) {
 	return startTime, endTime
 }
 
+// parseDashboardRange accepts an exclusive, minute-aligned time window in
+// addition to the existing inclusive date range.
+func parseDashboardRange(c *gin.Context) (start, end time.Time, precise bool, err error) {
+	rawStart, hasStart := c.GetQuery("start_time")
+	rawEnd, hasEnd := c.GetQuery("end_time")
+	if !hasStart && !hasEnd {
+		start, end = parseTimeRange(c)
+		return start, end, false, nil
+	}
+	start, startErr := time.Parse(time.RFC3339, rawStart)
+	end, endErr := time.Parse(time.RFC3339, rawEnd)
+	if startErr != nil || endErr != nil || !end.After(start) ||
+		start.Second() != 0 || end.Second() != 0 || start.Nanosecond() != 0 || end.Nanosecond() != 0 {
+		return time.Time{}, time.Time{}, false, errors.New("invalid start_time/end_time")
+	}
+	loc := timezone.NowInUserLocation(c.Query("timezone")).Location()
+	return start.In(loc), end.In(loc), true, nil
+}
+
+func dashboardRangeEndDate(end time.Time, precise bool) string {
+	if precise {
+		return end.Add(-time.Nanosecond).Format("2006-01-02")
+	}
+	return end.Add(-24 * time.Hour).Format("2006-01-02")
+}
+
 func parseOptionalBoolDashboardFilter(c *gin.Context, name string) (*bool, error) {
 	raw := strings.TrimSpace(c.Query(name))
 	if raw == "" {
@@ -542,23 +568,30 @@ func parseRankingLimit(raw string) int {
 // GetUserSpendingRanking handles getting user spending ranking data.
 // GET /api/v1/admin/dashboard/users-ranking
 func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
-	startTime, endTime := parseTimeRange(c)
+	startTime, endTime, precise, err := parseDashboardRange(c)
+	if err != nil || (precise && endTime.Sub(startTime) > 2*time.Hour) {
+		response.BadRequest(c, "invalid start_time/end_time")
+		return
+	}
 	limit := parseRankingLimit(c.DefaultQuery("limit", "12"))
 
-	keyRaw, _ := json.Marshal(struct {
-		Start string `json:"start"`
-		End   string `json:"end"`
-		Limit int    `json:"limit"`
-	}{
-		Start: startTime.UTC().Format(time.RFC3339),
-		End:   endTime.UTC().Format(time.RFC3339),
-		Limit: limit,
-	})
-	cacheKey := string(keyRaw)
-	if cached, ok := dashboardUsersRankingCache.Get(cacheKey); ok {
-		c.Header("X-Snapshot-Cache", "hit")
-		response.Success(c, cached.Payload)
-		return
+	var cacheKey string
+	if !precise {
+		keyRaw, _ := json.Marshal(struct {
+			Start string `json:"start"`
+			End   string `json:"end"`
+			Limit int    `json:"limit"`
+		}{
+			Start: startTime.UTC().Format(time.RFC3339),
+			End:   endTime.UTC().Format(time.RFC3339),
+			Limit: limit,
+		})
+		cacheKey = string(keyRaw)
+		if cached, ok := dashboardUsersRankingCache.Get(cacheKey); ok {
+			c.Header("X-Snapshot-Cache", "hit")
+			response.Success(c, cached.Payload)
+			return
+		}
 	}
 
 	ranking, err := h.dashboardService.GetUserSpendingRanking(c.Request.Context(), startTime, endTime, limit)
@@ -572,10 +605,13 @@ func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 		"total_actual_cost": ranking.TotalActualCost,
 		"total_requests":    ranking.TotalRequests,
 		"total_tokens":      ranking.TotalTokens,
+		"total_users":       ranking.TotalUsers,
 		"start_date":        startTime.Format("2006-01-02"),
-		"end_date":          endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":          dashboardRangeEndDate(endTime, precise),
 	}
-	dashboardUsersRankingCache.Set(cacheKey, payload)
+	if !precise {
+		dashboardUsersRankingCache.Set(cacheKey, payload)
+	}
 	c.Header("X-Snapshot-Cache", "miss")
 	response.Success(c, payload)
 }
@@ -672,7 +708,11 @@ func (h *DashboardHandler) GetBatchAPIKeysUsage(c *gin.Context) {
 // GET /api/v1/admin/dashboard/user-breakdown
 // Query params: start_date, end_date, group_id, model, endpoint, endpoint_type, limit
 func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
-	startTime, endTime := parseTimeRange(c)
+	startTime, endTime, precise, err := parseDashboardRange(c)
+	if err != nil || (precise && endTime.Sub(startTime) > 2*time.Hour) {
+		response.BadRequest(c, "invalid start_time/end_time")
+		return
+	}
 
 	dim := usagestats.UserBreakdownDimension{}
 	if v := c.Query("group_id"); v != "" {
@@ -756,6 +796,6 @@ func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
 	response.Success(c, gin.H{
 		"users":      stats,
 		"start_date": startTime.Format("2006-01-02"),
-		"end_date":   endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":   dashboardRangeEndDate(endTime, precise),
 	})
 }

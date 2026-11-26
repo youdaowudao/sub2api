@@ -78,6 +78,18 @@ export default {
       groupPricingDesc: '设置批量折扣和冻结比例',
       systemSettings: '系统设置',
       configureSystem: '配置系统设置',
+      lastHour: '最近 1 小时',
+      todayAvgResponse: '今日平均响应',
+      userUsageRanking: '用户用量排行',
+      totalUsersInRange: '共 {count} 位用户',
+      share: '占比',
+      vsYesterday: '较昨日同时段',
+      newUser: '新增',
+      groupCacheHitRate: '分组缓存命中率',
+      groupCacheHitRateHint: '按所选时间范围内请求量最多的 5 个分组',
+      todayConsumption: '今日消耗',
+      todayRequestsCard: '今日请求',
+      otherUsers: '其他用户',
       failedToLoad: '加载仪表盘数据失败'
     },
 

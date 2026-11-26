@@ -72,7 +72,8 @@ type DashboardStats struct {
 	TodayAccountCost         float64 `json:"today_account_cost"` // 今日账号成本
 
 	// 系统运行统计
-	AverageDurationMs float64 `json:"average_duration_ms"` // 平均响应时间
+	AverageDurationMs      float64  `json:"average_duration_ms"`       // 平均响应时间
+	TodayAverageDurationMs *float64 `json:"today_average_duration_ms"` // 今日平均响应时间；无请求时为 nil
 
 	// 性能指标
 	Rpm int64 `json:"rpm"` // 近5分钟平均每分钟请求数
@@ -126,13 +127,17 @@ type GroupUsageSummary struct {
 
 // GroupStat represents usage statistics for a single group
 type GroupStat struct {
-	GroupID     int64   `json:"group_id"`
-	GroupName   string  `json:"group_name"`
-	Requests    int64   `json:"requests"`
-	TotalTokens int64   `json:"total_tokens"`
-	Cost        float64 `json:"cost"`         // 标准计费
-	ActualCost  float64 `json:"actual_cost"`  // 实际扣除
-	AccountCost float64 `json:"account_cost"` // 账号成本
+	GroupID             int64    `json:"group_id"`
+	GroupName           string   `json:"group_name"`
+	Requests            int64    `json:"requests"`
+	TotalTokens         int64    `json:"total_tokens"`
+	Cost                float64  `json:"cost"`         // 标准计费
+	ActualCost          float64  `json:"actual_cost"`  // 实际扣除
+	AccountCost         float64  `json:"account_cost"` // 账号成本
+	InputTokens         int64    `json:"input_tokens"`
+	CacheCreationTokens int64    `json:"cache_creation_tokens"`
+	CacheReadTokens     int64    `json:"cache_read_tokens"`
+	CacheHitRate        *float64 `json:"cache_hit_rate"`
 }
 
 // UserUsageTrendPoint represents user usage trend data point
@@ -163,6 +168,7 @@ type UserSpendingRankingResponse struct {
 	TotalActualCost float64                   `json:"total_actual_cost"`
 	TotalRequests   int64                     `json:"total_requests"`
 	TotalTokens     int64                     `json:"total_tokens"`
+	TotalUsers      int64                     `json:"total_users"`
 }
 
 // UserBreakdownItem represents per-user usage breakdown within a dimension (group, model, endpoint).

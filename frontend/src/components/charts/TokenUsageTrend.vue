@@ -49,10 +49,11 @@ ChartJS.register(
 
 const { t } = useI18n()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   trendData: TrendDataPoint[]
   loading?: boolean
-}>()
+  showCacheHitRate?: boolean
+}>(), { showCacheHitRate: true })
 
 const isDarkMode = computed(() => {
   return document.documentElement.classList.contains('dark')
@@ -106,7 +107,7 @@ const chartData = computed(() => {
         fill: true,
         tension: 0.3
       },
-      {
+      ...(props.showCacheHitRate ? [{
         label: 'Cache Hit Rate',
         data: props.trendData.map((d) => {
           const totalPromptTokens = d.input_tokens + d.cache_read_tokens + d.cache_creation_tokens
@@ -118,7 +119,7 @@ const chartData = computed(() => {
         fill: false,
         tension: 0.3,
         yAxisID: 'yPercent'
-      }
+      }] : [])
     ]
   }
 })
@@ -187,6 +188,7 @@ const lineOptions = computed(() => ({
       }
     },
     yPercent: {
+      display: props.showCacheHitRate,
       position: 'right' as const,
       min: 0,
       max: 100,

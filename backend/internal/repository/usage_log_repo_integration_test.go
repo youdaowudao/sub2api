@@ -797,6 +797,15 @@ func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
 	s.Require().GreaterOrEqual(stats.TodayRequests, int64(1), "expected TodayRequests >= 1")
 	s.Require().GreaterOrEqual(stats.TodayCost, 0.0, "expected TodayCost >= 0")
 	s.Require().GreaterOrEqual(stats.TodayAccountCost, 0.0, "expected TodayAccountCost >= 0")
+	todayDuration := float64(d1)
+	if baseStats.TodayAverageDurationMs != nil {
+		todayDuration += *baseStats.TodayAverageDurationMs * float64(baseStats.TodayRequests)
+	}
+	if !logPerf.CreatedAt.Before(todayStart) {
+		todayDuration += float64(d3)
+	}
+	s.Require().NotNil(stats.TodayAverageDurationMs)
+	s.Require().InDelta(todayDuration/float64(stats.TodayRequests), *stats.TodayAverageDurationMs, 0.0001)
 
 	wantRpm, wantTpm, err := s.repo.getPerformanceStats(s.ctx, 0)
 	s.Require().NoError(err, "getPerformanceStats")
@@ -878,6 +887,8 @@ func (s *UsageLogRepoSuite) TestDashboardStatsWithRange_Fallback() {
 	// account_cost = COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1) = total_cost
 	s.Require().Equal(1.5, stats.TotalAccountCost)
 	s.Require().InEpsilon(150.0, stats.AverageDurationMs, 0.0001)
+	s.Require().NotNil(stats.TodayAverageDurationMs)
+	s.Require().Equal(float64(d2), *stats.TodayAverageDurationMs)
 }
 
 // --- GetUserDashboardStats ---

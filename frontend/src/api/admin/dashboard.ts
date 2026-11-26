@@ -47,7 +47,9 @@ export async function getRealtimeMetrics(): Promise<{
 export interface TrendParams {
   start_date?: string
   end_date?: string
-  granularity?: 'day' | 'hour'
+  start_time?: string
+  end_time?: string
+  granularity?: 'day' | 'hour' | 'minute'
   user_id?: number
   api_key_id?: number
   model?: string
@@ -167,6 +169,8 @@ export async function getGroupStats(params?: GroupStatsParams): Promise<GroupSta
 export interface UserBreakdownParams {
   start_date?: string
   end_date?: string
+  start_time?: string
+  end_time?: string
   group_id?: number
   model?: string
   model_source?: 'requested' | 'upstream' | 'mapping'
@@ -246,7 +250,7 @@ export interface UserTrendResponse {
 }
 
 export interface UserSpendingRankingParams
-  extends Pick<TrendParams, 'start_date' | 'end_date'> {
+  extends Pick<TrendParams, 'start_date' | 'end_date' | 'start_time' | 'end_time'> {
   limit?: number
 }
 

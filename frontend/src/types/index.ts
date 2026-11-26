@@ -2055,6 +2055,7 @@ export interface DashboardStats {
 
   // 系统运行统计
   average_duration_ms: number // 平均响应时间
+  today_average_duration_ms?: number | null
   uptime: number // 系统运行时间(秒)
 
   // 性能指标
@@ -2124,6 +2125,10 @@ export interface GroupStat {
   cost: number // 标准计费
   actual_cost: number // 实际扣除
   account_cost?: number // 账号成本（仅管理员接口返回）
+  input_tokens?: number
+  cache_creation_tokens?: number
+  cache_read_tokens?: number
+  cache_hit_rate?: number | null
 }
 
 export interface UserBreakdownItem {
@@ -2164,6 +2169,7 @@ export interface UserSpendingRankingResponse {
   total_actual_cost: number
   total_requests: number
   total_tokens: number
+  total_users: number
   start_date: string
   end_date: string
 }

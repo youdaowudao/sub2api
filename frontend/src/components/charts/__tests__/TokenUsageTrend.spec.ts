@@ -20,6 +20,7 @@ vi.mock('vue-i18n', async () => {
 
 vi.mock('vue-chartjs', () => ({
   Line: {
+    name: 'Line',
     props: ['data', 'options'],
     template: '<div class="chart-data">{{ JSON.stringify(data) }}</div>',
   },
@@ -126,6 +127,25 @@ describe('TokenUsageTrend', () => {
     expect.soft(footer.split(' | ')[0]).not.toContain('$')
     expect.soft(footer.split(' | ')[1]).not.toContain('¥')
     expect.soft(options.plugins.tooltip.callbacks.footer([])).toBe('')
+    wrapper.unmount()
+  })
+
+  it('V9 hides both the cache-rate dataset and the percentage scale only when requested', async () => {
+    const wrapper = mount(TokenUsageTrend, { props: { trendData: [{
+      date: '2026-11-27', requests: 1, input_tokens: 100, output_tokens: 50,
+      cache_creation_tokens: 20, cache_read_tokens: 80, total_tokens: 250,
+      cost: 1, actual_cost: 0.8
+    }] } })
+    const line = () => wrapper.getComponent({ name: 'Line' })
+    const datasets = () => line().props('data').datasets
+    const scale = () => line().props('options').scales.yPercent
+    expect(datasets().map((d: any) => d.label)).toContain('Cache Hit Rate')
+    expect(datasets().some((d: any) => d.yAxisID === 'yPercent')).toBe(true)
+    expect(scale().display).toBe(true)
+    await wrapper.setProps({ showCacheHitRate: false })
+    expect(datasets().map((d: any) => d.label)).toEqual(['Input', 'Output', 'Cache Creation', 'Cache Read'])
+    expect(datasets().some((d: any) => d.yAxisID === 'yPercent')).toBe(false)
+    expect(scale().display).toBe(false)
     wrapper.unmount()
   })
 
