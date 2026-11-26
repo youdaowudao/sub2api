@@ -482,6 +482,7 @@ const clientTabs = computed((): TabConfig[] => {
     case 'gemini':
       return [
         { id: 'gemini', label: t('keys.useKeyModal.cliTabs.geminiCli'), icon: SparkleIcon },
+        { id: 'antigravity-app', label: t('keys.useKeyModal.cliTabs.antigravityApp'), icon: SparkleIcon },
         { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
         { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
       ]
@@ -533,7 +534,7 @@ const openaiTabs: TabConfig[] = [
   { id: 'windows', label: 'Windows', icon: WindowsIcon }
 ]
 
-const showShellTabs = computed(() => activeClientTab.value !== 'opencode')
+const showShellTabs = computed(() => activeClientTab.value !== 'opencode' && activeClientTab.value !== 'antigravity-app')
 
 const showCodexAuthMode = computed(() =>
   props.platform === 'openai' &&
@@ -564,6 +565,7 @@ const platformDescription = computed(() => {
       }
       return t('keys.useKeyModal.openai.description')
     case 'gemini':
+      if (activeClientTab.value === 'antigravity-app') return t('keys.useKeyModal.antigravityApp.description')
       return t('keys.useKeyModal.gemini.description')
     case 'antigravity':
       return t('keys.useKeyModal.antigravity.description')
@@ -612,6 +614,7 @@ const platformNote = computed(() => {
         ? t('keys.useKeyModal.openai.noteWindows')
         : t('keys.useKeyModal.openai.note')
     case 'gemini':
+      if (activeClientTab.value === 'antigravity-app') return t('keys.useKeyModal.antigravityApp.note')
       return t('keys.useKeyModal.gemini.note')
     case 'antigravity':
       return activeClientTab.value === 'claude'
@@ -791,6 +794,17 @@ const currentFiles = computed((): FileConfig[] => {
     case 'gemini':
       if (activeClientTab.value === 'codex') {
         return generateRoutedCodexFiles(apiBase, apiKey, 'gemini')
+      }
+      if (activeClientTab.value === 'antigravity-app') {
+        return [{
+          path: t('keys.useKeyModal.antigravityApp.environment'),
+          content: [
+            'AGY_LLM_GATEWAY_URL=https://api.usegoodai.com',
+            `AGY_LLM_GATEWAY_API_KEY=${apiKey}`,
+            'AGY_LLM_GATEWAY_WIRE_PROTOCOL=genai',
+            'AGY_LLM_GATEWAY_MODELS=gemini-2.5-flash'
+          ].join('\n')
+        }]
       }
       return [generateGeminiCliContent(baseUrl, apiKey)]
     case 'antigravity':

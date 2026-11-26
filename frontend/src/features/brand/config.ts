@@ -53,13 +53,15 @@ export function currentTipIndex(now = Date.now(), count: number = quickStartTips
 }
 
 /** 一键导入的目标软件，对应导入链接里的 app 参数 */
-export type ImportApp = 'codex' | 'claude' | 'image'
+export type ImportApp = 'codex' | 'claude' | 'image' | 'antigravity'
 
 type ImportGroup = { id?: number; platform?: string; status?: string }
 
 /** 两个入口按站点设置和分组 ID 决定导入目标。 */
 export function importAppForGroup(group?: ImportGroup | null, imageGroupId = 0): ImportApp | null {
   if (!group) return null
+  // Antigravity App 只使用 Gemini 原生协议，不依赖 OpenAI 画图分组设置。
+  if (group.platform === 'gemini') return 'antigravity'
   if (imageGroupId > 0 && group.id === imageGroupId) {
     return group.platform === 'openai' && group.status === 'active' ? 'image' : null
   }

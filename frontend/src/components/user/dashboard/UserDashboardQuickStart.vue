@@ -108,7 +108,7 @@
 
             <p class="step3-lead mt-1" data-testid="quick-start-import-lead">{{ t('dashboard.quickStart.step3ImportLead', { app: appLabel }) }}</p>
             <!-- 手机上下拉框和一键导入上下排、各占满一行；电脑上同一行，卡片窄时下拉框自动变窄，再窄就上下排，按钮不伸出卡片 -->
-            <div class="import-row -mt-1">
+            <div class="import-row -mt-1" :class="{ 'import-row-antigravity': importApp === 'antigravity' }">
               <div class="import-select relative">
               <select v-model="selectedKeyId" class="h-11 w-full cursor-pointer appearance-none truncate rounded-xl border border-gray-200 bg-white py-0 pl-3 pr-7 text-[15px] text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-100" :aria-label="t('dashboard.quickStart.step3KeyLabel')" data-testid="quick-start-key-select">
                 <option v-if="!importKeys.length" :value="null">{{ t('dashboard.quickStart.step3NoKey') }}</option>
@@ -123,7 +123,7 @@
               </span>
             </div>
           </div>
-          <p class="mt-3 max-w-md text-[13px] leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ t('dashboard.quickStart.step3Hint', { app: appLabel }) }}</p>
+          <p class="mt-3 max-w-md text-[13px] leading-relaxed text-gray-500 dark:text-dark-400" data-testid="quick-start-step3-hint">{{ importApp === 'antigravity' ? t('dashboard.quickStart.step3AntigravityHint') : t('dashboard.quickStart.step3Hint', { app: appLabel }) }}</p>
           <p v-if="keyListStatus === 'failed'" class="mt-1.5 text-sm text-gray-500">{{ t('keys.failedToLoad') }}</p>
           <p v-else-if="!selectedKey && !isCodingImportConfigured(imageGroupId)" class="mt-1.5 text-sm text-gray-500">{{ t('dashboard.quickStart.step3ConfigurationNeeded') }}</p>
           <p v-if="importApp === 'image' && os === 'mac'" class="mt-1.5 text-sm text-gray-500">{{ t('dashboard.quickStart.step3ImageMac') }}</p>
@@ -175,7 +175,7 @@
       <li class="step" :class="stepClass(4, hasUsage)" data-testid="quick-start-step-4">
         <div class="step-inner">
           <StepHead :index="4" :done="hasUsage" :title="t(importApp === 'image' ? 'dashboard.quickStart.step4Image' : 'dashboard.quickStart.step4')" />
-          <p class="step-text">{{ t(importApp === 'image' ? 'dashboard.quickStart.step4HintImage' : importApp === 'claude' ? 'dashboard.quickStart.step4HintClaude' : 'dashboard.quickStart.step4Hint') }}</p>
+          <p class="step-text">{{ t(step4Hint) }}</p>
           <!-- 示意要发什么：一个迷你对话输入框 -->
           <div class="chat-mock" aria-hidden="true">
             <span class="min-w-0 flex-1 truncate">{{ t(importApp === 'image' ? 'dashboard.quickStart.step4SampleImage' : 'dashboard.quickStart.step4Sample') }}</span>
@@ -314,7 +314,13 @@ onMounted(async () => {
 const selectedKey = computed(() => importKeys.value.find((k) => k.id === selectedKeyId.value) ?? importKeys.value[0] ?? null)
 /** 第 3、4 步的软件名和导入目标跟着选中的密钥变 */
 const importApp = computed(() => importAppForGroup(selectedKey.value?.group, imageGroupId.value) ?? 'codex')
-const appLabel = computed(() => importApp.value === 'image' ? t('keys.importImageApp') : importApp.value === 'claude' ? 'Claude' : 'Codex')
+const appLabel = computed(() => importApp.value === 'image' ? t('keys.importImageApp') : importApp.value === 'claude' ? 'Claude' : importApp.value === 'antigravity' ? 'Antigravity' : 'Codex')
+const step4Hint = computed(() => ({
+  image: 'dashboard.quickStart.step4HintImage',
+  claude: 'dashboard.quickStart.step4HintClaude',
+  antigravity: 'dashboard.quickStart.step4HintAntigravity',
+  codex: 'dashboard.quickStart.step4Hint'
+})[importApp.value])
 
 /** 第一步「去创建」：到密钥页并直接打开创建窗口 */
 const quickCreateRoute = { path: '/keys', query: { create: 'quick' } }
@@ -574,6 +580,17 @@ const StepHead = defineComponent({
     }
     .import-btn-wrap {
       flex: none;
+    }
+  }
+  /* Antigravity 的按钮文案更长，窄卡片继续使用上下排。 */
+  @container step3 (max-width: 349.98px) {
+    .import-row-antigravity {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .import-row-antigravity .import-select {
+      flex: none;
+      min-width: 0;
     }
   }
 }

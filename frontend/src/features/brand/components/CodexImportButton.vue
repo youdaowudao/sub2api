@@ -3,7 +3,7 @@
     type="button"
     class="codex-import-btn"
     :class="stacked ? 'codex-import-btn-stacked' : compact ? 'codex-import-btn-compact' : ''"
-    :title="t('keys.importAssistantHint', { app: appLabel })"
+    :title="app === 'antigravity' ? t('keys.importAntigravityAssistantHint') : t('keys.importAssistantHint', { app: appLabel })"
     :aria-label="buttonLabel"
     :data-app="app"
     data-testid="codex-import"
@@ -34,9 +34,10 @@ const props = withDefaults(defineProps<{ apiKey?: ApiKey; app?: ImportApp; compa
 const emit = defineEmits<{ 'missing-key': [] }>()
 const { t } = useI18n()
 const appStore = useAppStore()
-const appLabel = computed(() => props.app === 'image' ? t('keys.importImageApp') : props.app === 'claude' ? 'Claude' : 'Codex')
+const appLabel = computed(() => props.app === 'image' ? t('keys.importImageApp') : props.app === 'claude' ? 'Claude' : props.app === 'antigravity' ? 'Antigravity' : 'Codex')
 const buttonLabel = computed(() => {
   if (props.app === 'image') return t('keys.importToImage')
+  if (props.app === 'antigravity') return t('keys.importToAntigravity')
   return t(props.app === 'claude' ? 'keys.importToClaude' : 'keys.importToCodex')
 })
 

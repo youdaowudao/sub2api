@@ -540,7 +540,7 @@ describe('user KeysView column settings', () => {
     expect(columnMenuText).not.toContain('Actions')
   })
 
-  it('shows the real destination and launches the right protocol for all four group types', async () => {
+  it('shows the real destination and launches the right protocol for all supported group types', async () => {
     const row = (id: number, platform: string | null, status = 'active', allowImage = false) => ({
       ...createApiKey(),
       id,
@@ -556,7 +556,8 @@ describe('user KeysView column settings', () => {
     })
     const items = [
       row(1, 'anthropic'), row(2, 'openai'), row(3, 'openai', 'active', true),
-      row(4, 'openai', 'active', true), row(5, 'gemini'), row(6, null), row(7, 'openai', 'inactive')
+      row(4, 'openai', 'active', true), row(5, 'gemini'), row(6, null), row(7, 'openai', 'inactive'),
+      row(8, 'antigravity'), row(9, 'composite'), row(10, 'gemini', 'inactive')
     ]
     getPublicSettings.mockResolvedValue({ quick_import_image_group_id: 4 })
     getKeyById.mockImplementation(async (id: number) => items.find((item) => item.id === id))
@@ -564,14 +565,14 @@ describe('user KeysView column settings', () => {
     const wrapper = await mountView()
     const badges = wrapper.findAll('[data-tour="key-group"]').map(button => button.findComponent({ name: 'GroupBadge' }))
     expect(badges.map(badge => badge.exists() ? badge.props('platform') : null))
-      .toEqual(['gemini', 'gemini', 'gemini', 'gemini', 'kimi', null, 'gemini'])
+      .toEqual(['gemini', 'gemini', 'gemini', 'gemini', 'kimi', null, 'gemini', 'gemini', 'gemini', 'kimi'])
     const buttons = wrapper.findAll('[data-testid="codex-import"]')
-    expect(buttons.map((b) => b.attributes('data-app'))).toEqual(['claude', 'codex', 'codex', 'image'])
-    const targets = ['Claude', 'Codex', 'Codex', '生图工具']
+    expect(buttons.map((b) => b.attributes('data-app'))).toEqual(['claude', 'codex', 'codex', 'image', 'antigravity'])
+    const targets = ['Claude', 'Codex', 'Codex', '生图工具', 'Antigravity']
     const location = { href: '' }
     vi.stubGlobal('location', location)
     try {
-      for (const [index, app] of ['claude', 'codex', 'codex', 'image'].entries()) {
+      for (const [index, app] of ['claude', 'codex', 'codex', 'image', 'antigravity'].entries()) {
         const button = buttons[index]
         expect(button.text()).toBe(`一键导入${targets[index]}`)
         await button.trigger('click')
@@ -585,6 +586,13 @@ describe('user KeysView column settings', () => {
       await flushPromises()
       expect(location.href).toBe('')
       expect(showError).toHaveBeenCalled()
+
+      getKeyById.mockResolvedValueOnce({ ...items[4], group: { ...items[4].group, status: 'disabled' } })
+      showError.mockClear()
+      await buttons[4].trigger('click')
+      await flushPromises()
+      expect(location.href).toBe('')
+      expect(showError).toHaveBeenCalledWith('keys.importChanged')
     } finally {
       vi.unstubAllGlobals()
     }

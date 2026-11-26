@@ -106,7 +106,7 @@ describe('quick start panel', () => {
     expect((await panel()).get('[data-testid="quick-start-recharge"]').attributes('data-to')).toBe('/redeem')
   })
 
-  it('imports the newest active OpenAI or Anthropic key and switches between Codex and Claude with the selected key', async () => {
+  it('imports the newest active eligible key and switches between Antigravity, Claude and Codex', async () => {
     list.mockResolvedValue({ items: [
       key(1, '旧', 'openai', '2026-10-01'),
       key(2, '测试', 'openai', '2026-10-30'),
@@ -118,15 +118,27 @@ describe('quick start panel', () => {
     expect(w.get('[data-testid="quick-start-step-1"]').text()).toContain('step1Tip')
     expect(w.get('[data-testid="quick-start-step-1"]').text()).not.toContain('测试')
     const select = w.get('[data-testid="quick-start-key-select"]')
-    expect(select.findAll('option').map((o) => o.text())).toEqual(['claude', '测试', '旧'])
+    expect(select.findAll('option').map((o) => o.text())).toEqual(['gemini', 'claude', '测试', '旧'])
     // 页面上只有示意用的 sk-••••，不出现真实密钥
     expect(w.text()).not.toMatch(/sk-[0-9a-z]/i)
 
     const step3 = () => w.get('[data-testid="quick-start-step-3"]').text()
     const location = { href: '' }
     vi.stubGlobal('location', location)
-    // 默认是最新的 Anthropic 密钥：同一个按钮变成导入 Claude
+    // 默认是最新的 Gemini 密钥：同一个按钮变成导入 Antigravity
+    expect(w.get('[data-testid="quick-start-import"]').attributes('data-app')).toBe('antigravity')
+    expect(w.get('.import-row').classes()).toContain('import-row-antigravity')
+    expect(step3()).toContain('{"app":"Antigravity"}')
+    expect(w.get('[data-testid="quick-start-step-4"]').text()).toContain('step4HintAntigravity')
+    expect(w.get('[data-testid="quick-start-step3-hint"]').text()).toContain('step3AntigravityHint')
+    await w.get('[data-testid="quick-start-import"]').trigger('click')
+    await flushPromises()
+    expect(location.href).toBe('usegoodai://import?v=2&app=antigravity&key=sk-5&name=gemini')
+    expect(create).not.toHaveBeenCalled()
+
+    await select.setValue(3)
     expect(w.get('[data-testid="quick-start-import"]').attributes('data-app')).toBe('claude')
+    expect(w.get('.import-row').classes()).not.toContain('import-row-antigravity')
     expect(step3()).toContain('{"app":"Claude"}')
     expect(w.get('[data-testid="quick-start-step-4"]').text()).toContain('step4HintClaude')
     await w.get('[data-testid="quick-start-import"]').trigger('click')
@@ -149,13 +161,14 @@ describe('quick start panel', () => {
     vi.unstubAllGlobals()
   })
 
-  it('switches label and actual link for image, both coding types and Claude', async () => {
+  it('switches label and actual link for image, both OpenAI types, Claude and Antigravity', async () => {
     getPublicSettings.mockResolvedValue({ quick_import_image_group_id: 10 })
     const groups = [
       { id: 10, platform: 'openai', allow_image_generation: true, app: 'image', label: '一键导入生图工具' },
       { id: 11, platform: 'openai', allow_image_generation: false, app: 'codex', label: '一键导入 Codex' },
       { id: 12, platform: 'openai', allow_image_generation: true, app: 'codex', label: '一键导入 Codex' },
       { id: 13, platform: 'anthropic', allow_image_generation: false, app: 'claude', label: '一键导入 Claude' },
+      { id: 14, platform: 'gemini', allow_image_generation: false, app: 'antigravity', label: '一键导入 Antigravity' },
     ]
     list.mockResolvedValue({ items: groups.map(group => ({
       ...key(group.id, `k${group.id}`, group.platform, '2026-11-18'),
@@ -180,6 +193,41 @@ describe('quick start panel', () => {
       vi.unstubAllGlobals()
     }
   })
+
+  it.each(['inactive key', 'disabled group', 'changed platform', 'changed group', 'rotated key', 'failed check'])(
+    'does not launch Antigravity or create another key after %s',
+    async (failure) => {
+      const selected = { ...key(5, 'Gemini', 'gemini', '2026-11-01'), group_id: 5, group: { id: 5, platform: 'gemini', status: 'active' } }
+      list.mockResolvedValue({ items: [selected] })
+      const wrapper = await panel({ totalApiKeys: 1 })
+      expect(wrapper.get('[data-testid="quick-start-import"]').attributes('data-app')).toBe('antigravity')
+      if (failure === 'failed check') {
+        getKeyById.mockRejectedValueOnce(new Error('check failed'))
+      } else {
+        const latest = { ...selected, group: { ...selected.group } }
+        if (failure === 'inactive key') latest.status = 'inactive'
+        if (failure === 'disabled group') latest.group.status = 'disabled'
+        if (failure === 'changed platform') latest.group.platform = 'openai'
+        if (failure === 'changed group') latest.group_id = latest.group.id = 6
+        if (failure === 'rotated key') latest.key = 'sk-rotated'
+        getKeyById.mockResolvedValueOnce(latest)
+      }
+      const location = { href: '' }
+      vi.stubGlobal('location', location)
+      try {
+        await wrapper.get('[data-testid="quick-start-import"]').trigger('click')
+        await flushPromises()
+        expect(getKeyById).toHaveBeenCalledTimes(1)
+        expect(getKeyById).toHaveBeenCalledWith(5)
+        expect(getPublicSettings).toHaveBeenCalledTimes(2)
+        expect(location.href).toBe('')
+        expect(showError).toHaveBeenCalledWith(failure === 'failed check' ? zh.keys.importCheckFailed : zh.keys.importChanged)
+        expect(create).not.toHaveBeenCalled()
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    }
+  )
 
   it('does not create a key when refreshed settings restore an existing import choice', async () => {
     const previousGroup = { id: 3, platform: 'anthropic', status: 'active' }
@@ -220,7 +268,7 @@ describe('quick start panel', () => {
     expect(one.get('[data-testid="quick-start-key-select"]').findAll('option').map((o) => o.text())).toEqual(['测试'])
     expect(one.find('[data-testid="quick-start-import"]').exists()).toBe(true)
 
-    list.mockResolvedValue({ items: [key(3, 'gemini', 'gemini', '2026-10-31')] })
+    list.mockResolvedValue({ items: [key(3, 'unsupported', 'antigravity', '2026-10-31')] })
     const none = await panel({ totalApiKeys: 1 })
     expect(none.find('[data-testid="quick-start-import"]').exists()).toBe(true)
     expect(none.get('[data-testid="quick-start-step-3"]').text()).not.toContain('step3Need')
@@ -451,6 +499,7 @@ describe('PowerShell helper instructions', () => {
 
 describe('one-click import without a key', () => {
   const groups = [
+    { id: 2, name: 'Gemini', platform: 'gemini', sort_order: 0 },
     { id: 1, name: 'Claude', platform: 'anthropic', sort_order: 1 },
     { id: 7, name: 'GPT 备用', platform: 'openai', sort_order: 5 },
     { id: 3, name: 'GPT 满血', platform: 'openai', sort_order: 2 }
@@ -507,7 +556,7 @@ describe('one-click import without a key', () => {
   })
 
   it('names the new key after existing test keys and falls back to the keys page without a GPT group', async () => {
-    list.mockResolvedValue({ items: [key(5, 'gemini', 'gemini', '2026-10-31'), key(6, 'keys.namePlaceholder', 'gemini', '2026-10-30')] })
+    list.mockResolvedValue({ items: [key(5, 'inactive Gemini', 'gemini', '2026-10-31', 'inactive'), key(6, 'keys.namePlaceholder', 'antigravity', '2026-10-30')] })
     getAvailable.mockResolvedValue(groups)
     create.mockResolvedValue({ id: 100, name: 'x', key: 'sk-x', status: 'active', created_at: '2026-11-03', group: { platform: 'openai' } })
     const location = { href: '' }
@@ -518,7 +567,7 @@ describe('one-click import without a key', () => {
       await flushPromises()
       expect(create).toHaveBeenCalledWith('keys.namePlaceholder1', 3)
 
-      getAvailable.mockResolvedValue([groups[0]])
+      getAvailable.mockResolvedValue(groups.filter(group => group.platform !== 'openai'))
       create.mockClear()
       const none = await panel()
       await none.get('[data-testid="quick-start-import"]').trigger('click')
@@ -559,7 +608,7 @@ describe('buildQuickConnectLink', () => {
   it('preserves platform visibility and skips OpenAI when no rollout choice is saved', () => {
     expect(importAppForGroup({ platform: 'anthropic' })).toBe('claude')
     expect(importAppForGroup({ platform: 'openai' }, -1)).toBe('codex')
-    for (const group of [{ platform: 'openai' }, { platform: 'gemini' }, { platform: 'antigravity' }, { platform: 'composite' }, {}, null, undefined]) {
+    for (const group of [{ platform: 'openai' }, { platform: 'antigravity' }, { platform: 'composite' }, {}, null, undefined]) {
       expect(importAppForGroup(group)).toBeNull()
     }
     expect(canQuickImport({ platform: 'openai' }, -1)).toBe(true)
@@ -568,13 +617,17 @@ describe('buildQuickConnectLink', () => {
     expect(canQuickImport({ id: 4, platform: 'openai', status: 'disabled' }, 4)).toBe(false)
     expect(canQuickImport({ id: 4, platform: 'anthropic', status: 'active' }, 4)).toBe(false)
     expect(canQuickImport({ platform: 'anthropic' })).toBe(true)
-    expect(canQuickImport({ platform: 'gemini' })).toBe(false)
+    expect(importAppForGroup({ platform: 'gemini' })).toBe('antigravity')
+    expect(canQuickImport({ platform: 'gemini' })).toBe(true)
+    expect(importAppForGroup({ id: 4, platform: 'gemini', status: 'active' }, 4)).toBe('antigravity')
     expect(canQuickImport(null)).toBe(false)
   })
 
   it('matches the helper link format', () => {
     expect(buildQuickConnectLink('sk-a+b', '测试')).toBe('usegoodai://import?v=2&app=codex&key=sk-a%2Bb&name=%E6%B5%8B%E8%AF%95')
     expect(buildQuickConnectLink('sk-x')).toBe('usegoodai://import?v=2&app=codex&key=sk-x')
+    expect(buildQuickConnectLink('sk-a+b&c=1', '测试 & +', 'antigravity')).toBe('usegoodai://import?v=2&app=antigravity&key=sk-a%2Bb%26c%3D1&name=%E6%B5%8B%E8%AF%95+%26+%2B')
+    expect(buildQuickConnectLink('sk-x', undefined, 'image')).toBe('usegoodai://import?v=2&app=image&key=sk-x')
   })
 
   it('RMB quick start balance excludes dollars', async () => {
