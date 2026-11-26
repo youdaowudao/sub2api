@@ -239,10 +239,12 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 			total_cost as today_cost,
 			actual_cost as today_actual_cost,
 			account_cost as today_account_cost,
-			active_users as active_users
+			active_users as active_users,
+			total_duration_ms
 		FROM usage_dashboard_daily
 		WHERE bucket_date = $1::date
 	`
+	var todayDurationMs int64
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -257,12 +259,17 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 		&stats.TodayActualCost,
 		&stats.TodayAccountCost,
 		&stats.ActiveUsers,
+		&todayDurationMs,
 	); err != nil {
 		if err != sql.ErrNoRows {
 			return err
 		}
 	}
 	stats.TodayTokens = stats.TodayInputTokens + stats.TodayOutputTokens + stats.TodayCacheCreationTokens + stats.TodayCacheReadTokens
+	if stats.TodayRequests > 0 {
+		average := float64(todayDurationMs) / float64(stats.TodayRequests)
+		stats.TodayAverageDurationMs = &average
+	}
 
 	hourlyActiveQuery := `
 		SELECT active_users
@@ -314,10 +321,12 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 			COALESCE(SUM(cache_read_tokens) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cache_read_tokens,
 			COALESCE(SUM(total_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_cost,
 			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_actual_cost,
-			COALESCE(SUM(account_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_account_cost
+			COALESCE(SUM(account_cost) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_account_cost,
+			COALESCE(SUM(duration_ms) FILTER (WHERE created_at >= $3::timestamptz AND created_at < $4::timestamptz), 0) AS today_duration_ms
 		FROM scoped
 	`
 	var totalDurationMs int64
+	var todayDurationMs int64
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
@@ -340,6 +349,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 		&stats.TodayCost,
 		&stats.TodayActualCost,
 		&stats.TodayAccountCost,
+		&todayDurationMs,
 	); err != nil {
 		return err
 	}
@@ -349,6 +359,10 @@ func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Co
 	}
 
 	stats.TodayTokens = stats.TodayInputTokens + stats.TodayOutputTokens + stats.TodayCacheCreationTokens + stats.TodayCacheReadTokens
+	if stats.TodayRequests > 0 {
+		average := float64(todayDurationMs) / float64(stats.TodayRequests)
+		stats.TodayAverageDurationMs = &average
+	}
 
 	hourStart := now.UTC().Truncate(time.Hour)
 	hourEnd := hourStart.Add(time.Hour)

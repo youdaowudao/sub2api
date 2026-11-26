@@ -563,7 +563,7 @@ func TestUsageLogRepositoryUsageAggregatesFilterNativeCompactionV2(t *testing.T)
 		repo := &usageLogRepository{sql: db}
 		mock.ExpectQuery("(?s)FROM usage_logs ul.*AND ul.native_compaction_v2 = \\$3").
 			WithArgs(start, end, true).
-			WillReturnRows(sqlmock.NewRows([]string{"group_id", "group_name", "requests", "total_tokens", "cost", "actual_cost", "account_cost"}))
+			WillReturnRows(sqlmock.NewRows([]string{"group_id", "group_name", "requests", "total_tokens", "cost", "actual_cost", "account_cost", "input_tokens", "cache_creation_tokens", "cache_read_tokens"}))
 
 		_, err := repo.GetGroupStatsWithUsageFilters(context.Background(), start, end, filters)
 		require.NoError(t, err)
@@ -759,9 +759,10 @@ func TestUsageLogRepositoryGetGroupStatsAccountCostColumn(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"group_id", "group_name", "requests", "total_tokens",
 			"cost", "actual_cost", "account_cost",
+			"input_tokens", "cache_creation_tokens", "cache_read_tokens",
 		}).
-			AddRow(int64(1), "azure-cc", int64(100), int64(5000), 10.0, 8.5, 7.2).
-			AddRow(int64(2), "max", int64(50), int64(2000), 5.0, 4.0, 3.5))
+			AddRow(int64(1), "azure-cc", int64(100), int64(5000), 10.0, 8.5, 7.2, int64(1000), int64(500), int64(1500)).
+			AddRow(int64(2), "max", int64(50), int64(2000), 5.0, 4.0, 3.5, int64(0), int64(0), int64(0)))
 
 	results, err := repo.GetGroupStatsWithFilters(context.Background(), start, end, 0, 0, 0, 0, nil, nil, nil)
 	require.NoError(t, err)
@@ -771,8 +772,14 @@ func TestUsageLogRepositoryGetGroupStatsAccountCostColumn(t *testing.T) {
 	require.Equal(t, 10.0, results[0].Cost)
 	require.Equal(t, 8.5, results[0].ActualCost)
 	require.Equal(t, 7.2, results[0].AccountCost)
+	require.Equal(t, int64(1000), results[0].InputTokens)
+	require.Equal(t, int64(500), results[0].CacheCreationTokens)
+	require.Equal(t, int64(1500), results[0].CacheReadTokens)
+	require.NotNil(t, results[0].CacheHitRate)
+	require.Equal(t, 50.0, *results[0].CacheHitRate)
 	require.Equal(t, int64(2), results[1].GroupID)
 	require.Equal(t, 3.5, results[1].AccountCost)
+	require.Nil(t, results[1].CacheHitRate)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -789,12 +796,15 @@ func TestUsageLogRepositoryGetGroupStatsWithUsageFiltersAppliesRequestedModelFil
 		WillReturnRows(sqlmock.NewRows([]string{
 			"group_id", "group_name", "requests", "total_tokens",
 			"cost", "actual_cost", "account_cost",
-		}).AddRow(int64(1), "default", int64(1), int64(30), 0.1, 0.08, 0.07))
+			"input_tokens", "cache_creation_tokens", "cache_read_tokens",
+		}).AddRow(int64(1), "default", int64(1), int64(30), 0.1, 0.08, 0.07, int64(10), int64(0), int64(0)))
 
 	results, err := repo.GetGroupStatsWithUsageFilters(context.Background(), start, end, filters)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	require.Equal(t, int64(1), results[0].GroupID)
+	require.NotNil(t, results[0].CacheHitRate)
+	require.Zero(t, *results[0].CacheHitRate)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -826,10 +836,10 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
 
-	rows := sqlmock.NewRows([]string{"user_id", "email", "username", "actual_cost", "requests", "tokens", "total_actual_cost", "total_requests", "total_tokens"}).
-		AddRow(int64(2), "beta@example.com", "beta", 12.5, int64(9), int64(900), 40.0, int64(30), int64(2600)).
-		AddRow(int64(1), "alpha@example.com", "alpha", 12.5, int64(8), int64(800), 40.0, int64(30), int64(2600)).
-		AddRow(int64(3), "gamma@example.com", "", 4.25, int64(5), int64(300), 40.0, int64(30), int64(2600))
+	rows := sqlmock.NewRows([]string{"user_id", "email", "username", "actual_cost", "requests", "tokens", "total_actual_cost", "total_requests", "total_tokens", "total_users"}).
+		AddRow(int64(2), "beta@example.com", "beta", 12.5, int64(9), int64(900), 40.0, int64(30), int64(2600), int64(3)).
+		AddRow(int64(1), "alpha@example.com", "alpha", 12.5, int64(8), int64(800), 40.0, int64(30), int64(2600), int64(3)).
+		AddRow(int64(3), "gamma@example.com", "", 4.25, int64(5), int64(300), 40.0, int64(30), int64(2600), int64(3))
 
 	mock.ExpectQuery("WITH user_spend AS \\(").
 		WithArgs(start, end, 12).
@@ -846,6 +856,7 @@ func TestUsageLogRepositoryGetUserSpendingRanking(t *testing.T) {
 		TotalActualCost: 40.0,
 		TotalRequests:   30,
 		TotalTokens:     2600,
+		TotalUsers:      3,
 	}, got)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

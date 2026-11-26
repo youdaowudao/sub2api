@@ -144,6 +144,74 @@ func (c *dashboardCacheStub) readLastEntry(t *testing.T) dashboardStatsCacheEntr
 	return entry
 }
 
+type minuteUsageRepoStub struct {
+	UsageLogRepository
+	getMinute func(context.Context, time.Time, time.Time, usagestats.UsageLogFilters) ([]usagestats.TrendDataPoint, error)
+}
+
+func (s *minuteUsageRepoStub) GetMinuteUsageTrendWithUsageFilters(ctx context.Context, start, end time.Time, filters usagestats.UsageLogFilters) ([]usagestats.TrendDataPoint, error) {
+	return s.getMinute(ctx, start, end, filters)
+}
+
+func TestDashboardService_GetMinuteUsageTrendWithUsageFilters(t *testing.T) {
+	ctx := context.Background()
+	start := time.Date(2026, 11, 27, 0, 37, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	filters := usagestats.UsageLogFilters{GroupID: 9, Model: "model-a"}
+	expected := []usagestats.TrendDataPoint{{Date: "2026-11-27T00:37:00Z", Requests: 1}}
+	t.Run("supported repository", func(t *testing.T) {
+		calls := 0
+		repo := &minuteUsageRepoStub{getMinute: func(gotCtx context.Context, gotStart, gotEnd time.Time, gotFilters usagestats.UsageLogFilters) ([]usagestats.TrendDataPoint, error) {
+			calls++
+			require.Equal(t, ctx, gotCtx)
+			require.Equal(t, start, gotStart)
+			require.Equal(t, end, gotEnd)
+			require.Equal(t, filters, gotFilters)
+			return expected, nil
+		}}
+		svc := NewDashboardService(repo, nil, nil, nil)
+		got, err := svc.GetMinuteUsageTrendWithUsageFilters(ctx, start, end, filters)
+		require.NoError(t, err)
+		require.Equal(t, expected, got)
+		require.Equal(t, 1, calls)
+	})
+	t.Run("unsupported repository", func(t *testing.T) {
+		svc := NewDashboardService(&usageRepoStub{}, nil, nil, nil)
+		got, err := svc.GetMinuteUsageTrendWithUsageFilters(ctx, start, end, filters)
+		require.Error(t, err)
+		require.Nil(t, got)
+	})
+	t.Run("repository error", func(t *testing.T) {
+		expectedErr := errors.New("read failed")
+		repo := &minuteUsageRepoStub{getMinute: func(context.Context, time.Time, time.Time, usagestats.UsageLogFilters) ([]usagestats.TrendDataPoint, error) {
+			return nil, expectedErr
+		}}
+		svc := NewDashboardService(repo, nil, nil, nil)
+		got, err := svc.GetMinuteUsageTrendWithUsageFilters(ctx, start, end, filters)
+		require.ErrorIs(t, err, expectedErr)
+		require.Nil(t, got)
+	})
+}
+
+func TestDashboardService_OldCacheWithoutTodayAverageDuration(t *testing.T) {
+	cache := &dashboardCacheStub{get: func(context.Context) (string, error) {
+		payload, err := json.Marshal(map[string]any{
+			"stats":      map[string]any{"today_requests": 3, "average_duration_ms": 120.0},
+			"updated_at": time.Now().Unix(),
+		})
+		return string(payload), err
+	}}
+	repo := &usageRepoStub{}
+	svc := NewDashboardService(repo, nil, cache, nil)
+	got, err := svc.GetDashboardStats(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, int64(3), got.TodayRequests)
+	require.Equal(t, 120.0, got.AverageDurationMs)
+	require.Nil(t, got.TodayAverageDurationMs)
+	require.Zero(t, atomic.LoadInt32(&repo.calls))
+	require.Zero(t, atomic.LoadInt32(&repo.rangeCalls))
+}
+
 func TestDashboardService_CacheHitFresh(t *testing.T) {
 	stats := &usagestats.DashboardStats{
 		TotalUsers:     10,

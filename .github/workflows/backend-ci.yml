@@ -24,9 +24,13 @@ jobs:
           go version | grep -q 'go1.27.4'
       - name: Unit tests
         working-directory: backend
+        env:
+          GOFLAGS: -v
         run: make test-unit
       - name: Integration tests
         working-directory: backend
+        env:
+          GOFLAGS: -v
         run: make test-integration
 
   frontend:
