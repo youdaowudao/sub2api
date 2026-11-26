@@ -77,7 +77,7 @@ func checkinStatDestinations(s *service.CheckinStats, today *sql.NullInt64) []an
 	return []any{&s.AdminNet, &s.AdminHasCredit, &s.TotalDays, &s.TotalCents, today, &s.LaterExists, &s.MonthCents, &s.PrevDate, &s.LastEmailDate, &s.SinceEmail, &s.RunLen}
 }
 func scanCheckinFirst(rows *sql.Rows, dest ...any) error {
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if e := rows.Err(); e != nil {
 			return e
@@ -240,7 +240,7 @@ func (r *checkinRepository) Overview(ctx context.Context, date string, days int)
 
 // A lateral page always returns the total row, including pages beyond the end.
 func scanCheckinPage[T any](rows *sql.Rows) ([]T, int64, error) {
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]T, 0)
 	var total int64
 	for rows.Next() {
