@@ -26,6 +26,7 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { isRegistrationIPBlocked } from '@/utils/authError'
 import { AuthLayout } from '@/components/layout'
 import PendingOAuthCreateAccountForm, {
   type PendingOAuthCreateAccountPayload
@@ -60,6 +61,7 @@ function sanitizeRedirectPath(path: string | null | undefined): string {
 }
 
 function getRequestErrorMessage(error: unknown, fallback: string): string {
+  if (isRegistrationIPBlocked(error)) return t('auth.errors.REGISTRATION_IP_BLOCKED')
   const err = error as { message?: string; response?: { data?: { detail?: string; message?: string } } }
   return err.response?.data?.detail || err.response?.data?.message || err.message || fallback
 }

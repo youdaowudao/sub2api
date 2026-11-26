@@ -98,6 +98,16 @@ describe('OAuthCallbackView', () => {
     window.sessionStorage.clear()
   })
 
+  it('localizes the registration IP refusal from the callback fragment', () => {
+    routeState.path = '/auth/oauth/callback'
+    locationState.current.hash = '#error=REGISTRATION_IP_BLOCKED&error_message=raw'
+    const wrapper = mount(OAuthCallbackView)
+    expect(showErrorMock).toHaveBeenCalledWith('auth.errors.REGISTRATION_IP_BLOCKED')
+    expect(setTokenMock).not.toHaveBeenCalled()
+    expect(exchangePendingOAuthCompletionMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('renders localized callback copy actions', () => {
     routeState.query = {
       code: 'oauth-code',

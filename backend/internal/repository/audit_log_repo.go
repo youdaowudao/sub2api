@@ -122,6 +122,15 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
 	return err
 }
 
+// Only parse ordinary registration request bodies emitted by RedactAuditBody.
+// CASE prevents casting unrelated text, omitted/truncated bodies, and JSON NUL escapes.
+const auditRegistrationEmail = `(CASE WHEN l.action = 'auth.register'
+ AND l.method = 'POST' AND l.path = '/api/v1/auth/register'
+ AND left(l.request_body, 1) = '{' AND right(l.request_body, 1) = '}'
+ AND strpos(l.request_body, chr(92)||'u0000') = 0
+ THEN CASE WHEN jsonb_typeof(l.request_body::jsonb -> 'email') = 'string'
+ THEN l.request_body::jsonb ->> 'email' END END)`
+
 func buildAuditLogsWhere(filter *service.AuditLogFilter) (string, []any) {
 	clauses := make([]string, 0, 10)
 	args := make([]any, 0, 10)
@@ -141,7 +150,8 @@ func buildAuditLogsWhere(filter *service.AuditLogFilter) (string, []any) {
 	}
 	if v := strings.TrimSpace(filter.ActorEmail); v != "" {
 		args = append(args, "%"+escapeLikePattern(v)+"%")
-		clauses = append(clauses, "l.actor_email ILIKE $"+itoa(len(args)))
+		idx := itoa(len(args))
+		clauses = append(clauses, "(l.actor_email ILIKE $"+idx+" OR "+auditRegistrationEmail+" ILIKE $"+idx+")")
 	}
 	if v := strings.TrimSpace(filter.AuthMethod); v != "" {
 		args = append(args, v)
@@ -169,7 +179,11 @@ func buildAuditLogsWhere(filter *service.AuditLogFilter) (string, []any) {
 	if v := strings.TrimSpace(filter.Query); v != "" {
 		args = append(args, "%"+escapeLikePattern(v)+"%")
 		idx := itoa(len(args))
-		clauses = append(clauses, "(l.path ILIKE $"+idx+" OR l.action ILIKE $"+idx+" OR l.actor_email ILIKE $"+idx+")")
+		clause := "(l.path ILIKE $" + idx + " OR l.action ILIKE $" + idx + " OR l.actor_email ILIKE $" + idx
+		if strings.Contains(v, "@") {
+			clause += " OR " + auditRegistrationEmail + " ILIKE $" + idx
+		}
+		clauses = append(clauses, clause+")")
 	}
 
 	return "WHERE " + strings.Join(clauses, " AND "), args

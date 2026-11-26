@@ -148,6 +148,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { isRegistrationIPBlocked, isRegistrationIPBlockedRedirect } from '@/utils/authError'
 import { useRoute, useRouter } from 'vue-router'
 import { useClipboard } from '@/composables/useClipboard'
 import { useAppStore, useAuthStore } from '@/stores'
@@ -195,9 +196,12 @@ type EmailOAuthPendingCompletion = Partial<OAuthTokenResponse> & {
 
 const code = computed(() => (route.query.code as string) || '')
 const state = computed(() => (route.query.state as string) || '')
-const error = computed(
-  () => (route.query.error as string) || (route.query.error_description as string) || ''
-)
+const error = computed(() => {
+  if ([route.query.error, route.query.error_message, route.query.error_description].includes('REGISTRATION_IP_BLOCKED')) {
+    return t('auth.errors.REGISTRATION_IP_BLOCKED')
+  }
+  return (route.query.error as string) || (route.query.error_description as string) || ''
+})
 
 const fullUrl = computed(() => {
   if (typeof window === 'undefined') return ''
@@ -313,7 +317,7 @@ async function resumePendingEmailOAuth() {
     appStore.showError(completion.error || t('auth.loginFailed'))
   } catch (e: unknown) {
     const err = e as { message?: string; response?: { data?: { message?: string } } }
-    const message = err.response?.data?.message || err.message || t('auth.loginFailed')
+    const message = isRegistrationIPBlocked(e) ? t('auth.errors.REGISTRATION_IP_BLOCKED') : (err.response?.data?.message || err.message || t('auth.loginFailed'))
     appStore.showError(message)
     invalidCallback.value = true
   } finally {
@@ -356,8 +360,9 @@ async function handleSubmitRegistration() {
     await finalizeTokenResponse(data, redirectTo.value)
   } catch (e: unknown) {
     const err = e as { message?: string; response?: { data?: { message?: string } } }
-    registrationError.value =
-      err.response?.data?.message || err.message || t('auth.oidc.completeRegistrationFailed')
+    registrationError.value = isRegistrationIPBlocked(e)
+      ? t('auth.errors.REGISTRATION_IP_BLOCKED')
+      : (err.response?.data?.message || err.message || t('auth.oidc.completeRegistrationFailed'))
   } finally {
     isSubmitting.value = false
   }
@@ -371,7 +376,7 @@ onMounted(async () => {
     params.get('error_description') || params.get('error_message') || ''
 
   if (fragmentError) {
-    appStore.showError(fragmentErrorDescription || fragmentError)
+    appStore.showError(isRegistrationIPBlockedRedirect(params) ? t('auth.errors.REGISTRATION_IP_BLOCKED') : (fragmentErrorDescription || fragmentError))
     return
   }
   if (!tokenResponse) {

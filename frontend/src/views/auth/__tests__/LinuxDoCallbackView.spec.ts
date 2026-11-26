@@ -96,6 +96,18 @@ describe('LinuxDoCallbackView', () => {
     sessionStorage.clear()
   })
 
+  it('shows the registration IP refusal and does not continue to pending or token login', async () => {
+    window.location.hash = '#error=session_error&error_message=REGISTRATION_IP_BLOCKED&error_description=raw'
+    const wrapper = mount(LinuxDoCallbackView, {
+      global: { stubs: { AuthLayout: { template: '<div><slot /></div>' }, Icon: true, RouterLink: true, transition: false } }
+    })
+    await flushPromises()
+    expect(showError).toHaveBeenCalledWith('auth.errors.REGISTRATION_IP_BLOCKED')
+    expect(exchangePendingOAuthCompletion).not.toHaveBeenCalled()
+    expect(setToken).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('accepts the legacy fragment token success callback without pending-session exchange', async () => {
     window.location.hash =
       '#access_token=legacy-access-token&refresh_token=legacy-refresh-token&expires_in=3600&token_type=Bearer&redirect=%2Flegacy-dashboard'

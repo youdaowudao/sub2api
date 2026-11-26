@@ -198,6 +198,20 @@ export default {
         emailDomainQuota: '非白名单域名限量注册',
         emailDomainQuotaHint:
           '开启后，白名单非空时，其他可注册主域名各限注册一个账户；关闭时非白名单域名直接拒绝注册。白名单为空时本开关无效果',
+        ipBlacklist: {
+          title: '注册 IP 黑名单',
+          hint: '名单中的 IP 不能注册新账号；已有账号仍可登录和使用。删除 IP 并保存后恢复注册资格。同一 IP 下的其他新用户也会被限制注册。名单单独保存，不影响其他设置。',
+          edit: '编辑名单',
+          editorTitle: '编辑注册 IP 黑名单',
+          label: '每行一个 IPv4 或 IPv6 地址',
+          save: '保存名单',
+          reload: '重新加载名单',
+          loadFailed: '名单读取失败，请重试。',
+          invalidStored: '注册 IP 黑名单配置异常，暂未生效。请重新填写有效 IP 或清空后保存。',
+          invalidInput: '名单格式无效，请输入有效的 IPv4 或 IPv6 单地址。',
+          unknownSave: '保存结果未确认，请重新加载名单核对后再试。',
+          saved: '注册 IP 黑名单已保存。',
+        },
         emailBlacklist: {
           title: '邮箱黑名单（精确匹配）',
           hint: '禁止名单中的邮箱注册，或绑定为账号邮箱。按收件箱匹配：Gmail 地址里的点号、googlemail.com 域名，以及各邮箱的 + 后缀都视为同一邮箱。已注册的账号不受影响，可用「检查已注册用户」找出后禁用。名单在弹窗里单独保存，不受页面底部保存按钮影响。',

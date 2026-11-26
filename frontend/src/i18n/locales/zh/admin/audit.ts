@@ -8,8 +8,9 @@ export default {
     filters: {
       all: '全部',
       q: '关键字',
-      qPlaceholder: '路径 / 动作 / 操作者邮箱',
-      actorEmail: '操作者邮箱',
+      qPlaceholder: '路径 / 动作 / 操作者或注册邮箱',
+      actorEmail: '邮箱',
+      actorEmailPlaceholder: '搜索操作者邮箱或注册邮箱',
       action: '动作',
       clientIp: '客户端 IP',
       method: '请求方法',

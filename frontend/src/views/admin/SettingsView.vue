@@ -1519,6 +1519,7 @@
 
               <!-- Exact Email Blacklist -->
               <RegistrationEmailBlacklistEditor />
+              <RegistrationIPBlacklistEditor />
 
               <!-- Promo Code -->
               <div
@@ -9097,6 +9098,7 @@ import {
   type RechargeBonusMode,
   type RechargeBonusTierDraft,
 } from "@/utils/rechargeBonus";
+import RegistrationIPBlacklistEditor from "@/components/admin/settings/RegistrationIPBlacklistEditor.vue";
 import RegistrationEmailBlacklistEditor from "@/components/admin/settings/RegistrationEmailBlacklistEditor.vue";
 import OpenAIFastPolicyUserSelector from "@/views/admin/settings/OpenAIFastPolicyUserSelector.vue";
 import UserAccountBlockSettings from "@/views/admin/settings/UserAccountBlockSettings.vue";
