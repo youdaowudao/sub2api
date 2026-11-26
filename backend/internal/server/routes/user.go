@@ -29,6 +29,9 @@ func RegisterUserRoutes(
 		user := authenticated.Group("/user")
 		{
 			user.GET("/profile", h.User.GetProfile)
+			if h.Checkin != nil {
+				registerCheckinUserRoutes(user, h.Checkin)
+			}
 			if h.MCPOAuth != nil {
 				user.GET("/mcp/config", h.MCPOAuth.ConnectionConfig)
 				user.GET("/mcp/grants", h.MCPOAuth.ListGrants)
@@ -164,4 +167,12 @@ func RegisterUserRoutes(
 			monitorV2.GET("/users", h.ChannelMonitorV2.Users)
 		}
 	}
+}
+
+func registerCheckinUserRoutes(user *gin.RouterGroup, h *handler.CheckinHandler) {
+	checkin := user.Group("/checkin")
+	checkin.GET("", h.GetState)
+	checkin.GET("/records", h.ListMonth)
+	checkin.POST("", h.Submit)
+	checkin.POST("/email-code", h.SendEmailCode)
 }

@@ -7,6 +7,7 @@ import Recent from '@/components/user/dashboard/UserDashboardRecentUsage.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 const { trend, models, recent, stats } = vi.hoisted(() => ({ trend: vi.fn(), models: vi.fn(), recent: vi.fn(), stats: vi.fn() }))
 vi.mock('@/api/usage', () => ({ usageAPI: { getDashboardStats: stats, getDashboardTrend: trend, getDashboardModels: models, getByDateRange: recent } }))
+vi.mock('@/api/checkin', () => ({ checkinAPI: { get: vi.fn().mockResolvedValue({enabled:false}) } }))
 vi.mock('@/api/user', () => ({ getMyPlatformQuotas: vi.fn().mockResolvedValue({ platform_quotas: [] }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: {}, isSimpleMode: false, refreshUser: vi.fn() }) }))
 vi.mock('vue-i18n', async () => ({ ...await vi.importActual<typeof import('vue-i18n')>('vue-i18n'), useI18n: () => ({ t: (k: string) => k, locale: ref('en') }) }))

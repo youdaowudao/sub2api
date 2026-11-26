@@ -132,6 +132,7 @@
     </div>
   </div>
 
+  <Teleport defer to="#dashboard-checkin-platform" :disabled="!movePlatform">
   <!-- Row 3: Per-platform breakdown -->
   <div v-if="!isSimple && platformCards.length > 0" class="card p-4">
     <div class="mb-3 flex items-center justify-between">
@@ -222,6 +223,7 @@
       </div>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -242,6 +244,7 @@ interface FusedPlatformCard {
 }
 
 const props = defineProps<{
+  movePlatform?: boolean
   stats: UserStatsType
   balance: number
   isSimple: boolean

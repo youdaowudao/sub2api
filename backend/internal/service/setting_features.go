@@ -492,25 +492,31 @@ type CaptchaProviderConfig struct {
 	Aliyun             AliyunCaptchaConfig
 }
 
+var captchaProviderConfigKeys = []string{
+	SettingKeyTurnstileEnabled,
+	SettingKeyTurnstileSecretKey,
+	SettingKeyTencentCaptchaEnabled,
+	SettingKeyTencentCaptchaAppID,
+	SettingKeyTencentCaptchaAppSecretKey,
+	SettingKeyTencentCaptchaCloudSecretID,
+	SettingKeyTencentCaptchaCloudSecretKey,
+	SettingKeyTencentCaptchaRegion,
+	SettingKeyAliyunCaptchaEnabled,
+	SettingKeyAliyunCaptchaAccessKeyID,
+	SettingKeyAliyunCaptchaAccessKeySecret,
+	SettingKeyAliyunCaptchaSceneID,
+	SettingKeyAliyunCaptchaRegion,
+}
+
 func (s *SettingService) GetCaptchaProviderConfig(ctx context.Context) (CaptchaProviderConfig, error) {
-	values, err := s.settingRepo.GetMultiple(ctx, []string{
-		SettingKeyTurnstileEnabled,
-		SettingKeyTurnstileSecretKey,
-		SettingKeyTencentCaptchaEnabled,
-		SettingKeyTencentCaptchaAppID,
-		SettingKeyTencentCaptchaAppSecretKey,
-		SettingKeyTencentCaptchaCloudSecretID,
-		SettingKeyTencentCaptchaCloudSecretKey,
-		SettingKeyTencentCaptchaRegion,
-		SettingKeyAliyunCaptchaEnabled,
-		SettingKeyAliyunCaptchaAccessKeyID,
-		SettingKeyAliyunCaptchaAccessKeySecret,
-		SettingKeyAliyunCaptchaSceneID,
-		SettingKeyAliyunCaptchaRegion,
-	})
+	values, err := s.settingRepo.GetMultiple(ctx, captchaProviderConfigKeys)
 	if err != nil {
 		return CaptchaProviderConfig{}, fmt.Errorf("read captcha provider settings: %w", err)
 	}
+	return parseCaptchaProviderConfig(values), nil
+}
+
+func parseCaptchaProviderConfig(values map[string]string) CaptchaProviderConfig {
 	return CaptchaProviderConfig{
 		TurnstileEnabled:   values[SettingKeyTurnstileEnabled] == "true",
 		TurnstileSecretKey: values[SettingKeyTurnstileSecretKey],
@@ -529,7 +535,7 @@ func (s *SettingService) GetCaptchaProviderConfig(ctx context.Context) (CaptchaP
 			SceneID:         values[SettingKeyAliyunCaptchaSceneID],
 			Region:          normalizeAliyunCaptchaRegion(values[SettingKeyAliyunCaptchaRegion]),
 		},
-	}, nil
+	}
 }
 
 func (s *SettingService) IsTencentCaptchaEnabled(ctx context.Context) bool {

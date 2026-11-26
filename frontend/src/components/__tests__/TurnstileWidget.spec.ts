@@ -65,6 +65,23 @@ describe('TurnstileWidget', () => {
     expect(wrapper.emitted('error')).toEqual([[]])
   })
 
+  it('loads a fresh SDK after the previous script failed and the widget is remounted', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    wrapper = mount(TurnstileWidget, { props: { siteKey: 'site-key' } })
+    const failed = document.querySelector(scriptSelector)!
+    failed.dispatchEvent(new Event('error'))
+    await flushPromises()
+    wrapper.unmount()
+    wrapper = mount(TurnstileWidget, { props: { siteKey: 'site-key' } })
+    const next = document.querySelector(scriptSelector)!
+    expect(next).not.toBe(failed)
+    expect(failed.isConnected).toBe(false)
+    const render = installSDK()
+    window.onTurnstileLoad?.()
+    await flushPromises()
+    expect(render).toHaveBeenCalledOnce()
+  })
+
   it('does not show a placeholder or load the SDK without a site key', async () => {
     wrapper = mount(TurnstileWidget, { props: { siteKey: '' } })
     await flushPromises()

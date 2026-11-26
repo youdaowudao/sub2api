@@ -57,6 +57,8 @@
         <!-- Subscription Progress (for users with active subscriptions; not mounted at all when the feature is off) -->
         <SubscriptionProgressMini v-if="user && subscriptionFeatureEnabled" />
 
+        <slot name="actions" />
+
         <!-- Balance Display -->
         <div
           v-if="user"

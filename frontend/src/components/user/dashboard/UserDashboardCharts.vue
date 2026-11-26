@@ -1,5 +1,6 @@
 <template>
-  <div class="space-y-6">
+  <div :class="checkinEnabled ? 'grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.8fr)_minmax(340px,1fr)] xl:items-start' : 'space-y-6'" data-testid="dashboard-charts-layout">
+    <div class="min-w-0 space-y-6" :class="checkinEnabled ? 'order-2 xl:order-1' : ''">
     <!-- Date Range Filter -->
     <div class="card p-4">
       <div class="flex flex-wrap items-center gap-4">
@@ -21,7 +22,7 @@
 
     <!-- Charts Grid -->
     <p v-if="error" role="alert" class="card p-4 text-sm text-red-600 dark:text-red-400">{{ t('dashboard.chartsLoadFailed') }}</p>
-    <div v-else class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <div v-else class="grid grid-cols-1 gap-6" :class="{ 'lg:grid-cols-2': !checkinEnabled }" data-testid="dashboard-chart-pair">
       <!-- Model Distribution Chart -->
       <div class="card relative overflow-hidden p-4">
         <div v-if="loading" class="absolute inset-0 z-10 flex items-center justify-center bg-white/50 backdrop-blur-sm dark:bg-dark-800/50">
@@ -61,6 +62,8 @@
       <!-- Token Usage Trend Chart -->
       <TokenUsageTrend :trend-data="trend" :loading="loading" />
     </div>
+    </div>
+    <div v-if="checkinEnabled" class="order-1 min-w-0 xl:order-2"><slot name="checkin" /></div>
   </div>
 </template>
 
@@ -77,7 +80,7 @@ import { formatCostFixed as formatCost, formatNumberLocaleString as formatNumber
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, ArcElement, Title, Tooltip, Legend, Filler } from 'chart.js'
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, ArcElement, Title, Tooltip, Legend, Filler)
 
-const props = defineProps<{ error?: boolean, loading: boolean, startDate: string, endDate: string, granularity: string, trend: TrendDataPoint[], models: ModelStat[] }>()
+const props = defineProps<{ checkinEnabled?: boolean, error?: boolean, loading: boolean, startDate: string, endDate: string, granularity: string, trend: TrendDataPoint[], models: ModelStat[] }>()
 defineEmits(['update:startDate', 'update:endDate', 'update:granularity', 'dateRangeChange', 'granularityChange', 'refresh'])
 const { t } = useI18n()
 

@@ -52,7 +52,17 @@ FRONTEND_CRITICAL_VITEST := \
 	src/features/channel-monitor-v2/__tests__/designSystem.structure.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorFormat.spec.ts \
 	src/features/channel-monitor-v2/__tests__/monitorZoom.spec.ts \
-	src/components/admin/channel/__tests__/PricingEntryCard.modelDefaultPrice.spec.ts
+	src/components/admin/channel/__tests__/PricingEntryCard.modelDefaultPrice.spec.ts \
+	src/utils/__tests__/checkinCalendar.spec.ts \
+	src/components/user/dashboard/__tests__/UserDashboardCheckin.spec.ts \
+	src/views/admin/__tests__/CheckinView.spec.ts \
+	src/views/admin/__tests__/UsersView.routeSearch.spec.ts \
+	src/stores/__tests__/auth.spec.ts \
+	src/views/user/__tests__/DashboardView.spec.ts \
+	src/components/user/dashboard/__tests__/UserDashboardStats.spec.ts \
+	src/components/__tests__/TurnstileWidget.spec.ts \
+	src/components/__tests__/AliyunCaptchaWidget.spec.ts \
+	src/components/__tests__/TencentCaptchaGate.spec.ts
 
 # 一键编译前后端
 build: build-backend build-frontend

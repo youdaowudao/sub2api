@@ -202,6 +202,7 @@ export default {
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',
+    checkin: 'Check-in management',
     promoCodes: 'Promo Codes',
     settings: 'Settings',
     myAccount: 'My Account',

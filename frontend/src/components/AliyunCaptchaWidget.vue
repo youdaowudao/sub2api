@@ -134,9 +134,10 @@ const loadScript = (): Promise<void> => {
     )
     if (existingScript) {
       existingScript.addEventListener('load', () => resolve())
-      existingScript.addEventListener('error', () =>
+      existingScript.addEventListener('error', () => {
+        existingScript.remove()
         reject(new Error('Failed to load Aliyun captcha script'))
-      )
+      }, { once: true })
       return
     }
 
@@ -144,7 +145,10 @@ const loadScript = (): Promise<void> => {
     script.src = SCRIPT_SRC
     script.async = true
     script.onload = () => resolve()
-    script.onerror = () => reject(new Error('Failed to load Aliyun captcha script'))
+    script.onerror = () => {
+      script.remove()
+      reject(new Error('Failed to load Aliyun captcha script'))
+    }
     document.head.appendChild(script)
   })
 }

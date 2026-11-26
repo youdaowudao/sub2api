@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import AliyunCaptchaWidget from '../AliyunCaptchaWidget.vue'
 
 interface CapturedInitOptions {
@@ -38,6 +38,7 @@ describe('AliyunCaptchaWidget', () => {
     delete window.AliyunCaptchaConfig
     document.getElementById('aliyunCaptcha-window-popup')?.remove()
     document.getElementById('aliyunCaptcha-mask')?.remove()
+    document.querySelectorAll('script[src*="aliyunCaptcha/AliyunCaptcha"]').forEach(script=>script.remove())
   })
 
   function mountWidget() {
@@ -165,6 +166,29 @@ describe('AliyunCaptchaWidget', () => {
     expect(wrapper.get('button').text()).toContain('auth.captchaClickToVerify')
 
     wrapper.unmount()
+  })
+
+  it('retries SDK loading after the failed script is removed', async () => {
+    const init = window.initAliyunCaptcha
+    delete window.initAliyunCaptcha
+    const wrapper = mountWidget()
+    const selector = 'script[src*="aliyunCaptcha/AliyunCaptcha"]'
+    const failed = document.querySelector(selector)!
+    failed.dispatchEvent(new Event('error'))
+    await flushPromises()
+    expect(wrapper.emitted('error')).toBeTruthy()
+    const vm = wrapper.vm as unknown as { verify: () => Promise<string | null> }
+    const result = vm.verify()
+    try {
+      const fresh = document.querySelector(selector)!
+      expect(fresh).not.toBe(failed)
+      expect(failed.isConnected).toBe(false)
+      window.initAliyunCaptcha = init
+      fresh.dispatchEvent(new Event('load'))
+      await flushPromises()
+      initOptions!.captchaVerifyCallback('retry-proof')
+      await expect(result).resolves.toBe('retry-proof')
+    } finally { wrapper.unmount() }
   })
 
   it('reset() 清空缓存并取消进行中的验证', async () => {

@@ -10,7 +10,10 @@ import promptAudit from './promptAudit'
 import plugins from './plugins'
 import forkEmailSignupFilter from './forkEmailSignupFilter'
 
+import checkin from './checkin'
+
 export default {
+  checkin,
   ...overview,
   ...channels,
   ...accounts,

@@ -78,6 +78,7 @@ export const useAuthStore = defineStore('auth', () => {
   // ==================== State ====================
 
   const user = ref<User | null>(null)
+  let balanceSeq = 0
   const token = ref<string | null>(null)
   const refreshTokenValue = ref<string | null>(null)
   const tokenExpiresAt = ref<number | null>(null) // 过期时间戳（毫秒）
@@ -432,17 +433,28 @@ export const useAuthStore = defineStore('auth', () => {
    * @returns Promise resolving to the updated user
    * @throws Error if not authenticated or request fails
    */
+  function applyBalance(balance: number): void {
+    if (!user.value) return
+    balanceSeq++
+    user.value.balance = balance
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user.value))
+  }
+
   async function refreshUser(): Promise<User> {
     if (!token.value) {
       throw new Error('Not authenticated')
     }
 
+    const requestBalanceSeq = balanceSeq
     try {
       const response = await authAPI.getCurrentUser()
       if (response.data.run_mode) {
         runMode.value = response.data.run_mode
       }
       const { run_mode: _run_mode, ...userData } = response.data
+      if (requestBalanceSeq !== balanceSeq && user.value?.id === userData.id) {
+        userData.balance = user.value.balance
+      }
       user.value = userData
 
       // Update localStorage
@@ -510,6 +522,7 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     checkAuth,
     refreshUser,
+    applyBalance,
     setPendingAuthSession,
     clearPendingAuthSession
   }

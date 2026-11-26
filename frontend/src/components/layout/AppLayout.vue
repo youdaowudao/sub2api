@@ -12,7 +12,7 @@
       :class="[sidebarCollapsed ? 'lg:ml-[72px]' : 'lg:ml-64']"
     >
       <!-- Header -->
-      <AppHeader />
+      <AppHeader><template #actions><slot name="header-actions" /></template></AppHeader>
 
       <!-- Main Content -->
       <main ref="contentRef" class="p-4 md:p-6 lg:p-8">

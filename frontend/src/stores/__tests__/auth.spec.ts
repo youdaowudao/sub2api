@@ -360,6 +360,25 @@ describe('useAuthStore', () => {
       expect(JSON.parse(localStorage.getItem('auth_user')!)).toEqual(updatedUser)
     })
 
+    it('签到余额不会被更早发起的刷新覆盖，其他字段照常更新', async () => {
+      mockLogin.mockResolvedValue(fakeAuthResponse)
+      const store = useAuthStore()
+      await store.login({ email: 'test@example.com', password: '123456' })
+      let resolve!: (value: { data: typeof fakeUser }) => void
+      mockGetCurrentUser.mockReturnValueOnce(new Promise(r => { resolve = r }))
+      const pending = store.refreshUser()
+      store.applyBalance(12.57)
+      expect(store.user?.balance).toBe(12.57)
+      resolve({ data: { ...fakeUser, username: 'updated-name' } })
+      await pending
+      expect(store.user?.balance).toBe(12.57)
+      expect(store.user?.username).toBe('updated-name')
+      expect(JSON.parse(localStorage.getItem('auth_user')!).balance).toBe(12.57)
+      mockGetCurrentUser.mockResolvedValue({ data: { ...fakeUser, balance: 12.1 } })
+      await store.refreshUser()
+      expect(store.user?.balance).toBe(12.1)
+    })
+
     it('未认证时抛出错误', async () => {
       const store = useAuthStore()
       await expect(store.refreshUser()).rejects.toThrow('Not authenticated')

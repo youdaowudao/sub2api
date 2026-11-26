@@ -72,6 +72,10 @@ const loadScript = (): Promise<void> => {
     // Check if script is already loading
     const existingScript = document.querySelector('script[src*="turnstile"]')
     if (existingScript) {
+      existingScript.addEventListener('error', () => {
+        existingScript.remove()
+        reject(new Error('Failed to load Turnstile script'))
+      }, { once: true })
       window.onTurnstileLoad = () => {
         scriptLoaded.value = true
         resolve()
@@ -90,6 +94,7 @@ const loadScript = (): Promise<void> => {
     }
 
     script.onerror = () => {
+      script.remove()
       reject(new Error('Failed to load Turnstile script'))
     }
 

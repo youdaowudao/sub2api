@@ -74,6 +74,9 @@ func RegisterAdminRoutes(
 
 		// 优惠码管理
 		registerPromoCodeRoutes(admin, h)
+		if h.Admin.Checkin != nil {
+			registerCheckinAdminRoutes(admin, h)
+		}
 
 		// 系统设置
 		registerSettingsRoutes(admin, h, stepUpAuth)
@@ -918,4 +921,14 @@ func channelMonitorModeV2Guard(settingService *service.SettingService) gin.Handl
 		}
 		c.Next()
 	}
+}
+
+func registerCheckinAdminRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	checkin := admin.Group("/checkin")
+	checkin.GET("/config", h.Admin.Checkin.GetConfig)
+	checkin.PUT("/config", h.Admin.Checkin.SaveConfig)
+	checkin.GET("/overview", h.Admin.Checkin.Overview)
+	checkin.GET("/users", h.Admin.Checkin.Users)
+	checkin.GET("/records", h.Admin.Checkin.Records)
+	checkin.GET("/ips", h.Admin.Checkin.IPs)
 }
