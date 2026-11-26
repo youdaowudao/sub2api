@@ -246,6 +246,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { isRegistrationIPBlocked, isRegistrationIPBlockedRedirect } from '@/utils/authError'
 import { AuthLayout } from '@/components/layout'
 import PendingOAuthCreateAccountForm, {
   type PendingOAuthCreateAccountPayload
@@ -565,6 +566,7 @@ function switchToCreateAccountMode() {
 }
 
 function getRequestErrorMessage(error: unknown, fallback: string): string {
+  if (isRegistrationIPBlocked(error)) return t('auth.errors.REGISTRATION_IP_BLOCKED')
   const err = error as { message?: string; response?: { data?: { detail?: string; message?: string } } }
   return err.response?.data?.detail || err.response?.data?.message || err.message || fallback
 }
@@ -802,7 +804,7 @@ onMounted(async () => {
     }
 
     if (error) {
-      errorMessage.value = errorDesc || error
+      errorMessage.value = isRegistrationIPBlockedRedirect(params) ? t('auth.errors.REGISTRATION_IP_BLOCKED') : (errorDesc || error)
       isProcessing.value = false
       return
     }

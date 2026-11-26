@@ -81,6 +81,8 @@ const {
   showSuccess: vi.fn(),
 }));
 
+const ipBlacklist = vi.hoisted(() => ({ get: vi.fn().mockResolvedValue({ ips: [] }), save: vi.fn().mockResolvedValue({ ips: ["192.0.2.1"] }) }));
+
 const localeRef = vi.hoisted(() => ({ value: "zh-CN" }));
 
 vi.mock("@/api", () => ({
@@ -99,6 +101,8 @@ vi.mock("@/api", () => ({
       getStreamTimeoutSettings,
       getRectifierSettings,
       getBetaPolicySettings,
+      getRegistrationIPBlacklist: ipBlacklist.get,
+      updateRegistrationIPBlacklist: ipBlacklist.save,
       getRegistrationEmailBlacklist: vi.fn().mockResolvedValue({ emails: [], max: 20000 }),
     },
     accounts: {
@@ -1837,6 +1841,31 @@ describe("admin SettingsView payment visible method controls", () => {
     // supported_types should be normalized to an empty array, not null
     expect(Array.isArray(receivedProviders[0].supported_types)).toBe(true);
     expect(receivedProviders[0].supported_types).toEqual([]);
+  });
+  it("saves registration IP blacklist without submitting the parent settings form", async () => {
+    ipBlacklist.get.mockClear();
+    ipBlacklist.save.mockClear();
+    const wrapper = mountView();
+    await flushPromises();
+    await openSecurityTab(wrapper);
+    expect(ipBlacklist.get).not.toHaveBeenCalled();
+    await wrapper.get('[data-testid="ip-blacklist-edit"]').trigger("click");
+    await flushPromises();
+    const editor = wrapper.getComponent({ name: "RegistrationIPBlacklistEditor" });
+    expect(ipBlacklist.get).toHaveBeenCalledTimes(1);
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('[data-testid="ip-blacklist-draft"]');
+    expect(textarea).not.toBeNull();
+    textarea!.value = "192.0.2.1";
+    textarea!.dispatchEvent(new Event("input", { bubbles: true }));
+    await flushPromises();
+    const save = document.body.querySelector<HTMLButtonElement>('[data-testid="ip-blacklist-save"]');
+    expect(save?.type).toBe("button");
+    save!.click();
+    await flushPromises();
+    expect(ipBlacklist.save).toHaveBeenCalledWith(["192.0.2.1"]);
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(editor.exists()).toBe(true);
+    wrapper.unmount();
   });
 });
 

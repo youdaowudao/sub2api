@@ -265,6 +265,7 @@ export default {
     loginFailed: '登录失败，请检查您的凭据后重试。',
     errors: {
       USER_NOT_ACTIVE: '账号已被禁用',
+      REGISTRATION_IP_BLOCKED: '当前网络不允许注册新账号。已有账号仍可正常登录，如有疑问请联系站点管理员。',
       EMAIL_BLOCKED: '该邮箱不允许注册，请更换其他邮箱。',
     },
     registrationFailed: '注册失败，请重试。',

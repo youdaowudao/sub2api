@@ -1274,6 +1274,12 @@ func (h *AuthHandler) tryOIDCVerifiedEmailFastPath(
 		readOAuthPromoCode(c),
 	)
 	if err != nil {
+		if infraerrors.Reason(err) == "REGISTRATION_IP_BLOCKED" {
+			clearOAuthPendingSessionCookie(c, isRequestHTTPS(c))
+			clearOAuthPendingBrowserCookie(c, isRequestHTTPS(c))
+			redirectOAuthError(c, frontendCallback, infraerrors.Reason(err), infraerrors.Message(err), "")
+			return true
+		}
 		log.Printf("[OIDC OAuth] verified-email fast path skipped: reason=%s", infraerrors.Reason(err))
 		return false
 	}

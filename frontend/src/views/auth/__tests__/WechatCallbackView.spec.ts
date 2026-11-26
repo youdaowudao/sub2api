@@ -281,6 +281,18 @@ describe('WechatCallbackView', () => {
     expect(locationState.current.href).toContain('mode=open')
   })
 
+  it('shows the registration IP refusal and does not continue to pending or token login', async () => {
+    locationState.current.hash = '#error=session_error&error_message=REGISTRATION_IP_BLOCKED&error_description=raw'
+    const wrapper = mount(WechatCallbackView, {
+      global: { stubs: { AuthLayout: { template: '<div><slot /></div>' }, Icon: true, RouterLink: true, transition: false } }
+    })
+    await flushPromises()
+    expect(showErrorMock).toHaveBeenCalledWith('auth.errors.REGISTRATION_IP_BLOCKED')
+    expect(exchangePendingOAuthCompletionMock).not.toHaveBeenCalled()
+    expect(setTokenMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('accepts the legacy fragment token success callback without pending-session exchange', async () => {
     locationState.current.hash =
       '#access_token=legacy-access-token&refresh_token=legacy-refresh-token&expires_in=3600&token_type=Bearer&redirect=%2Flegacy-dashboard'

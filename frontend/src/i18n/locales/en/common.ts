@@ -265,6 +265,7 @@ export default {
     loginFailed: 'Login failed. Please check your credentials and try again.',
     errors: {
       USER_NOT_ACTIVE: 'Account has been disabled.',
+      REGISTRATION_IP_BLOCKED: 'Your current network cannot register new accounts. Existing accounts can still sign in. Contact the site administrator if you have questions.',
       EMAIL_BLOCKED: 'This email address is not allowed. Please use a different one.',
     },
     registrationFailed: 'Registration failed. Please try again.',

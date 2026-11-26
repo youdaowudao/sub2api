@@ -8,8 +8,9 @@ export default {
     filters: {
       all: 'All',
       q: 'Keyword',
-      qPlaceholder: 'Path / action / actor email',
-      actorEmail: 'Actor Email',
+      qPlaceholder: 'Path / action / actor or registration email',
+      actorEmail: 'Email',
+      actorEmailPlaceholder: 'Search actor or registration email',
       action: 'Action',
       clientIp: 'Client IP',
       method: 'Method',

@@ -172,8 +172,8 @@ func (s *AuthService) Register(ctx context.Context, email, password string) (str
 // RegisterWithVerification 用户注册（支持邮件验证、优惠码、邀请码和邀请返利码），返回token和用户。
 func (s *AuthService) RegisterWithVerification(ctx context.Context, email, password, verifyCode, promoCode, invitationCode, affiliateCode string) (string, *User, error) {
 	// 检查是否开放注册（默认关闭：settingService 未配置时不允许注册）
-	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
-		return "", nil, ErrRegDisabled
+	if err := s.checkRegistrationAllowed(ctx, "", false); err != nil {
+		return "", nil, err
 	}
 
 	// 防止用户注册 LinuxDo OAuth 合成邮箱，避免第三方登录与本地账号发生碰撞。
@@ -599,8 +599,8 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			// OAuth 首次登录视为注册（fail-close：settingService 未配置时不允许注册）
-			if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
-				return "", nil, ErrRegDisabled
+			if err := s.checkRegistrationAllowed(ctx, "", false); err != nil {
+				return "", nil, err
 			}
 
 			randomPassword, err := randomHexString(32)
@@ -728,8 +728,8 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			// OAuth 首次登录视为注册
-			if s.settingService == nil || (!s.settingService.IsRegistrationEnabled(ctx) && !s.canBypassRegistrationDisabledForOAuth(ctx, signupSource)) {
-				return nil, nil, ErrRegDisabled
+			if err := s.checkRegistrationAllowed(ctx, signupSource, true); err != nil {
+				return nil, nil, err
 			}
 
 			// 检查是否需要邀请码

@@ -425,6 +425,53 @@ describe('EmailVerifyView', () => {
     )
   })
 
+  it('shows localized IP registration rejection without successful login', async () => {
+    getPublicSettingsMock.mockResolvedValue({
+      turnstile_enabled: false,
+      turnstile_site_key: '',
+      site_name: 'Sub2API',
+      registration_email_suffix_whitelist: ['allowed.com'],
+      registration_email_domain_quota_enabled: true,
+    })
+    sessionStorage.setItem(
+      'register_data',
+      JSON.stringify({
+        email: 'second@custom.example',
+        password: 'secret-123',
+      })
+    )
+    registerMock.mockRejectedValueOnce({
+      reason: 'REGISTRATION_IP_BLOCKED',
+      message: 'raw backend message',
+    })
+
+    const wrapper = mount(EmailVerifyView, {
+      global: {
+        stubs: {
+          AuthLayout: { template: '<div><slot /><slot name="footer" /></div>' },
+          Icon: true,
+          TurnstileWidget: true,
+          transition: false,
+        },
+      },
+    })
+
+    await flushPromises()
+    await wrapper.get('#code').setValue('123456')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(registerMock).toHaveBeenCalled()
+    expect(showErrorMock).toHaveBeenLastCalledWith(
+      'auth.errors.REGISTRATION_IP_BLOCKED'
+    )
+    expect(showSuccessMock).not.toHaveBeenCalled()
+    expect(pushMock).not.toHaveBeenCalled()
+    expect(setTokenMock).not.toHaveBeenCalled()
+    expect(setPendingAuthSessionMock).not.toHaveBeenCalled()
+    expect(persistOAuthTokenContextMock).not.toHaveBeenCalled()
+  })
+
   // 域名限量注册开关默认关闭：恢复 PR5423 之前的客户端白名单预检，非白名单域名不发送验证码。
   it('blocks sending a verification code for a non-whitelist email domain when the quota switch is disabled', async () => {
     getPublicSettingsMock.mockResolvedValue({

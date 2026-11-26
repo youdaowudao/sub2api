@@ -198,6 +198,20 @@ export default {
         emailDomainQuota: 'Non-allowlist Domain Quota',
         emailDomainQuotaHint:
           'When enabled and the allowlist is not empty, every other registrable domain can register one account. When disabled, non-allowlist domains are rejected. Has no effect while the allowlist is empty',
+        ipBlacklist: {
+          title: 'Registration IP blacklist',
+          hint: 'IP addresses on this list cannot register new accounts. Existing accounts can still sign in and use the service. Remove an IP and save to restore registration eligibility. Other new users sharing that IP will also be restricted. The list is saved separately from other settings.',
+          edit: 'Edit list',
+          editorTitle: 'Edit registration IP blacklist',
+          label: 'One IPv4 or IPv6 address per line',
+          save: 'Save list',
+          reload: 'Reload list',
+          loadFailed: 'Could not load the list. Please try again.',
+          invalidStored: 'The registration IP blacklist is invalid and is not in effect. Enter valid IP addresses or clear the list and save.',
+          invalidInput: 'Invalid list format. Enter valid individual IPv4 or IPv6 addresses.',
+          unknownSave: 'Save result is unconfirmed. Reload the list to verify before trying again.',
+          saved: 'Registration IP blacklist saved.',
+        },
         emailBlacklist: {
           title: 'Email Blacklist (Exact Match)',
           hint: 'Listed addresses cannot register or be bound as an account email. Matching is per inbox: dots in Gmail addresses, the googlemail.com domain and +suffixes are treated as the same address. Existing accounts are not affected; use Check Registered Users to find and disable them. The list is saved from its own dialog, independent of the Save button at the bottom of this page.',

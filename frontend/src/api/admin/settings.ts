@@ -1398,6 +1398,27 @@ export async function updateRegistrationEmailBlacklist(
   return data;
 }
 
+export interface RegistrationIPBlacklist {
+  ips: string[] | null;
+}
+
+export async function getRegistrationIPBlacklist(): Promise<RegistrationIPBlacklist> {
+  const { data } = await apiClient.get<RegistrationIPBlacklist>(
+    "/admin/settings/registration-ip-blacklist",
+  );
+  return data;
+}
+
+export async function updateRegistrationIPBlacklist(
+  ips: string[],
+): Promise<{ ips: string[] }> {
+  const { data } = await apiClient.put<{ ips: string[] }>(
+    "/admin/settings/registration-ip-blacklist",
+    { ips },
+  );
+  return data;
+}
+
 export async function getPanelRateLimitSettings(): Promise<PanelRateLimitSettings> {
   const { data } = await apiClient.get<PanelRateLimitSettings>(
     "/admin/settings/panel-rate-limit",
@@ -1671,6 +1692,8 @@ export const settingsAPI = {
   updateOverloadCooldownSettings,
   getRateLimit429CooldownSettings,
   updateRateLimit429CooldownSettings,
+  getRegistrationIPBlacklist,
+  updateRegistrationIPBlacklist,
   getRegistrationEmailBlacklist,
   updateRegistrationEmailBlacklist,
   getPanelRateLimitSettings,

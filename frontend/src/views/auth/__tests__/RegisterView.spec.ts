@@ -101,6 +101,7 @@ describe('RegisterView', () => {
     getPublicSettingsMock.mockReset()
     registerMock.mockReset()
     showErrorMock.mockReset()
+    appStoreMock.showSuccess.mockReset()
     pushMock.mockReset()
     verifyActionMock.mockReset()
     appStoreMock.cachedPublicSettings = null
@@ -282,6 +283,35 @@ describe('RegisterView', () => {
     expect(showErrorMock).toHaveBeenCalledWith(
       '该邮箱域名无法注册新账户。请使用主流邮箱注册；如需使用企业邮箱，请联系客服添加域名白名单。'
     )
+  })
+
+  it('shows localized IP registration rejection without successful login', async () => {
+    getPublicSettingsMock.mockResolvedValueOnce({
+      ...publicSettings,
+      turnstile_enabled: false,
+      registration_email_suffix_whitelist: ['allowed.com'],
+      registration_email_domain_quota_enabled: true
+    })
+    registerMock.mockRejectedValueOnce({
+      reason: 'REGISTRATION_IP_BLOCKED',
+      message: 'raw backend message'
+    })
+
+    const wrapper = mountRegister()
+    await flushPromises()
+    await wrapper.get('#email').setValue('second@custom.example')
+    await wrapper.get('#password').setValue('secret-123')
+    await wrapper.get('#confirmPassword').setValue('secret-123')
+    await wrapper.get('form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(showErrorMock).toHaveBeenCalledWith(
+      'auth.errors.REGISTRATION_IP_BLOCKED'
+    )
+    expect(registerMock).toHaveBeenCalledOnce()
+    expect(appStoreMock.showSuccess).not.toHaveBeenCalled()
+    expect(pushMock).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('register_data')).toBeNull()
   })
 
   // 域名限量注册开关默认关闭：恢复 PR5423 之前的客户端白名单预检，非白名单域名不发起注册请求。
