@@ -453,6 +453,14 @@ func TestAuthServiceBindEmailIdentity_ReplacesBoundEmailAndSkipsFirstBindDefault
 		service.SettingKeyAuthSourceDefaultEmailGrantOnFirstBind: "true",
 	}, cache, assigner)
 
+	// Use the interface so the existing-entry RED overlay also compiles against the old implementation.
+	invalidator := &emailBindAuthCacheInvalidator{}
+	if setter, ok := any(svc).(interface {
+		SetAPIKeyAuthCacheInvalidator(service.APIKeyAuthCacheInvalidator)
+	}); ok {
+		setter.SetAPIKeyAuthCacheInvalidator(invalidator)
+	}
+
 	ctx := context.Background()
 	hashedPassword, err := svc.HashPassword("current-password")
 	require.NoError(t, err)
@@ -480,6 +488,7 @@ func TestAuthServiceBindEmailIdentity_ReplacesBoundEmailAndSkipsFirstBindDefault
 	require.NoError(t, err)
 	require.NotNil(t, updatedUser)
 	require.Equal(t, "new@example.com", updatedUser.Email)
+	require.Equal(t, []int64{user.ID}, invalidator.ids)
 
 	storedUser, err := client.User.Get(ctx, user.ID)
 	require.NoError(t, err)
@@ -1198,4 +1207,12 @@ func (s *emailBindCacheStub) IncrNotifyVerifyCodeAttempts(context.Context, strin
 
 func (s *emailBindCacheStub) ConsumePasswordResetToken(context.Context, string, string) (bool, error) {
 	return false, nil
+}
+
+type emailBindAuthCacheInvalidator struct{ ids []int64 }
+
+func (s *emailBindAuthCacheInvalidator) InvalidateAuthCacheByKey(context.Context, string)    {}
+func (s *emailBindAuthCacheInvalidator) InvalidateAuthCacheByGroupID(context.Context, int64) {}
+func (s *emailBindAuthCacheInvalidator) InvalidateAuthCacheByUserID(_ context.Context, id int64) {
+	s.ids = append(s.ids, id)
 }

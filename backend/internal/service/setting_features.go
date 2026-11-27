@@ -168,7 +168,7 @@ func (s *SettingService) GetAffiliateRebatePerInviteeCap(ctx context.Context) fl
 func (s *SettingService) IsPasswordResetEnabled(ctx context.Context) bool {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyPasswordResetEnabled)
 	if err != nil {
-		return false // 默认关闭
+		return errors.Is(err, ErrSettingNotFound) // 仅未配置时默认开启，读取故障仍关闭。
 	}
 	return value == "true"
 }

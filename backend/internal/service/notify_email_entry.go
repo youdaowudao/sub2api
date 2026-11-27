@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"net/mail"
 	"strings"
 )
 
@@ -78,4 +79,63 @@ func MarshalNotifyEmails(entries []NotifyEmailEntry) string {
 		return "[]"
 	}
 	return string(data)
+}
+
+// filterVerifiedEmails returns deduplicated, non-disabled, verified emails.
+func filterVerifiedEmails(entries []NotifyEmailEntry) []string {
+	var recipients []string
+	seen := make(map[string]bool)
+	for _, entry := range entries {
+		if entry.Disabled || !entry.Verified {
+			continue
+		}
+		email := strings.TrimSpace(entry.Email)
+		if email == "" {
+			continue
+		}
+		lower := strings.ToLower(email)
+		if seen[lower] {
+			continue
+		}
+		seen[lower] = true
+		recipients = append(recipients, email)
+	}
+	return recipients
+}
+
+// When no explicit list exists, the account email is the default recipient.
+// A nonempty list keeps the user's explicit recipient choices, including disabled entries.
+func balanceNotifyRecipients(accountEmail string, extraEmails []NotifyEmailEntry) []string {
+	primary := strings.TrimSpace(accountEmail)
+	if !usableBalanceNotifyEmail(primary) {
+		primary = ""
+	}
+	if len(extraEmails) == 0 {
+		if primary == "" {
+			return nil
+		}
+		return []string{primary}
+	}
+	// Reuse the existing deduplication/disabled rules. The current account email
+	// needs no extra verification; never persist this as a verified alternate address.
+	entries := make([]NotifyEmailEntry, 0, len(extraEmails))
+	for _, entry := range extraEmails {
+		if !usableBalanceNotifyEmail(entry.Email) {
+			continue
+		}
+		if primary != "" && strings.EqualFold(strings.TrimSpace(entry.Email), primary) {
+			entry.Verified = true
+		}
+		entries = append(entries, entry)
+	}
+	return filterVerifiedEmails(entries)
+}
+
+func usableBalanceNotifyEmail(email string) bool {
+	email = strings.TrimSpace(email)
+	if email == "" || len(email) > 255 || strings.HasSuffix(strings.ToLower(email), ".invalid") {
+		return false
+	}
+	address, err := mail.ParseAddress(email)
+	return err == nil && address.Address == email
 }

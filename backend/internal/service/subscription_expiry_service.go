@@ -153,17 +153,17 @@ func (s *SubscriptionExpiryService) sendExpiryReminders(ctx context.Context) {
 
 func (s *SubscriptionExpiryService) expiryReminderEnabled(ctx context.Context) bool {
 	if s == nil || s.settingRepo == nil {
-		return true
+		return false
 	}
 	value, err := s.settingRepo.GetValue(ctx, SettingKeySubscriptionExpiryNotifyEnabled)
 	if err != nil {
 		if errors.Is(err, ErrSettingNotFound) {
-			return true
+			return false
 		}
 		log.Printf("[SubscriptionExpiry] Read expiry reminder switch failed: %v", err)
 		return false
 	}
-	return !isFalseSettingValue(value)
+	return isTrueSettingValue(value)
 }
 
 func (s *SubscriptionExpiryService) smtpConfigured(ctx context.Context) bool {

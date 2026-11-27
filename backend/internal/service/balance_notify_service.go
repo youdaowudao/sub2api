@@ -283,32 +283,9 @@ func (s *BalanceNotifyService) getSiteName(ctx context.Context) string {
 	return name
 }
 
-// filterVerifiedEmails returns deduplicated, non-disabled, verified emails.
-func filterVerifiedEmails(entries []NotifyEmailEntry) []string {
-	var recipients []string
-	seen := make(map[string]bool)
-	for _, entry := range entries {
-		if entry.Disabled || !entry.Verified {
-			continue
-		}
-		email := strings.TrimSpace(entry.Email)
-		if email == "" {
-			continue
-		}
-		lower := strings.ToLower(email)
-		if seen[lower] {
-			continue
-		}
-		seen[lower] = true
-		recipients = append(recipients, email)
-	}
-	return recipients
-}
-
-// collectBalanceNotifyRecipients returns verified, non-disabled email recipients.
-// Only emails with verified=true and disabled=false are included.
+// collectBalanceNotifyRecipients uses the account email unless the user has an explicit recipient list.
 func (s *BalanceNotifyService) collectBalanceNotifyRecipients(user *User) []string {
-	return filterVerifiedEmails(user.BalanceNotifyExtraEmails)
+	return balanceNotifyRecipients(user.Email, user.BalanceNotifyExtraEmails)
 }
 
 // sendEmails sends an email to all recipients with shared timeout and error logging.

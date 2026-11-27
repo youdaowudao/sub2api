@@ -384,3 +384,29 @@ func migrationChecksum(content string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(content)))
 	return hex.EncodeToString(sum[:])
 }
+
+func TestSubscriptionExpirySeedChecksumCompatibility(t *testing.T) {
+	const name = "141_subscription_expiry_notify_enabled.sql"
+	const old = "86c3d5318bfa70db158a74e2e5ae0dfc65ae5cf7c1b6bb7824e24eac29de0234"
+	const updated = "1ca32834ca489c0f273cb31f01f3ccee83e20f0a5f79d0986d644328735a3090"
+	require.True(t, isMigrationChecksumCompatible(name, old, updated))
+	require.False(t, isMigrationChecksumCompatible(name, "unexpected", updated))
+	require.False(t, isMigrationChecksumCompatible(name, old, "unexpected"))
+}
+
+func TestApplyMigrationsFS_SubscriptionExpirySeedDoesNotReapplyOldChecksum(t *testing.T) {
+	const name = "141_subscription_expiry_notify_enabled.sql"
+	const old = "86c3d5318bfa70db158a74e2e5ae0dfc65ae5cf7c1b6bb7824e24eac29de0234"
+	const newSQL = `-- 订阅到期提醒邮件开关，新安装默认关闭。
+INSERT INTO settings (key, value, updated_at)
+VALUES ('subscription_expiry_notify_enabled', 'false', NOW())
+ON CONFLICT (key) DO NOTHING;`
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	prepareMigrationsBootstrapExpectations(mock)
+	mock.ExpectQuery("SELECT checksum FROM schema_migrations WHERE filename = \\$1").WithArgs(name).WillReturnRows(sqlmock.NewRows([]string{"checksum"}).AddRow(old))
+	mock.ExpectExec("SELECT pg_advisory_unlock\\(\\$1\\)").WithArgs(migrationsAdvisoryLockID).WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, applyMigrationsFS(context.Background(), db, fstest.MapFS{name: &fstest.MapFile{Data: []byte(newSQL)}}))
+	require.NoError(t, mock.ExpectationsWereMet())
+}

@@ -59,3 +59,13 @@ func TestAPIKeyService_RejectsV15AuthSnapshotWithoutReasoningEffortPolicy(t *tes
 		t.Fatalf("expected no API key from stale snapshot, got %#v", apiKey)
 	}
 }
+
+func TestAPIKeyService_RejectsV28SnapshotWithOldBalanceNotifyDefault(t *testing.T) {
+	svc := &APIKeyService{}
+	apiKey, ok, err := svc.applyAuthCacheEntry("legacy-notify", &APIKeyAuthCacheEntry{
+		Snapshot: &APIKeyAuthSnapshot{Version: 28, User: APIKeyAuthUserSnapshot{ID: 1, BalanceNotifyEnabled: true}},
+	})
+	if err != nil || ok || apiKey != nil {
+		t.Fatalf("old notification snapshot must be ignored, accepted=%v err=%v", ok, err)
+	}
+}

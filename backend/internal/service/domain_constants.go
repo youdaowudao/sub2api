@@ -731,10 +731,11 @@ const (
 	SettingKeyBalanceLowNotifyRechargeURL = "balance_low_notify_recharge_url" // 充值页面 URL
 
 	// 充值到账通知
-	SettingKeyBalanceRechargeNotifyEnabled = "balance_recharge_notify_enabled" // 充值成功邮件全局开关，默认开启
+	SettingKeyBalanceRechargeNotifyEnabled      = "balance_recharge_notify_enabled"      // 充值成功邮件全局开关，默认关闭
+	SettingKeySubscriptionPurchaseNotifyEnabled = "subscription_purchase_notify_enabled" // 订阅开通成功邮件全局开关，默认关闭
 
 	// 订阅到期提醒
-	SettingKeySubscriptionExpiryNotifyEnabled = "subscription_expiry_notify_enabled" // 订阅到期提醒全局开关，默认开启
+	SettingKeySubscriptionExpiryNotifyEnabled = "subscription_expiry_notify_enabled" // 订阅到期提醒全局开关，默认关闭
 
 	// 账号限额通知
 	SettingKeyAccountQuotaNotifyEnabled = "account_quota_notify_enabled" // 全局开关

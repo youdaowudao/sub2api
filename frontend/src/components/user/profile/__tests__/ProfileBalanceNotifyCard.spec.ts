@@ -2,20 +2,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import ProfileBalanceNotifyCard from '../ProfileBalanceNotifyCard.vue'
 
-const { sendNotifyEmailCode, verifyNotifyEmail, getProfile } = vi.hoisted(() => ({
+const { sendNotifyEmailCode, verifyNotifyEmail, getProfile, updateProfile, removeNotifyEmail, showError, showSuccess } = vi.hoisted(() => ({
   sendNotifyEmailCode: vi.fn(),
   verifyNotifyEmail: vi.fn(),
-  getProfile: vi.fn()
+  getProfile: vi.fn(),
+  updateProfile: vi.fn(),
+  removeNotifyEmail: vi.fn(),
+  showError: vi.fn(),
+  showSuccess: vi.fn()
 }))
 
 vi.mock('@/api', () => ({
-  userAPI: { sendNotifyEmailCode, verifyNotifyEmail, getProfile }
+  userAPI: { sendNotifyEmailCode, verifyNotifyEmail, getProfile, updateProfile, removeNotifyEmail }
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ user: null }) }))
 vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({ showSuccess: vi.fn(), showError: vi.fn() })
+  useAppStore: () => ({ showSuccess, showError })
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: { email?: string }) => values?.email ? `${key} ${values.email}` : key }) }))
 
 enableAutoUnmount(afterEach)
 
@@ -42,6 +46,82 @@ describe('ProfileBalanceNotifyCard', () => {
   afterEach(() => {
     vi.clearAllTimers()
     vi.useRealTimers()
+  })
+
+  it('enables reminders with the account email in one save and never sends verification', async () => {
+    updateProfile.mockResolvedValue({ balance_notify_enabled: true, balance_notify_extra_emails: [] })
+    const wrapper = mount(ProfileBalanceNotifyCard, {
+      props: { enabled: false, threshold: null, extraEmails: [], systemDefaultThreshold: 5, userEmail: 'account@example.com' }
+    })
+    const toggle = wrapper.get('input[type="checkbox"]')
+    expect((toggle.element as HTMLInputElement).checked).toBe(false)
+    await toggle.setValue(true)
+    await flushPromises()
+    expect(updateProfile).toHaveBeenCalledTimes(1)
+    expect(updateProfile).toHaveBeenCalledWith({ balance_notify_enabled: true })
+    expect(wrapper.text()).toContain('profile.balanceNotify.accountRecipient account@example.com')
+    expect((wrapper.get('input[type="email"]').element as HTMLInputElement).value).toBe('')
+    await wrapper.get('input[type="email"]').setValue('account@example.com')
+    await button(wrapper, 'common.add').trigger('click')
+    expect(wrapper.findAll('button').some(item => item.text() === 'profile.balanceNotify.sendCode')).toBe(false)
+    expect(sendNotifyEmailCode).not.toHaveBeenCalled()
+    expect(verifyNotifyEmail).not.toHaveBeenCalled()
+  })
+
+  it('locks the toggle while saving and restores it on an error', async () => {
+    let reject!: (reason?: unknown) => void
+    updateProfile.mockReturnValueOnce(new Promise((_resolve, fail) => { reject = fail }))
+    const wrapper = mount(ProfileBalanceNotifyCard, {
+      props: { enabled: false, threshold: null, extraEmails: [], systemDefaultThreshold: 5, userEmail: 'account@example.com' }
+    })
+    const toggle = wrapper.get('input[type="checkbox"]')
+    await toggle.setValue(true)
+    expect((toggle.element as HTMLInputElement).disabled).toBe(true)
+    reject(new Error('failed'))
+    await flushPromises()
+    expect((toggle.element as HTMLInputElement).checked).toBe(false)
+    expect((toggle.element as HTMLInputElement).disabled).toBe(false)
+    expect(wrapper.text()).not.toContain('profile.balanceNotify.accountRecipient')
+  })
+
+  it('preserves an explicit list and does not request another code for the account address', () => {
+    const wrapper = mount(ProfileBalanceNotifyCard, {
+      props: {
+        enabled: true, threshold: null, systemDefaultThreshold: 5, userEmail: 'account@example.com',
+        extraEmails: [{ email: 'account@example.com', disabled: false, verified: false }]
+      }
+    })
+    expect(wrapper.text()).toContain('profile.balanceNotify.customRecipientsHint')
+    expect(wrapper.text()).toContain('profile.balanceNotify.primaryEmail')
+    expect(wrapper.text()).not.toContain('profile.balanceNotify.unverified')
+    expect(wrapper.text()).not.toContain('profile.balanceNotify.accountRecipient')
+    expect(sendNotifyEmailCode).not.toHaveBeenCalled()
+  })
+
+  it('restores the account recipient after deleting the final custom address returned as null', async () => {
+    removeNotifyEmail.mockResolvedValue({ balance_notify_extra_emails: null })
+    getProfile.mockResolvedValue({ balance_notify_extra_emails: null })
+    const wrapper = mount(ProfileBalanceNotifyCard, {
+      props: {
+        enabled: true, threshold: null, systemDefaultThreshold: 5, userEmail: 'account@example.com',
+        extraEmails: [{ email: 'other@example.com', disabled: false, verified: true }]
+      }
+    })
+    await button(wrapper, 'profile.balanceNotify.removeEmail').trigger('click')
+    await flushPromises()
+    expect(removeNotifyEmail).toHaveBeenCalledWith('other@example.com')
+    expect(wrapper.text()).toContain('profile.balanceNotify.accountRecipient account@example.com')
+    expect(wrapper.text()).not.toContain('other@example.com')
+    expect(showError).not.toHaveBeenCalled()
+    expect(sendNotifyEmailCode).not.toHaveBeenCalled()
+  })
+
+  it('prompts to bind a real email instead of displaying a placeholder as recipient', () => {
+    const wrapper = mount(ProfileBalanceNotifyCard, {
+      props: { enabled: true, threshold: null, extraEmails: [], systemDefaultThreshold: 5, userEmail: 'user@linuxdo-connect.invalid' }
+    })
+    expect(wrapper.text()).toContain('profile.balanceNotify.noAccountRecipient')
+    expect(wrapper.text()).not.toContain('user@linuxdo-connect.invalid')
   })
 
   it.each(['remove', 'unmount'])('does not start a pending email timer after %s', async (action) => {

@@ -357,7 +357,7 @@ const eventDisplayMeta: Record<string, EventDisplayMeta> = {
   },
   "subscription.purchase_success": {
     label: "订阅开通成功",
-    timing: "订阅订单完成支付并成功开通或续期后发送。",
+    timing: "订阅开通成功通知开启时，订单成功开通或续期后发送。",
     categoryLabel: "订阅",
   },
   "subscription.expiry_reminder": {
@@ -367,7 +367,7 @@ const eventDisplayMeta: Record<string, EventDisplayMeta> = {
   },
   "balance.low": {
     label: "余额不足提醒",
-    timing: "用户余额低于全局或个人配置的提醒阈值时发送。",
+    timing: "站点允许且用户主动开启后，余额跨过提醒阈值时发送。",
     categoryLabel: "计费",
   },
   "balance.recharge_success": {
@@ -420,7 +420,7 @@ const eventDisplayMetaEn: Record<string, EventDisplayMeta> = {
   },
   "subscription.purchase_success": {
     label: "Subscription Activated",
-    timing: "Sent after a subscription order is paid and the subscription is activated or extended.",
+    timing: "Sent after successful activation or renewal when subscription activation notifications are enabled.",
     categoryLabel: "Subscription",
   },
   "subscription.expiry_reminder": {
@@ -430,7 +430,7 @@ const eventDisplayMetaEn: Record<string, EventDisplayMeta> = {
   },
   "balance.low": {
     label: "Low Balance Alert",
-    timing: "Sent when a user's balance drops below the global or personal reminder threshold.",
+    timing: "Sent when the balance crosses the reminder threshold and both the site and user have enabled alerts.",
     categoryLabel: "Billing",
   },
   "balance.recharge_success": {

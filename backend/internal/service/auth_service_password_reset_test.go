@@ -38,11 +38,15 @@ func newPasswordResetAuthService(settings map[string]string, token string) (*Aut
 // 关闭邮箱验证只影响注册，不影响找回密码：申请重置链接和凭链接改密码都要可用。
 func TestPasswordResetWorksWithoutEmailVerification(t *testing.T) {
 	ctx := context.Background()
-	for _, emailVerify := range []string{"true", "false"} {
+	for _, emailVerify := range []string{"true", "false", "missing"} {
 		t.Run("email_verify="+emailVerify, func(t *testing.T) {
 			settings := map[string]string{
 				SettingKeyEmailVerifyEnabled:   emailVerify,
 				SettingKeyPasswordResetEnabled: "true",
+			}
+			if emailVerify == "missing" {
+				delete(settings, SettingKeyPasswordResetEnabled)
+				settings[SettingKeyEmailVerifyEnabled] = "false"
 			}
 			svc, repo := newPasswordResetAuthService(settings, "reset-token")
 			queue := &EmailQueueService{taskChan: make(chan EmailTask, 1)}
@@ -65,7 +69,7 @@ func TestPasswordResetStaysDisabledWhenSwitchIsOff(t *testing.T) {
 	ctx := context.Background()
 	for name, settings := range map[string]map[string]string{
 		"off":     {SettingKeyEmailVerifyEnabled: "true", SettingKeyPasswordResetEnabled: "false"},
-		"missing": {SettingKeyEmailVerifyEnabled: "true"},
+		"invalid": {SettingKeyEmailVerifyEnabled: "true", SettingKeyPasswordResetEnabled: "invalid"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			svc, repo := newPasswordResetAuthService(settings, "reset-token")
@@ -88,17 +92,27 @@ func TestPasswordResetSettingIndependentOfEmailVerification(t *testing.T) {
 		{"true", "true", true},
 		{"true", "false", false},
 		{"false", "", false},
+		{"false", "missing", true},
 	} {
 		values := map[string]string{
 			SettingKeyEmailVerifyEnabled:   tc.emailVerify,
 			SettingKeyPasswordResetEnabled: tc.passwordReset,
 		}
-		svc := NewSettingService(&settingPublicRepoStub{values: values}, &config.Config{})
+		if tc.passwordReset == "missing" {
+			delete(values, SettingKeyPasswordResetEnabled)
+		}
+		svc := NewSettingService(&settingRepoStub{values: values}, &config.Config{})
 
 		public, err := svc.GetPublicSettings(context.Background())
 		require.NoError(t, err)
+		require.Equal(t, tc.want, svc.IsPasswordResetEnabled(context.Background()), "runtime %+v", tc)
 		require.Equal(t, tc.want, public.PasswordResetEnabled, "public %+v", tc)
 		require.Equal(t, tc.emailVerify == "true", public.EmailVerifyEnabled)
 		require.Equal(t, tc.want, svc.parseSettings(values).PasswordResetEnabled, "admin %+v", tc)
 	}
+}
+
+func TestPasswordResetSettingReadErrorFailsClosed(t *testing.T) {
+	svc := NewSettingService(&settingRepoStub{err: ErrServiceUnavailable}, &config.Config{})
+	require.False(t, svc.IsPasswordResetEnabled(context.Background()))
 }

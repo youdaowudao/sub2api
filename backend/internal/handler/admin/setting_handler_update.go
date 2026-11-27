@@ -295,13 +295,14 @@ type UpdateSettingsRequest struct {
 	OpenAIAdvancedSchedulerWeightSessionSticky         *string  `json:"openai_advanced_scheduler_weight_session_sticky"`
 
 	// 余额不足提醒
-	BalanceLowNotifyEnabled         *bool                   `json:"balance_low_notify_enabled"`
-	BalanceLowNotifyThreshold       *float64                `json:"balance_low_notify_threshold"`
-	BalanceLowNotifyRechargeURL     *string                 `json:"balance_low_notify_recharge_url"`
-	BalanceRechargeNotifyEnabled    *bool                   `json:"balance_recharge_notify_enabled"`
-	SubscriptionExpiryNotifyEnabled *bool                   `json:"subscription_expiry_notify_enabled"`
-	AccountQuotaNotifyEnabled       *bool                   `json:"account_quota_notify_enabled"`
-	AccountQuotaNotifyEmails        *[]dto.NotifyEmailEntry `json:"account_quota_notify_emails"`
+	BalanceLowNotifyEnabled           *bool                   `json:"balance_low_notify_enabled"`
+	BalanceLowNotifyThreshold         *float64                `json:"balance_low_notify_threshold"`
+	BalanceLowNotifyRechargeURL       *string                 `json:"balance_low_notify_recharge_url"`
+	BalanceRechargeNotifyEnabled      *bool                   `json:"balance_recharge_notify_enabled"`
+	SubscriptionPurchaseNotifyEnabled *bool                   `json:"subscription_purchase_notify_enabled"`
+	SubscriptionExpiryNotifyEnabled   *bool                   `json:"subscription_expiry_notify_enabled"`
+	AccountQuotaNotifyEnabled         *bool                   `json:"account_quota_notify_enabled"`
+	AccountQuotaNotifyEmails          *[]dto.NotifyEmailEntry `json:"account_quota_notify_emails"`
 
 	// Payment configuration (integrated into settings, full replace)
 	PaymentEnabled                   *bool    `json:"payment_enabled"`
@@ -525,6 +526,11 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	// Keep the effective previous default in the audit snapshot when this field is omitted.
+	passwordResetEnabled := req.PasswordResetEnabled
+	if _, skipped := omitted[service.SettingKeyPasswordResetEnabled]; skipped {
+		passwordResetEnabled = previousSettings.PasswordResetEnabled
 	}
 	quickImportImageGroupID := req.QuickImportImageGroupID
 	if _, skipped := omitted[service.SettingKeyQuickImportImageGroupID]; skipped {
@@ -1558,7 +1564,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		RegistrationEmailSuffixWhitelist:    req.RegistrationEmailSuffixWhitelist,
 		RegistrationEmailDomainQuotaEnabled: registrationEmailDomainQuotaEnabled,
 		PromoCodeEnabled:                    req.PromoCodeEnabled,
-		PasswordResetEnabled:                req.PasswordResetEnabled,
+		PasswordResetEnabled:                passwordResetEnabled,
 		FrontendURL:                         req.FrontendURL,
 		InvitationCodeEnabled:               req.InvitationCodeEnabled,
 		TotpEnabled:                         req.TotpEnabled,
@@ -1945,6 +1951,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				return *req.BalanceRechargeNotifyEnabled
 			}
 			return previousSettings.BalanceRechargeNotifyEnabled
+		}(),
+		SubscriptionPurchaseNotifyEnabled: func() bool {
+			if req.SubscriptionPurchaseNotifyEnabled != nil {
+				return *req.SubscriptionPurchaseNotifyEnabled
+			}
+			return previousSettings.SubscriptionPurchaseNotifyEnabled
 		}(),
 		SubscriptionExpiryNotifyEnabled: func() bool {
 			if req.SubscriptionExpiryNotifyEnabled != nil {
@@ -2450,6 +2462,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		BalanceLowNotifyThreshold:                              updatedSettings.BalanceLowNotifyThreshold,
 		BalanceLowNotifyRechargeURL:                            updatedSettings.BalanceLowNotifyRechargeURL,
 		BalanceRechargeNotifyEnabled:                           updatedSettings.BalanceRechargeNotifyEnabled,
+		SubscriptionPurchaseNotifyEnabled:                      updatedSettings.SubscriptionPurchaseNotifyEnabled,
 		SubscriptionExpiryNotifyEnabled:                        updatedSettings.SubscriptionExpiryNotifyEnabled,
 		AccountQuotaNotifyEnabled:                              updatedSettings.AccountQuotaNotifyEnabled,
 		AccountQuotaNotifyEmails:                               dto.NotifyEmailEntriesFromService(updatedSettings.AccountQuotaNotifyEmails),

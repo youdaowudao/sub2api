@@ -278,3 +278,26 @@ func TestCollectBalanceNotifyRecipients_TrimsWhitespace(t *testing.T) {
 	got := s.collectBalanceNotifyRecipients(u)
 	require.Equal(t, []string{"trimmed@example.com"}, got)
 }
+
+func TestCollectBalanceNotifyRecipients_UsesAccountEmailWithoutExtraVerification(t *testing.T) {
+	s := &BalanceNotifyService{}
+	for _, tc := range []struct {
+		name   string
+		email  string
+		extras []NotifyEmailEntry
+		want   []string
+	}{
+		{"default", " user@example.com ", nil, []string{"user@example.com"}},
+		{"placeholder", "placeholder@linuxdo-connect.invalid", nil, nil},
+		{"invalid", "not-an-email", nil, nil},
+		{"explicit other", "user@example.com", []NotifyEmailEntry{{Email: "other@example.com", Verified: true}}, []string{"other@example.com"}},
+		{"disabled explicit", "user@example.com", []NotifyEmailEntry{{Email: "other@example.com", Verified: true, Disabled: true}}, nil},
+		{"same account without code", "user@example.com", []NotifyEmailEntry{{Email: "USER@example.com"}}, []string{"USER@example.com"}},
+		{"unverified old account after change", "new@example.com", []NotifyEmailEntry{{Email: "old@example.com"}}, nil},
+		{"disabled account", "user@example.com", []NotifyEmailEntry{{Email: "user@example.com", Disabled: true}}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, s.collectBalanceNotifyRecipients(&User{Email: tc.email, BalanceNotifyExtraEmails: tc.extras}))
+		})
+	}
+}

@@ -281,7 +281,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 	weChatEnabled, weChatOpenEnabled, weChatMPEnabled, weChatMobileEnabled := s.weChatOAuthCapabilitiesFromSettings(settings)
 
 	emailVerifyEnabled := settings[SettingKeyEmailVerifyEnabled] == "true"
-	passwordResetEnabled := settings[SettingKeyPasswordResetEnabled] == "true"
+	passwordResetEnabled := passwordResetSettingEnabled(settings)
 	registrationEmailSuffixWhitelist := ParseRegistrationEmailSuffixWhitelist(
 		settings[SettingKeyRegistrationEmailSuffixWhitelist],
 	)
