@@ -1242,6 +1242,9 @@ type openaiNonStreamingResultPassthrough struct {
 
 const openAIStreamKeepaliveBytesKey = "openai_stream_keepalive_bytes"
 
+// GatewayStreamHeartbeatBytesKey identifies queue heartbeats already counted by the handler.
+const GatewayStreamHeartbeatBytesKey = "gateway_stream_heartbeat_bytes"
+
 func recordOpenAIStreamKeepaliveBytes(c *gin.Context, written int) {
 	if c == nil || written <= 0 {
 		return
@@ -1264,6 +1267,49 @@ func openAIStreamClientOutputStarted(c *gin.Context, localStarted bool) bool {
 	// not semantic model output and therefore must not block a safe retry.
 	// Without a compact keepalive this is equivalent to checking Writer.Size().
 	return OpenAICompactKeepaliveAdjustedWrittenSize(c) >= 0
+}
+
+// Only ordinary OpenAI HTTP stream recovery may also disregard queue heartbeats.
+// Keep the legacy output boundary for terminal error handling and compact fallback.
+func openAIHTTPStreamRecoveryOutputStarted(c *gin.Context, account *Account, localStarted bool) bool {
+	if localStarted || account == nil || account.Platform != PlatformOpenAI || c == nil || c.Writer == nil {
+		return openAIStreamClientOutputStarted(c, localStarted)
+	}
+	size := OpenAICompactKeepaliveAdjustedWrittenSize(c)
+	if size < 0 {
+		return false
+	}
+	value, _ := c.Get(GatewayStreamHeartbeatBytesKey)
+	heartbeatBytes, _ := value.(int)
+	return heartbeatBytes <= 0 || size != heartbeatBytes
+}
+
+// Only the observed empty relay-ready frame is metadata on OpenAI HTTP streams.
+// Unknown events and relay-ready events carrying any other data retain their
+// existing output classification. The shared WebSocket classifiers stay unchanged.
+func isOpenAIHTTPRelayReadyMetadata(account *Account, data, eventType, pendingSSEEventType string) bool {
+	const relayReady = "response.relay_ready"
+	if account == nil || account.Platform != PlatformOpenAI || eventType != relayReady {
+		return false
+	}
+	if pending := strings.TrimSpace(pendingSSEEventType); pending != "" && pending != relayReady {
+		return false
+	}
+	if !gjson.Valid(data) {
+		return false
+	}
+	object := gjson.Parse(data)
+	if !object.IsObject() {
+		return false
+	}
+	members := 0
+	valid := true
+	object.ForEach(func(key, value gjson.Result) bool {
+		members++
+		valid = key.String() == "type" && value.Type == gjson.String && value.String() == relayReady
+		return valid && members == 1
+	})
+	return valid && members == 1
 }
 
 // Lifecycle metadata and transport heartbeats are not model output.
@@ -2156,6 +2202,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	capacityFailoverSuppressedLogged := false
 	failedMessage := ""
 	clientOutputStarted := false
+	relayReadySeen := false
 	codexFailureTerminal := account != nil && account.Platform == PlatformOpenAI
 	failureDelivered := false
 	suppressCurrentEvent := false
@@ -2236,7 +2283,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			s.handleOpenAIStreamTerminalAccountSideEffects(c, account, bareErrorPayload, failedMessage, resp.Header, mappedModel)
 			bareErrorAccountSideEffectsPending = false
 		}
-		if clientDisconnected || !writePendingLines() {
+		if clientDisconnected {
+			return
+		}
+		// A staged relay-ready followed by a bare error can reach EOF before
+		// normal output has stopped the heartbeat. Stop it before writing the
+		// attempt's pending lines and synthesized terminal to the raw writer.
+		stopKeepalive()
+		if !writePendingLines() {
 			return
 		}
 		if _, err := fmt.Fprint(w, buildOpenAIResponseFailedSSE(responseID, originalModel, createdAtTracker.Value(), bareErrorPayload, failedMessage)); err != nil {
@@ -2279,6 +2333,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			suppressCurrentEvent = codexFailureTerminal && (eventType == "error" || (sawBareError && !sawResponseFailed && eventType != "response.failed"))
 		}
 		lineStartsClientOutput := false
+		relayReady := false
 		forceFlushFailedEvent := false
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
@@ -2320,15 +2375,15 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			if codexFailureTerminal && sawBareError && !sawResponseFailed && eventType != "response.failed" {
 				suppressCurrentEvent = true
 			}
-			if !capacityFailoverSuppressedLogged && account != nil && account.Platform == PlatformOpenAI &&
-				(eventType == "error" || eventType == "response.failed") &&
-				openAIStreamClientOutputStarted(c, clientOutputStarted) &&
-				isOpenAIUpstreamCapacityShedEvent(dataBytes) {
-				logOpenAICapacityFailoverSuppressed(ctx, account, "passthrough_sse", upstreamRequestID, eventType)
-				capacityFailoverSuppressedLogged = true
-			}
 			cyberHit := false
 			if eventType == "response.failed" || eventType == "error" {
+				recoveryStarted := openAIHTTPStreamRecoveryOutputStarted(c, account, clientOutputStarted)
+				legacyStarted := openAIStreamClientOutputStarted(c, clientOutputStarted) || relayReadySeen
+				if !capacityFailoverSuppressedLogged && account != nil && account.Platform == PlatformOpenAI &&
+					recoveryStarted && isOpenAIUpstreamCapacityShedEvent(dataBytes) {
+					logOpenAICapacityFailoverSuppressed(ctx, account, "passthrough_sse", upstreamRequestID, eventType)
+					capacityFailoverSuppressedLogged = true
+				}
 				if codexFailureTerminal && eventType == "error" {
 					sawBareError = true
 					bareErrorPayload = append(bareErrorPayload[:0], dataBytes...)
@@ -2356,13 +2411,24 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 						UpstreamOutTok: usage.OutputTokens,
 					})
 				}
-				outputStarted := openAIStreamClientOutputStarted(c, clientOutputStarted)
-				if !outputStarted && !cyberHit {
+				if !legacyStarted && !cyberHit {
 					if compactErr := newOpenAICompactFallbackSignal(c, dataBytes, failedMessage); compactErr != nil {
 						return resultWithUsage(), compactErr
 					}
 				}
-				if outputStarted && !cyberHit {
+				if !recoveryStarted && !cyberHit {
+					shouldFailover := false
+					if eventType == "error" {
+						shouldFailover = openAIStreamErrorEventShouldFailover(dataBytes, failedMessage)
+					} else {
+						shouldFailover = openAIStreamFailedEventShouldFailover(dataBytes, failedMessage)
+					}
+					if shouldFailover {
+						return resultWithUsage(),
+							s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header)
+					}
+				}
+				if legacyStarted && !cyberHit {
 					if codexFailureTerminal && eventType == "error" {
 						// Wait for the authoritative response.failed before mutating
 						// account health; EOF synthesis applies the pending effect.
@@ -2377,19 +2443,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 						s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "stream_failed", dataBytes, failedMessage)
 					}
 				}
-				if !outputStarted {
-					shouldFailover := false
-					if !cyberHit {
-						if eventType == "error" {
-							shouldFailover = openAIStreamErrorEventShouldFailover(dataBytes, failedMessage)
-						} else {
-							shouldFailover = openAIStreamFailedEventShouldFailover(dataBytes, failedMessage)
-						}
-					}
-					if shouldFailover {
-						return resultWithUsage(),
-							s.newOpenAIStreamFailoverErrorWithModel(c, account, true, upstreamRequestID, dataBytes, failedMessage, mappedModel, resp.Header)
-					}
+				if !legacyStarted {
 					if !cyberHit && !sawBareError {
 						if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {
 							// 命中透传规则也要记录 ops 上游错误事件（对齐 CC/Messages 与
@@ -2427,13 +2481,14 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			if sanitizedData, sanitized := sanitizeOpenAIResponseFailedEventForClient(
 				dataBytes,
 				eventType,
-				openAIStreamClientOutputStarted(c, clientOutputStarted),
+				openAIStreamClientOutputStarted(c, clientOutputStarted) || relayReadySeen,
 			); sanitized {
 				dataBytes = sanitizedData
 				trimmedData = strings.TrimSpace(string(sanitizedData))
 				line = "data: " + string(sanitizedData)
 			}
-			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
+			relayReady = isOpenAIHTTPRelayReadyMetadata(account, trimmedData, eventType, pendingSSEEventType)
+			lineStartsClientOutput = forceFlushFailedEvent || (!relayReady && openAIStreamDataStartsClientOutput(trimmedData, eventType))
 			if lineStartsClientOutput && trimmedData != "[DONE]" && !openAIStreamEventTypeIsTerminal(eventType) {
 				semanticOutputSeen = true
 			}
@@ -2446,7 +2501,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
 				return resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
 			}
-			if firstTokenMs == nil && openAIStreamDataStartsTTFT(trimmedData, eventType, forceFlushFailedEvent, ttftMode) {
+			if firstTokenMs == nil && !relayReady && openAIStreamDataStartsTTFT(trimmedData, eventType, forceFlushFailedEvent, ttftMode) {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
 			}
@@ -2464,6 +2519,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		if !clientDisconnected && !failureDelivered && !suppressCurrentEvent {
 			if !clientOutputStarted && !lineStartsClientOutput {
 				pendingLines = append(pendingLines, line)
+				relayReadySeen = relayReadySeen || relayReady
 				continue
 			}
 			// 真实输出开始，心跳的使命结束。停拍是幂等的，且会与心跳 goroutine
@@ -2516,7 +2572,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] SSE line too long: account=%d max_size=%d error=%v", account.ID, maxLineSize, err)
 			return resultWithUsage(), err
 		}
-		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+		if !openAIHTTPStreamRecoveryOutputStarted(c, account, clientOutputStarted) {
 			msg := "OpenAI stream disconnected before completion"
 			if errText := strings.TrimSpace(err.Error()); errText != "" {
 				msg += ": " + errText
@@ -2545,7 +2601,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			zap.Int64("account_id", account.ID),
 			zap.String("upstream_request_id", upstreamRequestID),
 		).Info("OpenAI passthrough 上游流在未收到 [DONE] 时结束，疑似断流")
-		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+		if !openAIHTTPStreamRecoveryOutputStarted(c, account, clientOutputStarted) {
 			return resultWithUsage(),
 				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before a terminal event")
 		}
