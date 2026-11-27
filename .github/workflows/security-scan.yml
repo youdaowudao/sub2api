@@ -1,9 +1,9 @@
 name: Security Scan
 
 on:
+  # 与 CI 相同：只在推送非 main 分支时运行；main 由每周定时扫描覆盖。
   push:
-    branches: ['**']
-  pull_request:
+    branches: ['**', '!main']
   schedule:
     - cron: '0 3 * * 1'
 

@@ -1,9 +1,9 @@
 name: CI
 
 on:
+  # 只在推送非 main 分支时运行一次：PR 不重复跑；main 只接受已通过检查且包含最新 main 的 PR 合并，合并后不重跑。
   push:
-    branches: ['**']
-  pull_request:
+    branches: ['**', '!main']
 
 permissions:
   contents: read
@@ -32,6 +32,25 @@ jobs:
         env:
           GOFLAGS: -v
         run: make test-integration
+
+  # RED 回归核对：提交说明写了 "RED: ./<包> <测试名>" 时，证明该测试在旧代码上失败、在新代码上通过；没写且不需要时直接通过。
+  red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Verify Go version
+        run: |
+          go version | grep -q 'go1.27.4'
+      - name: RED check
+        run: python3 tools/red_check.py
 
   frontend:
     runs-on: ubuntu-latest
