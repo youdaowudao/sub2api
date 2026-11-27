@@ -581,7 +581,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
-import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
+import type { Account, AccountListItem, BasePaginationResponse, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
 const accountRoute = useRoute()
 const accountRouter = useRouter()
@@ -1280,7 +1280,7 @@ const {
   handlePageChange: baseHandlePageChange,
   handlePageSizeChange: baseHandlePageSizeChange
 } = useTableLoader<AccountListItem, any>({
-  fetchFn: async (page, size, filters, options) => {
+  fetchFn: async (page, size, filters, options): Promise<BasePaginationResponse<AccountListItem>> => {
     if (listPreparationPending.value) throw new DOMException('Aborted', 'AbortError')
     const revision = scheduleRevision
     const routeRevision = locationRevision
@@ -2918,7 +2918,7 @@ watch(() => accountRoute?.query.account_id, async value => {
   closeAccountToolsDropdown(); showAutoRefreshDropdown.value = false; showExportDataDialog.value = false
   clearSelection()
   accounts.value = []
-  lastListKey.value = ''
+  lastListKey.value = ''; metricListError.value = ''
   pagination.total = 0; pagination.pages = 0
   showBulkEdit.value = false; bulkEditTarget.value = null
   menu.show = false; menu.acc = null
