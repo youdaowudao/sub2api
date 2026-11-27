@@ -78,3 +78,10 @@ export function buildGroupSelectOptionsByCategory<T extends DisplayGroup & Group
     ...groups.map(toOption),
   ])
 }
+
+/** Shared presentation for admin group selectors. Eligibility is decided by each caller. */
+export function buildAdminGroupSelectOptions<T extends DisplayGroup & GroupWithCategory, Option>(
+  groups: readonly T[], toOption: (group: T) => Option, t: (key: string) => string,
+): (Option | GroupDisplayHeader)[] {
+  return buildGroupSelectOptionsByCategory(groups, toOption, category => t(`keys.providers.${category}`))
+}

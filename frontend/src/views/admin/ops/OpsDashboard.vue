@@ -141,6 +141,7 @@
 </template>
 
 <script setup lang="ts">
+import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
 import AccountPerformancePanel from '@/components/admin/usage/AccountPerformancePanel.vue'
 import { makeTodayOpsRange, type PreciseAdminRange } from '@/utils/adminRecentRange'
@@ -201,13 +202,13 @@ const lastUpdated = ref<Date | null>(new Date())
 const timeRange = ref<TimeRange>('1h')
 const platform = ref<string>('')
 const groupId = ref<number | null>(null)
-const groups = ref<Array<{ id: number; name: string; platform: string }>>([])
+const groups = ref<Array<{ id: number; name: string; platform: string; display_category?: string; sort_order?: number }>>([])
 const groupOptionsFailed = ref(false)
 const groupOptions = computed(() => {
   const available = groups.value.filter(group => !platform.value || group.platform === platform.value)
-  const options: Array<{ value: number | null; label: string }> = [
+  const options: Array<{ value: number | string | null; label: string; kind?: string; disabled?: boolean }> = [
     { value: null, label: t('common.all') },
-    ...available.map(group => ({ value: group.id, label: group.name })),
+    ...buildAdminGroupSelectOptions(available, group => ({ value: group.id, label: group.name }), t),
   ]
   const selected = groupId.value
   if (selected !== null && !options.some(option => option.value === selected)) {

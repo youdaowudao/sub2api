@@ -1,4 +1,4 @@
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import { getCacheHitRateRangeDates } from '@/utils/dateRange'
 
@@ -7,5 +7,5 @@ export function useCacheHitRateDefaultRange(onChange: () => void) {
   const dates = { get value() { return getCacheHitRateRangeDates(settings.cacheHitRateDefaultRange) } }
   watch(() => settings.cacheHitRateDefaultRange, onChange)
   void settings.fetch()
-  return { dates }
+  return { dates, loading: computed(() => settings.loading) }
 }

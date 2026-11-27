@@ -507,6 +507,25 @@ export default {
 
     // Usage Records
     usage: {
+      queryThisUser: "查询此用户",
+      filterThisAccount: "按此账号筛选",
+      filterThisGroup: "按此分组筛选",
+      filterThisModel: "按此模型筛选",
+      filterThisKey: "按此 API Key 筛选",
+      manageThisAccount: "前往账号管理",
+      clearKeepTime: "清空筛选（保留时间）",
+      collapseOverview: "收起统计概览",
+      expandOverview: "展开统计概览",
+      focusMode: "专注查看",
+      exitFocus: "退出专注查看",
+      accountRanking: "高频账号 · {range}",
+      previousAccountRanking: "选择账号前的排行 · {range}",
+      noAccountRanking: "暂无当前条件的排行，可输入账号名称搜索",
+      deletedAccount: "已删除",
+      modelRankingBasis: '按原请求模型统计口径排序',
+      onlyUsage: '仅用量',
+      onlyErrors: '仅错误',
+      noModelRanking: "当前条件暂无模型排行，可输入完整模型名或切换原始模型统计",
       recentRange: {
         '30': '最近 30 分钟',
         '180': '最近 3 小时',

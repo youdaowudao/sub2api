@@ -208,6 +208,63 @@ describe('admin UsageView route filters', () => {
     vi.useRealTimers()
   })
 
+  it('ranks requested models by tokens and accounts by requests without a second performance query', async () => {
+    getModelStats.mockResolvedValueOnce({ models: [
+      { model: 'alpha', total_tokens: 10, requests: 20 },
+      { model: 'zeta', total_tokens: 100, requests: 2 },
+      { model: 'beta', total_tokens: 100, requests: 10 },
+    ] })
+    const result = { window_start: '2026-11-27T00:00:00Z', window_end: '2026-11-27T01:00:00Z', items: [
+      { id: 3, name: 'low', requests: 1 },
+      { id: 2, name: 'high', requests: 50 },
+      { id: 1, name: '', requests: 50, account_exists: false },
+      { id: 4, name: 'none', requests: 0 },
+    ] }
+    getCacheHitRate.mockClear()
+    getCacheHitRate.mockImplementation(async (params) => params.dimension === 'account' && !params.account_id ? result : { items: [] })
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    expect(vm.modelNameOptions.map((m: any) => m.value)).toEqual(['beta','zeta','alpha'])
+    expect(vm.accountCandidates.map((a: any) => a.id)).toEqual([1,2,3])
+    expect(vm.accountCandidates[0]).toMatchObject({name:'#1',deleted:true})
+    expect(getCacheHitRate).toHaveBeenCalledTimes(3)
+    vm.filters.account_id = 2
+    vm.applyFilters()
+    await flushPromises()
+    expect(vm.accountCandidates.map((a: any) => a.id)).toEqual([1,2,3])
+    expect(getCacheHitRate).toHaveBeenCalledTimes(6)
+    vm.filters.group_id = 22
+    vm.applyFilters()
+    await flushPromises()
+    expect(vm.accountCandidates).toEqual([])
+    expect(getCacheHitRate).toHaveBeenCalledTimes(9)
+    wrapper.unmount()
+    getCacheHitRate.mockReset().mockResolvedValue({items:[]})
+  })
+
+  it('queries the balance-history user once on the same tab and keeps the selected time', async () => {
+    routeQuery.start_time = '2026-11-27T00:00:00Z'
+    routeQuery.end_time = '2026-11-27T01:00:00Z'
+    getById.mockResolvedValueOnce({id:7,email:'history@example.test'})
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.filters.api_key_id = 99
+    await vm.handleUserClick(7)
+    expect(vm.showBalanceHistoryModal).toBe(true)
+    list.mockClear(); getById.mockClear()
+    vm.queryBalanceUser()
+    await flushPromises()
+    expect(vm.showBalanceHistoryModal).toBe(false)
+    expect(vm.activeTab).toBe('usage')
+    expect(vm.filters.api_key_id).toBeUndefined()
+    expect(list).toHaveBeenCalledTimes(1)
+    expect(list.mock.lastCall?.[0]).toMatchObject({user_id:7,start_time:new Date(routeQuery.start_time).toISOString(),end_time:new Date(routeQuery.end_time).toISOString()})
+    expect(getById).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('uses the same exact three-hour window for every read path and leaves cleanup disabled', async () => {
     const range = { start_time:'2026-11-26T22:00:00.000Z', end_time:'2026-11-27T01:00:00.000Z' }
     Object.assign(routeQuery, range)
@@ -777,7 +834,7 @@ describe('admin UsageView errors tab filter forwarding', () => {
     expect(routerPush).not.toHaveBeenCalled()
     expect(routerReplace).not.toHaveBeenCalled()
     expect(listErrorRecords).toHaveBeenCalledWith(expect.objectContaining({
-      scope: 'request', view: 'all', display: 'raw', finance: 'include',
+      scope: 'request', view: 'all', display: 'grouped', finance: 'include',
       model: 'gpt-5.3-codex', account_id: 7, group_id: 3,
       user_id: 42, api_key_id: 43, phase: 'upstream', category: 'quota', status_codes: '0',
       start_time: new Date('2026-08-01T00:00:00').toISOString(),
@@ -889,7 +946,8 @@ describe('admin UsageView errors tab filter forwarding', () => {
     const firstSignal = listErrorRecords.mock.calls[0][1].signal
     const table = () => wrapper.findComponent({ name: 'OpsErrorLogTable' })
     expect(table().props('visibleColumnKeys')).not.toContain('model')
-    expect(table().props('visibleColumnKeys')).toContain('user')
+    expect(table().props('visibleColumnKeys')).not.toContain('user')
+    expect(table().props('visibleColumnKeys')).toContain('message')
     await tabs[0].trigger('click')
     expect(firstSignal.aborted).toBe(true)
     await tabs[1].trigger('click')

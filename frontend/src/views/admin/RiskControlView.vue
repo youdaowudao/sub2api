@@ -750,8 +750,8 @@
                 <input v-model.trim="groupSearch" type="search" class="input pl-9" :placeholder="t('admin.riskControl.searchGroups')" />
               </div>
               <div class="grid max-h-[420px] grid-cols-1 gap-3 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3">
-                <button
-                  v-for="group in filteredGroups"
+                <CategorizedGroupList :groups="filteredGroups" #default="{ group }">
+                  <button
                   :key="group.id"
                   type="button"
                   class="flex min-h-20 items-center justify-between rounded-lg border p-4 text-left transition-colors"
@@ -769,6 +769,7 @@
                     <Icon name="check" size="xs" :stroke-width="2" />
                   </span>
                 </button>
+                </CategorizedGroupList>
                 <p v-if="filteredGroups.length === 0" class="text-sm text-gray-500 dark:text-gray-400">{{ t('admin.riskControl.noGroups') }}</p>
               </div>
             </div>
@@ -1147,6 +1148,8 @@
 </template>
 
 <script setup lang="ts">
+import CategorizedGroupList from '@/components/common/CategorizedGroupList.vue'
+import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 
 import { computed, onMounted, onUnmounted, reactive, ref, toRaw } from 'vue'
@@ -1487,10 +1490,10 @@ const endpointOptions = computed<SelectOption[]>(() => [
 
 const groupFilterOptions = computed<SelectOption[]>(() => [
   { value: 0, label: t('admin.riskControl.filters.allGroups') },
-  ...sortGroupsForDisplay(groups.value).map((group) => ({
+  ...buildAdminGroupSelectOptions(groups.value, (group) => ({
     value: group.id,
     label: `${group.name} (${group.platform})`,
-  })),
+  }), t),
 ])
 
 const selectedGroupCount = computed(() => String(configForm.group_ids.length))

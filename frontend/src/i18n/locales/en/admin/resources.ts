@@ -510,6 +510,25 @@ export default {
 
     // Usage Records
     usage: {
+      queryThisUser: "Query this user",
+      filterThisAccount: "Filter by this account",
+      filterThisGroup: "Filter by this group",
+      filterThisModel: "Filter by this model",
+      filterThisKey: "Filter by this API key",
+      manageThisAccount: "Open account management",
+      clearKeepTime: "Clear filters (keep time)",
+      collapseOverview: "Collapse statistics",
+      expandOverview: "Expand statistics",
+      focusMode: "Focus view",
+      exitFocus: "Exit focus view",
+      accountRanking: "Frequent accounts · {range}",
+      previousAccountRanking: "Ranking before account selection · {range}",
+      noAccountRanking: "No ranking for these filters. Search by account name.",
+      deletedAccount: "Deleted",
+      modelRankingBasis: 'Ranked by requested-model statistics',
+      onlyUsage: 'Usage only',
+      onlyErrors: 'Errors only',
+      noModelRanking: "No ranking for these filters. Enter a model name or switch to requested model statistics.",
       recentRange: {
         '30': 'Last 30 minutes',
         '180': 'Last 3 hours',

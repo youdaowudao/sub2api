@@ -1,5 +1,14 @@
 export default {
     accounts: {
+      setDefaultGroup: "设为默认分组",
+      cancelDefaultGroup: "取消默认分组",
+      currentDefaultGroup: "默认：{name}",
+      defaultGroupUnavailable: "默认分组不可选，已显示全部分组",
+      todaySortMetric: "排序指标",
+      reverseSort: "反向排序",
+      metricSortFailedPrevious: "排序数据更新失败，当前显示同一条件的上次结果。请重试或改用其他排序。",
+      metricSortFailed: "排序数据更新失败，请重试或改用其他排序。",
+      cacheSortRangePending: "缓存率区间已变更，刷新列表后生效（当前排序区间：{range}）",
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',

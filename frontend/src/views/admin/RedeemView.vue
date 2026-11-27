@@ -611,7 +611,7 @@
 </template>
 
 <script setup lang="ts">
-import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -665,16 +665,15 @@ const subscriptionGroups = ref<Group[]>([])
 
 // 订阅类型分组选项
 const subscriptionGroupOptions = computed(() => {
-  return sortGroupsForDisplay(subscriptionGroups.value
-    .filter((g) => g.subscription_type === 'subscription'))
-    .map((g) => ({
+  return buildAdminGroupSelectOptions(subscriptionGroups.value
+    .filter((g) => g.subscription_type === 'subscription'), (g) => ({
       value: g.id,
       label: g.name,
       description: g.description,
       platform: g.platform,
       subscriptionType: g.subscription_type,
       rate: g.rate_multiplier
-    }))
+    }), t)
 })
 
 const batchGroupOptions = computed(() => [

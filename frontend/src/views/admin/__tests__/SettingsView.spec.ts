@@ -804,7 +804,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
     await flushPromises();
     const selector = wrapper.get('[data-testid="quick-import-image-group"]');
-    expect(selector.findAll("option").map((option) => option.attributes("value"))).toEqual(["0", "-1", "34"]);
+    expect(selector.findAll("option").map((option) => option.attributes("value"))).toEqual(["0", "-1", "__group_category:openai", "34"]);
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     expect(updateSettings.mock.lastCall?.[0]).not.toHaveProperty("quick_import_image_group_id");
@@ -2141,7 +2141,7 @@ describe("admin SettingsView wechat connect controls", () => {
     await add!.trigger('click');
     const select = wrapper.findComponent('.default-sub-group-select');
     expect(select.props('modelValue')).toBe(30);
-    expect((select.props('options') as { value: number }[]).map(o => o.value)).toEqual([10, 30]);
+    expect((select.props('options') as { value: number }[]).map(o => o.value)).toEqual(['__group_category:openai', 10, '__group_category:anthropic', 30]);
     await wrapper.get('[data-testid="auth-source-email-enabled"]').setValue(true);
     const sourceAdd = wrapper.findAll('button').filter(n => n.text() === 'admin.settings.defaults.addDefaultSubscription')[1];
     await sourceAdd!.trigger('click');

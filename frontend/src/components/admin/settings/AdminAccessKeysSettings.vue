@@ -51,7 +51,7 @@
       <fieldset v-for="(rule, index) in draft.policy.rules" :key="index" class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-700">
         <legend>{{ t('adminAccessKeys.ruleLegend', { index: index + 1 }) }}</legend>
         <label class="flex gap-2"><input v-model="rule.all_groups" type="checkbox" />{{ t('adminAccessKeys.allGroups') }}</label>
-        <label class="block">{{ t('adminAccessKeys.groups') }}<select v-model="rule.group_ids" :data-test="`groups-${index}`" multiple class="input mt-1" :disabled="rule.all_groups"><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option></select></label>
+        <label class="block">{{ t('adminAccessKeys.groups') }}<select v-model="rule.group_ids" :data-test="`groups-${index}`" multiple class="input mt-1" :disabled="rule.all_groups"><optgroup v-for="section in groupedGroups" :key="section.category" :label="t('keys.providers.' + section.category)"><option v-for="group in section.groups" :key="group.id" :value="group.id">{{ group.name }}</option></optgroup></select></label>
         <label class="flex gap-2"><input v-model="rule.include_ungrouped" type="checkbox" />{{ t('adminAccessKeys.includeUngrouped') }}</label>
         <div>{{ t('adminAccessKeys.accountTypes') }}<div class="flex flex-wrap gap-4"><label v-for="type in accountTypes" :key="type" class="flex gap-2"><input v-model="rule.account_types" type="checkbox" :value="type" />{{ type }}</label></div></div>
         <label class="block">{{ t('adminAccessKeys.platforms') }}<select v-model="rule.platforms" multiple class="input mt-1"><option v-for="platform in CONCRETE_PLATFORM_OPTIONS" :key="platform.value" :value="platform.value">{{ platform.label }}</option></select></label>
@@ -87,6 +87,7 @@
 </template>
 
 <script setup lang="ts">
+import { groupGroupsByCategory } from '@/utils/groupDisplay'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import * as api from '@/api/admin/adminAccessKeys'
@@ -103,7 +104,8 @@ const { permissionLabel, permissionCategory } = useAdminAccessKeyPermissions()
 const stepUp = useStepUp()
 const items = ref<AdminKey[]>([])
 const permissions = ref<Permission[]>([])
-const groups = ref<{ id: number; name: string }[]>([])
+const groups = ref<{ id: number; name: string; platform: string; display_category?: string; sort_order?: number }[]>([])
+const groupedGroups = computed(() => groupGroupsByCategory(groups.value))
 const loading = ref(false)
 const loaded = ref(false)
 const busy = ref(false)

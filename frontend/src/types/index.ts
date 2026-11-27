@@ -1430,7 +1430,7 @@ export interface Account {
 
 // The admin account list may return this compact shape when lite=1. Detail
 // operations still use Account from /admin/accounts/:id.
-export type AccountListItem = Omit<Account, 'groups'>
+export type AccountListItem = Omit<Account, 'groups'> & { cache_hit_rate_stats?: CacheHitRateItem; today_stats?: WindowStats }
 
 export interface AccountSchedulerGroupScore {
   group_id?: number | null

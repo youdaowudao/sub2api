@@ -24,7 +24,9 @@
         :server-side-sort="serverSideSort"
         :default-sort-key="defaultSortKey"
         :default-sort-order="defaultSortOrder"
-        :column-width-storage-key="columnWidthStorageKey"
+         :column-width-storage-key="columnWidthStorageKey"
+        :top-horizontal-scroll="topHorizontalScroll"
+        :controlled-sort="controlledSort"
         @sort="(key, order) => $emit('sort', key, order)"
       >
         <template #cell-user="{ row }">
@@ -47,10 +49,12 @@
 
         <template #cell-api_key="{ row }">
           <span class="text-sm text-gray-900 dark:text-white">{{ row.api_key?.name || '-' }}</span>
+        <UsageQuickFilterButton v-if="quickFilters && row.api_key_id && row.user_id" :label="t('admin.usage.filterThisKey')" @click="$emit('quickFilter', { field: 'api_key_id', value: row.api_key_id, label: row.api_key?.name, userId: row.user_id, userLabel: row.user?.email })" />
         </template>
 
         <template #cell-account="{ row }">
           <span class="text-sm text-gray-900 dark:text-white">{{ row.account?.name || '-' }}</span>
+        <UsageQuickFilterButton v-if="quickFilters && row.account_id" :label="t('admin.usage.filterThisAccount')" @click="$emit('quickFilter', { field: 'account_id', value: row.account_id, label: row.account?.name })" /><button v-if="quickFilters && row.account_id && row.account" type="button" class="ml-1 text-xs text-primary-600" :title="t('admin.usage.manageThisAccount')" @click.stop="$emit('manageAccount', row.account_id)">↗</button>
         </template>
 
         <template #cell-model="{ row }">
@@ -89,6 +93,7 @@
               </span>
             </div>
           </div>
+        <UsageQuickFilterButton v-if="quickFilters && row.model" :label="t('admin.usage.filterThisModel')" @click="$emit('quickFilter', { field: 'model', value: row.model })" />
         </template>
 
         <template #cell-reasoning_effort="{ row }">
@@ -123,6 +128,7 @@
             {{ row.group.name }}
           </span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        <UsageQuickFilterButton v-if="quickFilters && row.group_id" :label="t('admin.usage.filterThisGroup')" @click="$emit('quickFilter', { field: 'group_id', value: row.group_id, label: row.group?.name })" />
         </template>
 
         <template #cell-stream="{ row }">
@@ -594,6 +600,8 @@ function accountBilled(row: { total_cost?: number | null; account_stats_cost?: n
 
 
 import DataTable from '@/components/common/DataTable.vue'
+import UsageQuickFilterButton from './UsageQuickFilterButton.vue'
+import type { UsageQuickFilter } from '@/utils/usageQuickFilter'
 import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -614,6 +622,9 @@ interface Props {
   flat?: boolean
   /** 设置后表头可拖动调整列宽，并按这个 key 记在本浏览器 */
   columnWidthStorageKey?: string
+  topHorizontalScroll?: boolean
+  quickFilters?: boolean
+  controlledSort?: { key: string; order: 'asc' | 'desc' }
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -629,6 +640,8 @@ const emit = defineEmits<{
   userClick: [userID: number, email?: string]
   sort: [key: string, order: 'asc' | 'desc']
   ipGeoBatchFailed: []
+  quickFilter: [filter: UsageQuickFilter]
+  manageAccount: [id: number]
 }>()
 const { t } = useI18n()
 const appStore = useAppStore()

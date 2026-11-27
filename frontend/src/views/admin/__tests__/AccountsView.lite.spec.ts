@@ -4,6 +4,7 @@ import { defineComponent, ref } from 'vue'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 
 import AccountsView from '../AccountsView.vue'
+import { adminAPI } from '@/api/admin'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
 import AccountScheduleTimer from '@/components/account/AccountScheduleTimer.vue'
 
@@ -217,6 +218,19 @@ describe('admin AccountsView lite account list', () => {
     vi.restoreAllMocks()
   })
 
+  it('uses the saved default group directly and reuses sorted cache metrics', async () => {
+    localStorage.setItem('account-filter-values', JSON.stringify({platform:'',status:'',default_group:'7'}))
+    listAccounts.mockResolvedValue({items:[{...listRow,cache_hit_rate_stats:{id:42,requests:6,cache_hit_rate:80}}],total:1,pages:1})
+    vi.mocked(adminAPI.usage.getCacheHitRate).mockClear()
+    const wrapper = mountView()
+    await flushPromises()
+    expect(listAccounts).toHaveBeenCalledTimes(1)
+    expect(listAccounts.mock.calls[0][2]).toMatchObject({group:'7',sort_by:'cache_hit_rate',sort_order:'desc'})
+    expect(adminAPI.usage.getCacheHitRate).not.toHaveBeenCalled()
+    expect((wrapper.vm as any).cacheHitRateByAccountId[42]?.cache_hit_rate).toBe(80)
+    wrapper.unmount()
+  })
+
   it('syncs the selected row without clearing notes missing from the upstream', async () => {
     const account = { ...listRow, type: 'apikey', notes: 'local notes' }
     listAccounts.mockResolvedValue({ items: [account], total: 1, page: 1, page_size: 20, pages: 1 })
@@ -302,6 +316,150 @@ describe('admin AccountsView lite account list', () => {
     expect(listAccounts.mock.lastCall?.[2].account_id).toBeUndefined()
     expect(wrapper.find('account-bulk-actions-bar-stub').exists()).toBe(true)
     wrapper.unmount()
+  })
+
+  it('waits for the initial default group once while route location changes', async () => {
+    localStorage.setItem('account-filter-values',JSON.stringify({platform:'',status:'',default_group:'7'}))
+    let finishGroups!: (rows: unknown[])=>void
+    getAllGroups.mockImplementationOnce(()=>new Promise(resolve=>{finishGroups=resolve}))
+    const router=createRouter({history:createMemoryHistory(),routes:[{path:'/admin/accounts',component:{template:'<div />'}}]})
+    await router.push('/admin/accounts')
+    const wrapper=mountView(true,false,router)
+    try {
+      await flushPromises()
+      expect(listAccounts).not.toHaveBeenCalled()
+      expect(wrapper.find('[aria-busy="true"][inert]').exists()).toBe(true)
+      await router.push('/admin/accounts?account_id=42');await flushPromises()
+      await router.replace('/admin/accounts');await flushPromises()
+      expect(listAccounts).not.toHaveBeenCalled()
+      finishGroups([{id:7,name:'codex',platform:'openai'}]);await flushPromises()
+      expect(listAccounts).toHaveBeenCalledTimes(1)
+      expect(listAccounts.mock.lastCall?.[2]).toMatchObject({group:'7',sort_by:'cache_hit_rate'})
+      expect(listAccounts.mock.lastCall?.[2].account_id).toBeUndefined()
+    } finally {wrapper.unmount()}
+  })
+
+  it('applies only the latest location exit after a slow group read', async () => {
+    localStorage.setItem('account-filter-values',JSON.stringify({platform:'',status:'',default_group:'999'}))
+    let finishGroups!: (rows: unknown[])=>void
+    getAllGroups.mockImplementationOnce(()=>new Promise(resolve=>{finishGroups=resolve}))
+    const router=createRouter({history:createMemoryHistory(),routes:[{path:'/admin/accounts',component:{template:'<div />'}}]})
+    await router.push('/admin/accounts?account_id=42')
+    const wrapper=mountView(true,false,router)
+    try {
+      await flushPromises()
+      expect(listAccounts).toHaveBeenCalledTimes(1)
+      await router.replace('/admin/accounts');await flushPromises()
+      expect(listAccounts).toHaveBeenCalledTimes(1)
+      expect(wrapper.find('[aria-busy="true"][inert]').exists()).toBe(true)
+      expect(wrapper.find('account-bulk-actions-bar-stub').exists()).toBe(false)
+      await (wrapper.vm as any).openBulkEditFiltered()
+      expect(listAccounts).toHaveBeenCalledTimes(1)
+      await router.push('/admin/accounts?account_id=43');await flushPromises()
+      expect(listAccounts).toHaveBeenCalledTimes(2)
+      expect(listAccounts.mock.lastCall?.[2]).toMatchObject({account_id:43,group:''})
+      await router.replace('/admin/accounts');await flushPromises()
+      expect(listAccounts).toHaveBeenCalledTimes(2)
+      finishGroups([{id:7,name:'codex',platform:'openai'}]);await flushPromises()
+      expect(listAccounts).toHaveBeenCalledTimes(3)
+      expect(listAccounts.mock.lastCall?.[2]).toMatchObject({group:''})
+      expect(listAccounts.mock.lastCall?.[2].account_id).toBeUndefined()
+      expect(showWarning).toHaveBeenCalledTimes(1)
+      expect(getAllGroups).toHaveBeenCalledTimes(1)
+    } finally {wrapper.unmount()}
+  })
+
+  it('does not preview the wrong bulk scope while restoring a valid default group', async () => {
+    localStorage.setItem('account-filter-values',JSON.stringify({platform:'',status:'',default_group:'7'}))
+    let finishGroups!: (rows:unknown[])=>void
+    getAllGroups.mockImplementationOnce(()=>new Promise(resolve=>{finishGroups=resolve}))
+    const router=createRouter({history:createMemoryHistory(),routes:[{path:'/admin/accounts',component:{template:'<div />'}}]})
+    await router.push('/admin/accounts?account_id=42')
+    const w=mountView(true,false,router)
+    try {
+      await flushPromises()
+      await router.replace('/admin/accounts');await flushPromises()
+      expect(w.find('account-bulk-actions-bar-stub').exists()).toBe(false)
+      await (w.vm as any).openBulkEditFiltered()
+      expect(listAccounts).toHaveBeenCalledTimes(1)
+      finishGroups([{id:7,name:'codex',platform:'openai'}]);await flushPromises()
+      expect(w.find('account-bulk-actions-bar-stub').exists()).toBe(true)
+      await (w.vm as any).openBulkEditFiltered();await flushPromises()
+      expect(listAccounts).toHaveBeenCalledTimes(3)
+      expect(listAccounts.mock.lastCall?.[2]).toMatchObject({group:'7',sort_by:'id',sort_order:'asc'})
+      expect(w.getComponent({name:'BulkEditAccountModal'}).props('show')).toBe(true)
+    } finally {w.unmount()}
+  })
+
+  it.each(['cache_hit_rate','name'])('shows missing only after a successful empty location list (%s)', async sort => {
+    localStorage.setItem('account-table-sort-v2',JSON.stringify({key:sort,order:'desc'}))
+    const router=createRouter({history:createMemoryHistory(),routes:[{path:'/admin/accounts',component:{template:'<div />'}}]})
+    await router.push('/admin/accounts?account_id=42')
+    listAccounts.mockRejectedValueOnce(new Error('query unavailable'))
+    const w=mountView(true,false,router)
+    try {
+      await flushPromises()
+      expect(w.text()).not.toContain('admin.accounts.locateMissing')
+      listAccounts.mockResolvedValue({items:[],total:0,pages:0,page:1,page_size:20})
+      await (w.vm as any).load();await flushPromises()
+      expect(w.text()).toContain('admin.accounts.locateMissing')
+    } finally {w.unmount()}
+  })
+
+  it('does not execute an old debounced filter after location changes', async () => {
+    vi.useFakeTimers()
+    const router=createRouter({history:createMemoryHistory(),routes:[{path:'/admin/accounts',component:{template:'<div />'}}]})
+    await router.push('/admin/accounts')
+    const w=mountView(true,false,router)
+    try {
+      await flushPromises()
+      const vm=w.vm as any
+      vm.params.search='old draft';vm.debouncedReload()
+      await router.push('/admin/accounts?account_id=42');await flushPromises()
+      await router.replace('/admin/accounts');await flushPromises()
+      const calls=listAccounts.mock.calls.length
+      await vi.advanceTimersByTimeAsync(500);await flushPromises()
+      expect(listAccounts).toHaveBeenCalledTimes(calls)
+      expect(listAccounts.mock.lastCall?.[2]).toMatchObject({search:'',group:''})
+    } finally {w.unmount()}
+  })
+
+  it('does not label cleared metric rows as a previous result for an earlier filter', async () => {
+    const wrapper=mountView()
+    try {
+      await flushPromises()
+      const vm=wrapper.vm as any
+      expect(vm.accounts).toHaveLength(1)
+      listAccounts.mockRejectedValue(new Error('metric unavailable'))
+      vm.params.group='7'
+      await vm.reload();await flushPromises()
+      expect(vm.accounts).toHaveLength(0)
+      expect(vm.metricListError).toContain('admin.accounts.metricSortFailed ')
+      vm.params.group=''
+      await vm.reload();await flushPromises()
+      expect(vm.accounts).toHaveLength(0)
+      expect(vm.metricListError).toContain('admin.accounts.metricSortFailed ')
+      expect(vm.metricListError).not.toContain('metricSortFailedPrevious')
+    } finally {wrapper.unmount()}
+  })
+
+  it('restores all groups when leaving a location with a saved unavailable default', async () => {
+    localStorage.setItem('account-filter-values', JSON.stringify({platform:'',status:'',default_group:'999'}))
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/accounts', component: { template: '<div />' } }] })
+    await router.push('/admin/accounts?account_id=42')
+    const wrapper = mountView(true, false, router)
+    try {
+      await flushPromises()
+      expect(listAccounts.mock.lastCall?.[2]).toMatchObject({account_id:42,group:''})
+      expect(showWarning).not.toHaveBeenCalled()
+      await router.replace('/admin/accounts')
+      await flushPromises()
+      expect(listAccounts.mock.lastCall?.[2]).toMatchObject({group:''})
+      expect(listAccounts.mock.lastCall?.[2].account_id).toBeUndefined()
+      expect(getAllGroups).toHaveBeenCalledTimes(1)
+      expect(showWarning).toHaveBeenCalledWith('admin.accounts.defaultGroupUnavailable')
+      expect(JSON.parse(localStorage.getItem('account-filter-values')!).default_group).toBe('999')
+    } finally {wrapper.unmount()}
   })
 
   it('discards old rows and an in-flight bulk edit preview when entering account location', async () => {

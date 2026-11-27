@@ -3,7 +3,7 @@
     <template v-for="section in sections" :key="section.label">
       <div v-if="section.items.length" class="px-2 pt-1 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t(section.label) }}</div>
       <div v-for="item in section.items" :key="item.id" class="flex items-center gap-1 rounded hover:bg-gray-100 dark:hover:bg-dark-700">
-        <button class="min-w-0 flex-1 truncate px-2 py-2 text-left" type="button" @click="emit('select', item)">{{ item.email }} <span class="text-gray-400">#{{ item.id }}</span></button>
+        <button data-filter-choice class="min-w-0 flex-1 truncate px-2 py-2 text-left" type="button" @click="emit('select', item)">{{ item.email }} <span class="text-gray-400">#{{ item.id }}</span></button>
         <button type="button" class="px-2 py-1 text-xs text-gray-500 hover:text-primary-600" :title="t(item.pinned ? 'admin.usage.history.unpin' : 'admin.usage.history.pin')" @click.stop="history.togglePin(item.id)">{{ item.pinned ? '★' : '☆' }}</button>
         <button type="button" class="px-2 py-1 text-gray-500" :aria-label="t('admin.usage.history.remove')" @click.stop="history.remove(item.id)">×</button>
       </div>

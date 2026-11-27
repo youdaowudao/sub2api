@@ -117,6 +117,23 @@ describe('sorting stays consistent with requests', () => {
   })
 })
 
+it('aborts a pending member page when returning to the previous page and rejects its late response', async () => {
+  const wrapper = mountPanel(); await flushPromises()
+  table(wrapper).vm.$emit('openErrorDetail', 5); await flushPromises()
+  let finish!: (value: typeof memberResult) => void
+  vi.mocked(opsAPI.listErrorRecordMembers).mockImplementationOnce(() => new Promise(resolve => { finish=resolve }))
+  table(wrapper, 1).findComponent(Pagination).vm.$emit('update:page', 2); await flushPromises()
+  const oldSignal = vi.mocked(opsAPI.listErrorRecordMembers).mock.lastCall?.[2]?.signal
+  table(wrapper, 1).findComponent(Pagination).vm.$emit('update:page', 1); await flushPromises()
+  expect(oldSignal?.aborted).toBe(true)
+  expect(opsAPI.listErrorRecordMembers).toHaveBeenCalledTimes(3)
+  expect(opsAPI.listErrorRecordMembers).toHaveBeenLastCalledWith(5,expect.objectContaining({page:1}),expect.anything())
+  finish({...memberResult,page:2,items:[{...memberResult.items[0],id:111,representative_id:111}]})
+  await flushPromises()
+  expect(table(wrapper,1).props('rows').map((row:OpsErrorLog)=>row.id)).toEqual([110])
+  expect(table(wrapper,1).props('page')).toBe(1)
+})
+
 it('keeps loading and in-memory page changes usable when storage reads and writes throw', async () => {
   vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('storage blocked') })
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage blocked') })

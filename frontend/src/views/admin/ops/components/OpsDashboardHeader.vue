@@ -18,7 +18,7 @@ interface Props {
   overview?: OpsDashboardOverview | null
   platform: string
   groupId: number | null
-  groupOptions?: Array<{ value: number | null; label: string }>
+  groupOptions?: Array<{ value: number | string | null; label: string; kind?: string; disabled?: boolean }>
   timeRange: string
   queryMode: string
   loading: boolean

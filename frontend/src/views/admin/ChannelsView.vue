@@ -294,8 +294,8 @@
                   {{ t('admin.channels.form.noGroupsAvailable', 'No groups available') }}
                 </div>
                 <div v-else class="flex flex-wrap gap-1">
-                  <label
-                    v-for="group in getGroupsForPlatform(section.platform)"
+                  <CategorizedGroupList :groups="getGroupsForPlatform(section.platform)" #default="{ group }">
+                    <label
                     :key="group.id"
                     class="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-gray-200 px-2 py-1 text-xs transition-colors hover:bg-gray-50 dark:border-dark-600 dark:hover:bg-dark-700"
                     :class="[
@@ -320,6 +320,7 @@
                       class="text-[10px] text-gray-400"
                     >{{ getGroupInOtherChannelLabel(group.id) }}</span>
                   </label>
+                  </CategorizedGroupList>
                 </div>
               </div>
             </div>
@@ -628,6 +629,7 @@
 </template>
 
 <script setup lang="ts">
+import CategorizedGroupList from '@/components/common/CategorizedGroupList.vue'
 import { sortGroupsForDisplay, sortGroupIdsForDisplay } from '@/utils/groupDisplayOrder'
 
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'

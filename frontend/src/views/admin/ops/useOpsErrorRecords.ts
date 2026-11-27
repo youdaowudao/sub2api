@@ -1,8 +1,10 @@
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { opsAPI, type OpsErrorRecord, type OpsErrorLog, type OpsErrorRecordsParams, type OpsErrorRecordsResponse } from '@/api/admin/ops'
+import { opsAPI, type OpsErrorRecord, type OpsErrorLog, type OpsErrorRecordsParams } from '@/api/admin/ops'
 import { makeTodayOpsRange } from '@/utils/adminRecentRange'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { useErrorRecordMembers } from './useErrorRecordMembers'
+import { uniqueErrorUser, uniqueErrorKey } from './errorRecordPresentation'
 
 export interface OpsErrorRecordGlobals {
   timeRange: string
@@ -29,8 +31,8 @@ export function errorRecordRows(items: OpsErrorRecord[]): OpsErrorLog[] {
     const row = { ...(item.representative || item) } as OpsErrorLog
     row.id = item.representative_id || row.id
     if (item.representative) {
-      row.user_id = item.single_user?.id ?? null; row.user_email = item.single_user?.email || ''
-      row.api_key_id = item.single_api_key?.id ?? null; row.api_key_name = item.single_api_key?.name || ''; row.api_key_deleted = !!item.single_api_key?.deleted
+      row.user_id = uniqueErrorUser(item) ? item.single_user?.id ?? null : null; row.user_email = uniqueErrorUser(item) ? item.single_user?.email || '' : ''
+      row.api_key_id = uniqueErrorKey(item) ? item.single_api_key?.id ?? null : null; row.api_key_name = uniqueErrorKey(item) ? item.single_api_key?.name || '' : ''; row.api_key_deleted = uniqueErrorKey(item) && !!item.single_api_key?.deleted
       row.client_ip = item.single_client_ip; row.user_agent = item.single_user_agent || ''
       row.inbound_endpoint ||= row.request_path
     }
@@ -55,11 +57,8 @@ export function useOpsErrorRecords(props: OpsErrorRecordGlobals, prefix: () => s
   const windowRange = ref<{ start_time: string; end_time: string } | null>(null)
   let mainController: AbortController | undefined; let mainSequence = 0
   const activeParams = ref<OpsErrorRecordsParams | null>(null)
-  const group = ref<OpsErrorRecord | null>(null); const showGroup = ref(false)
-  const memberItems = ref<OpsErrorRecord[]>([]); const memberTotal = ref(0); const memberPage = ref(1)
-  const memberSortBy = ref('created_at'); const memberSortOrder = ref<'asc' | 'desc'>('desc')
-  const memberPageSize = ref(10); const memberLoading = ref(false); const memberError = ref('')
-  let memberController: AbortController | undefined; let memberSequence = 0; let loadedMemberKey = ''
+  const members = useErrorRecordMembers(activeParams, translate)
+  const { closeGroup } = members
   let disposed = false
 
   function applyRoute() {
@@ -105,7 +104,6 @@ export function useOpsErrorRecords(props: OpsErrorRecordGlobals, prefix: () => s
   function reset() { Object.assign(filters, defaultFilters(), { user_id: undefined, api_key_id: undefined, account_id: undefined }); sortBy.value = 'created_at'; sortOrder.value = 'desc'; page.value = 1; invalidRoute.value = false; syncRoute() }
   function refresh() { refreshRevision.value++ }
   function sort(key: string, order: 'asc' | 'desc') { sortBy.value = key; sortOrder.value = order }
-  function closeGroup() { showGroup.value = false; group.value = null; memberItems.value = []; loadedMemberKey = ''; memberSequence++; memberController?.abort() }
   function valid(): boolean {
     if (invalidRoute.value || invalidGlobalGroup.value) return false
     if (filters.phase && !['request', 'auth', 'account_auth', 'routing', 'upstream', 'network', 'internal'].includes(filters.phase)) return false
@@ -155,31 +153,6 @@ export function useOpsErrorRecords(props: OpsErrorRecordGlobals, prefix: () => s
     void load()
   }, { immediate: true })
 
-  function openGroup(item: OpsErrorRecord) { group.value = item; memberPage.value = 1; memberSortBy.value = 'created_at'; memberSortOrder.value = 'desc'; memberItems.value = []; loadedMemberKey = ''; showGroup.value = true }
-  async function loadMembers(force = false) {
-    if (!showGroup.value || !group.value || !activeParams.value) return
-    const id = group.value.representative_id
-    const { display: _display, ...query } = activeParams.value
-    const memberParams = { ...query, page: memberPage.value, page_size: memberPageSize.value, sort_by: memberSortBy.value, sort_order: memberSortOrder.value }
-    const key = JSON.stringify([id, memberParams])
-    if (!force && key === loadedMemberKey) return
-    memberController?.abort(); memberController = new AbortController(); const sequence = ++memberSequence
-    memberLoading.value = true; memberError.value = ''; memberItems.value = []
-    try {
-      const data: OpsErrorRecordsResponse = await opsAPI.listErrorRecordMembers(id, memberParams, { signal: memberController.signal })
-      if (sequence !== memberSequence || disposed) return
-      memberItems.value = data.items; memberTotal.value = data.total; loadedMemberKey = key
-    } catch (err) {
-      if (sequence === memberSequence && !memberController.signal.aborted && !disposed) memberError.value = extractApiErrorMessage(err, translate('admin.ops.records.loadFailed'))
-    } finally { if (sequence === memberSequence && !disposed) memberLoading.value = false }
-  }
-  function sortMembers(key: string, order: 'asc' | 'desc') { memberSortBy.value = key; memberSortOrder.value = order }
-  watch(() => JSON.stringify([showGroup.value, group.value?.representative_id, memberPage.value, memberPageSize.value, memberSortBy.value, memberSortOrder.value]), (value, old) => {
-    const next = JSON.parse(value); const previous = old ? JSON.parse(old) : null
-    if (previous && [3, 4, 5].some(i => next[i] !== previous[i]) && memberPage.value !== 1) { memberPage.value = 1; return }
-    if (showGroup.value) void loadMembers()
-    else { memberSequence++; memberController?.abort(); memberLoading.value = false }
-  })
-  onUnmounted(() => { disposed = true; mainSequence++; memberSequence++; mainController?.abort(); memberController?.abort() })
-  return { filters, page, pageSize, sortBy, sortOrder, items, total, totalRecords, loading, error, updatedAt, windowRange, changeFilters, reset, refresh, sort, group, showGroup, memberItems, memberTotal, memberPage, memberPageSize, memberSortBy, memberSortOrder, memberLoading, memberError, closeGroup, openGroup, loadMembers, sortMembers }
+  onUnmounted(() => { disposed = true; mainSequence++; mainController?.abort() })
+  return { filters, page, pageSize, sortBy, sortOrder, items, total, totalRecords, loading, error, updatedAt, windowRange, changeFilters, reset, refresh, sort, members, ...members }
 }

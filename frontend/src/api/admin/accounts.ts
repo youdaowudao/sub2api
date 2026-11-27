@@ -57,6 +57,8 @@ export async function list(
     include_scheduler_score?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
+    start_date?: string
+    end_date?: string
   },
   options?: {
     signal?: AbortSignal
@@ -89,6 +91,7 @@ export async function getUpstreamBillingRatesWithEtag(
   page: number = 1,
   pageSize: number = 20,
   filters?: {
+    account_ids?: string
     platform?: string
     type?: string
     status?: string
@@ -133,6 +136,8 @@ export async function listWithEtag(
     include_scheduler_score?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'
+    start_date?: string
+    end_date?: string
   },
   options?: {
     signal?: AbortSignal

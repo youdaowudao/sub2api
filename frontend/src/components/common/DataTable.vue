@@ -91,9 +91,20 @@
     </template>
   </div>
 
-  <div
-    v-else
+  <div v-else :class="topHorizontalScroll ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'contents'">
+    <div v-if="topHorizontalScroll && isScrollable" class="shrink-0">
+      <div class="px-2 text-xs text-gray-500 dark:text-gray-400">{{ t('common.horizontalScrollHint') }}</div>
+      <div ref="topScrollRef" tabindex="0" role="region" :aria-label="t('common.horizontalScrollHint')"
+        class="table-top-scroll" :style="{ width: scrollViewportWidth + 'px' }" @scroll="onHorizontalTopScroll()" @wheel="onTopWheel">
+        <div :style="{ width: scrollContentWidth + 'px', height: '1px' }"></div>
+      </div>
+    </div>
+    <div
     ref="tableWrapperRef"
+    @scroll="topHorizontalScroll && onHorizontalTableScroll()"
+    :tabindex="topHorizontalScroll && isScrollable ? 0 : undefined"
+    :aria-label="topHorizontalScroll && isScrollable ? t('common.horizontalScrollHint') : undefined"
+    @wheel="topHorizontalScroll && onTableWheel($event)"
     class="table-wrapper"
     :class="{
       'actions-expanded': actionsExpanded,
@@ -281,6 +292,7 @@
         </template>
       </tbody>
     </table>
+    </div>
   </div>
 </template>
 
@@ -309,6 +321,52 @@ const emit = defineEmits<{
 // 表格容器引用
 const tableWrapperRef = ref<HTMLElement | null>(null)
 const isScrollable = ref(false)
+const topScrollRef = ref<HTMLElement | null>(null)
+const scrollContentWidth = ref(0)
+const scrollViewportWidth = ref(0)
+let savedScrollLeft = 0
+let savedScrollTop = 0
+let restoreScroll = false
+let restoreVerticalScroll = false
+let horizontalFrame = 0
+const syncHorizontalScroll = (source: 'top' | 'table') => {
+  const from = source === 'top' ? topScrollRef.value : tableWrapperRef.value
+  const to = source === 'top' ? tableWrapperRef.value : topScrollRef.value
+  if (!from || !to || Math.abs(from.scrollLeft - to.scrollLeft) < 1) return
+  to.scrollLeft = from.scrollLeft
+}
+const onHorizontalTopScroll = () => {
+  const table = tableWrapperRef.value
+  if (!table?.clientWidth || restoreScroll || props.loading) return
+  syncHorizontalScroll('top')
+  savedScrollLeft = table.scrollLeft
+}
+const onHorizontalTableScroll = () => {
+  const table = tableWrapperRef.value
+  if (!table?.clientWidth || restoreScroll || props.loading) return
+  savedScrollLeft = table.scrollLeft
+  savedScrollTop = table.scrollTop
+  syncHorizontalScroll('table')
+}
+const horizontalWheel = (event: WheelEvent, target: HTMLElement | null) => {
+  if (!target || event.defaultPrevented || event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
+  const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? target.clientWidth : 1
+  const next = Math.max(0, Math.min(target.scrollWidth - target.clientWidth, target.scrollLeft + event.deltaY * scale))
+  if (Math.abs(next - target.scrollLeft) < 1) return
+  event.preventDefault()
+  target.scrollLeft = next
+  if (target === topScrollRef.value) onHorizontalTopScroll()
+  else onHorizontalTableScroll()
+}
+const onTopWheel = (event: WheelEvent) => horizontalWheel(event, topScrollRef.value)
+const onTableWheel = (event: WheelEvent) => {
+  const target = tableWrapperRef.value
+  if (!target || (event.target as HTMLElement | null)?.closest('input, textarea, select, [role="listbox"]')) return
+  const rect = target.getBoundingClientRect()
+  if (event.shiftKey || (event.target === target && event.clientY >= rect.bottom - 16)) horizontalWheel(event, target)
+}
+watch(topScrollRef, () => { syncHorizontalScroll('table') })
+
 const actionsColumnNeedsExpanding = ref(false)
 
 // --- 虚拟滚动「整表空白」根治 ---
@@ -335,7 +393,28 @@ const observeElementRectNonZero = (
 // 检查是否可滚动
 const checkScrollable = () => {
   if (tableWrapperRef.value) {
+    if (props.topHorizontalScroll && !tableWrapperRef.value.clientWidth) {
+      restoreScroll = true
+      restoreVerticalScroll = true
+      return
+    }
     isScrollable.value = tableWrapperRef.value.scrollWidth > tableWrapperRef.value.clientWidth
+    if (props.topHorizontalScroll) {
+      scrollContentWidth.value = tableWrapperRef.value.scrollWidth
+      scrollViewportWidth.value = tableWrapperRef.value.clientWidth
+      if (horizontalFrame) cancelAnimationFrame(horizontalFrame)
+      horizontalFrame = requestAnimationFrame(() => {
+        horizontalFrame = 0
+        const table = tableWrapperRef.value
+        if (restoreScroll && !props.loading && table?.clientWidth) {
+          table.scrollLeft = savedScrollLeft
+          if (restoreVerticalScroll) table.scrollTop = savedScrollTop
+          restoreVerticalScroll = false
+          restoreScroll = false
+        }
+        syncHorizontalScroll('table')
+      })
+    }
   }
 }
 
@@ -414,6 +493,8 @@ const attachDesktopTableTracking = () => {
       checkActionsColumnWidth()
     })
     resizeObserver.observe(tableWrapperRef.value)
+    const table = tableWrapperRef.value.querySelector('table')
+    if (props.topHorizontalScroll && table) resizeObserver.observe(table)
   } else {
     // 降级方案：不支持 ResizeObserver 时使用 window resize
     resizeHandler = () => {
@@ -441,6 +522,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   detachDesktopTableTracking()
+  if (horizontalFrame) cancelAnimationFrame(horizontalFrame)
   if (desktopViewportMediaQuery && desktopViewportListener) {
     if (typeof desktopViewportMediaQuery.removeEventListener === 'function') {
       desktopViewportMediaQuery.removeEventListener('change', desktopViewportListener)
@@ -476,6 +558,8 @@ interface Props {
    * will emit 'sort' events instead of performing client-side sorting.
    */
   serverSideSort?: boolean
+  controlledSort?: { key: string; order: 'asc' | 'desc' }
+  topHorizontalScroll?: boolean
   /** Emit 'rowClick' on row/card click and show pointer cursor (interactive cells should @click.stop) */
   clickableRows?: boolean
   /** Estimated row height in px for the virtualizer (default 56) */
@@ -532,6 +616,9 @@ const {
 
 const sortKey = ref<string>('')
 const sortOrder = ref<'asc' | 'desc'>('asc')
+watch(() => props.controlledSort, state => {
+  if (state) { sortKey.value = state.key; sortOrder.value = state.order }
+}, { immediate: true, deep: true })
 const actionsExpanded = ref(false)
 
 type PersistedSortState = {
@@ -696,10 +783,18 @@ watch(
   { immediate: true, flush: 'post' }
 )
 
+watch(() => props.loading, (loading) => {
+  if (props.topHorizontalScroll && loading) {
+    const table = tableWrapperRef.value
+    if (table?.clientWidth && !restoreScroll) savedScrollLeft = table.scrollLeft
+    restoreScroll = true
+  }
+}, { flush: 'sync' })
+
 // 数据/列变化时重新检查滚动状态
 // 注意：不能监听 actionsExpanded，因为 checkActionsColumnWidth 会临时修改它，会导致无限循环
 watch(
-  [() => props.data.length, columnsSignature],
+  [() => props.data.length, columnsSignature, () => props.loading],
   async () => {
     await nextTick()
     checkScrollable()
@@ -720,6 +815,10 @@ const handleSort = (key: string) => {
     newOrder = sortOrder.value === 'asc' ? 'desc' : 'asc'
   }
 
+  if (props.controlledSort) {
+    emit('sort', key, newOrder)
+    return
+  }
   if (props.serverSideSort) {
     // Server-side sort mode: emit event and update internal state for UI feedback
     sortKey.value = key
@@ -946,14 +1045,14 @@ const getAdaptivePaddingClass = () => {
 const didInitSort = ref(false)
 
 onMounted(() => {
-  const initial = resolveInitialSortState()
-  applySortState(initial)
+  if (!props.controlledSort) applySortState(resolveInitialSortState())
   didInitSort.value = true
 })
 
 watch(
   columnsSignature,
   () => {
+    if (props.controlledSort) return
     // If current sort key is no longer sortable/visible, fall back to default/persisted.
     const normalized = normalizeSortKey(sortKey.value)
     if (!sortKey.value) {
@@ -978,7 +1077,7 @@ watch(
 watch(
   [sortKey, sortOrder],
   ([nextKey, nextOrder]) => {
-    if (!didInitSort.value) return
+    if (!didInitSort.value || props.controlledSort) return
     if (!props.sortStorageKey) return
     const key = normalizeSortKey(nextKey)
     if (!key) return
@@ -997,7 +1096,16 @@ defineExpose({
 </script>
 
 <style scoped>
-/* 表格横向滚动 */
+.table-top-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: auto;
+  scrollbar-color: #9ca3af transparent;
+  min-height: 16px;
+}
+.table-top-scroll::-webkit-scrollbar { height: 13px; }
+.table-top-scroll::-webkit-scrollbar-thumb { background: #9ca3af; border-radius: 6px; }
+ /* 表格横向滚动 */
 .table-wrapper {
   --select-col-width: 52px; /* 勾选列宽度：px-6 (24px*2) + checkbox (16px) */
   position: relative;
@@ -1208,7 +1316,7 @@ tbody tr:hover .sticky-col {
 
 /* 常驻、不透明的滑块，无视鼠标是否 hover 都在那！ */
 .table-wrapper::-webkit-scrollbar-thumb {
-  background-color: rgba(107, 114, 128, 0.75) !important; 
+  background-color: rgba(107, 114, 128, 0.75) !important;
   border-radius: 6px !important;
   border: 2px solid transparent !important;
   background-clip: padding-box !important;

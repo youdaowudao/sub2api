@@ -1,5 +1,6 @@
 export default {
   common: {
+    horizontalScrollHint: "Scroll horizontally with the wheel",
     unknownPlatform: 'Unknown platform',
     loading: 'Loading...',
     submitting: 'Submitting...',
