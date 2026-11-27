@@ -241,7 +241,9 @@ func TestOpenAIStreamingRelayReadyBoundary(t *testing.T) {
 		waitOpenAIResponseFlushSignal(t, rec.flushBlocked)
 		value, ok := c.Get(openAICompactSSEKeepaliveKey)
 		require.True(t, ok)
-		keepalive := value.(*openAICompactSSEKeepalive)
+		keepalive, ok := value.(*openAICompactSSEKeepalive)
+		require.True(t, ok)
+		require.NotNil(t, keepalive)
 		select {
 		case <-keepalive.stop:
 		default:
@@ -347,7 +349,8 @@ func TestOpenAIHTTPStreamPreOutputRecoveryBoundary(t *testing.T) {
 					require.False(t, errors.As(err, &failover))
 					val, ok := c.Get(OpsUpstreamErrorsKey)
 					require.True(t, ok)
-					events := val.([]*OpsUpstreamErrorEvent)
+					events, ok := val.([]*OpsUpstreamErrorEvent)
+					require.True(t, ok)
 					require.NotEmpty(t, events)
 					if tc.relay || tc.queue {
 						require.Equal(t, http.StatusOK, rec.Code)
