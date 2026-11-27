@@ -1,9 +1,9 @@
 name: CI
 
 on:
+  # 只在推送非 main 分支时运行一次：PR 不重复跑；main 只接受已通过检查且包含最新 main 的 PR 合并，合并后不重跑。
   push:
-    branches: ['**']
-  pull_request:
+    branches: ['**', '!main']
 
 permissions:
   contents: read
