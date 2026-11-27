@@ -1,5 +1,5 @@
 <template>
-  <div v-if="!isDesktopViewport" class="space-y-3">
+  <div v-if="!isDesktopViewport" class="space-y-3" v-bind="$attrs">
     <template v-if="loading">
       <div v-for="i in 5" :key="i" class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
         <div class="space-y-3">
@@ -91,7 +91,7 @@
     </template>
   </div>
 
-  <div v-else :class="topHorizontalScroll ? 'flex min-h-0 min-w-0 flex-1 flex-col' : 'contents'">
+  <template v-else>
     <div v-if="topHorizontalScroll && isScrollable" class="shrink-0">
       <div class="px-2 text-xs text-gray-500 dark:text-gray-400">{{ t('common.horizontalScrollHint') }}</div>
       <div ref="topScrollRef" tabindex="0" role="region" :aria-label="t('common.horizontalScrollHint')"
@@ -110,6 +110,7 @@
       'actions-expanded': actionsExpanded,
       'is-scrollable': isScrollable
     }"
+    v-bind="$attrs"
   >
     <table
       :class="['divide-y divide-gray-200 dark:divide-dark-700', isFixedLayout ? '' : 'w-full min-w-max']"
@@ -293,7 +294,7 @@
       </tbody>
     </table>
     </div>
-  </div>
+  </template>
 </template>
 
 <script setup lang="ts">
@@ -303,6 +304,9 @@ import { useVirtualizer, observeElementRect as observeElementRectDefault } from 
 import { useI18n } from 'vue-i18n'
 import type { Column } from './types'
 import Icon from '@/components/icons/Icon.vue'
+
+// Keep incoming markers, classes and events on the same scroll/card element as before.
+defineOptions({ inheritAttrs: false })
 
 const { t } = useI18n()
 
