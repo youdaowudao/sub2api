@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,11 +11,115 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type preOutputRecoveryBillingCache struct {
+	*handlerInflightCache
+}
+
+func (c *preOutputRecoveryBillingCache) DeductUserBalance(_ context.Context, _ int64, amount float64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.balance -= amount
+	return nil
+}
+
+func TestOpenAIResponsesRelayReadyBeforeOutputFailover(t *testing.T) {
+	testOpenAIResponsesPreOutputFailover(t, true, false)
+}
+
+func TestOpenAIResponsesQueueHeartbeatBeforeOutputFailover(t *testing.T) {
+	testOpenAIResponsesPreOutputFailover(t, false, true)
+}
+
+func testOpenAIResponsesPreOutputFailover(t *testing.T, relayReady, queueHeartbeat bool) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	first := "event: response.created\ndata: " + `{"type":"response.created","response":{"id":"resp_failed","object":"response","model":"gpt-5.4","status":"in_progress","output":[]}}` + "\n\n" +
+		"event: response.in_progress\ndata: " + `{"type":"response.in_progress","response":{"id":"resp_failed","model":"gpt-5.4","status":"in_progress"}}` + "\n\n" +
+		"event: response.failed\ndata: " + `{"type":"response.failed","response":{"id":"resp_failed","status":"failed","model":"gpt-5.4","error":{"code":"server_error","message":"upstream processing failed"},"usage":{"input_tokens":123,"output_tokens":0,"total_tokens":123}}}` + "\n\n"
+	if relayReady {
+		first = "event: response.relay_ready\ndata: {\"type\":\"response.relay_ready\"}\n\n" + first
+	}
+	upstream := &preContentFailoverUpstream{respond: func(call int) (*http.Response, error) {
+		require.LessOrEqual(t, call, 2, "unexpected extra upstream call")
+		payload := first
+		if call == 2 {
+			payload = preContentHandlerSuccess
+		}
+		resp := preContentSSEResponse(io.NopCloser(strings.NewReader(payload)))
+		resp.Header.Set("X-Request-Id", fmt.Sprintf("pre-output-recovery-%d", call))
+		return resp, nil
+	}}
+	accounts := routeCapabilityTestAccounts(2)
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	cfg.Default.RateMultiplier = 1
+	cfg.Gateway.MaxAccountSwitches = 1
+	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
+	billingRepo := &compatStreamUsageBillingRepo{}
+	cache := &preOutputRecoveryBillingCache{newHandlerInflightCache(100)}
+	billingCache := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCache.Stop)
+	gateway := service.NewOpenAIGatewayService(
+		openAIImagesFailoverAccountRepo{accounts: accounts},
+		usageRepo, billingRepo, nil, nil, nil, nil, cfg, nil, nil,
+		service.NewBillingService(cfg, nil), nil, billingCache, upstream,
+		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil,
+	)
+	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billingCache,
+		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
+	c, rec := newOpenAIResponsesFailoverTestContext(t, nil)
+	c.Request.Body = io.NopCloser(strings.NewReader(`{"model":"gpt-5.4","stream":true,"input":"hello"}`))
+	key, ok := middleware.GetAPIKeyFromContext(c)
+	require.True(t, ok)
+	key.UserID = key.User.ID
+	key.User.Balance = 100
+	key.User.Status = service.StatusActive
+	key.Group.Hydrated = true
+	key.Group.Status = service.StatusActive
+	key.Group.RateMultiplier = 1
+	if queueHeartbeat {
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		n, err := c.Writer.WriteString(":\n\n")
+		require.NoError(t, err)
+		recordGatewayStreamHeartbeat(c, n)
+	}
+	h.Responses(c)
+
+	require.Equal(t, []int64{1, 2}, upstream.hits)
+	require.Equal(t, http.StatusOK, rec.Code)
+	out := rec.Body.String()
+	require.Contains(t, out, "resp_pc")
+	require.Contains(t, out, "answer from second account")
+	require.Contains(t, out, "response.completed")
+	require.NotContains(t, out, "resp_failed")
+	require.NotContains(t, out, "response.failed")
+	require.NotContains(t, out, "upstream processing failed")
+	require.NotContains(t, out, "response.relay_ready")
+	if queueHeartbeat {
+		require.True(t, strings.HasPrefix(out, ":\n\n"))
+		require.Equal(t, 1, strings.Count(out, ":\n\n"))
+	}
+	billingRepo.mu.Lock()
+	defer billingRepo.mu.Unlock()
+	require.Len(t, billingRepo.commands, 1)
+	cmd := billingRepo.commands[0]
+	require.EqualValues(t, 2, cmd.AccountID)
+	require.Equal(t, 3, cmd.InputTokens)
+	require.Equal(t, 4, cmd.OutputTokens)
+	require.Positive(t, cmd.BalanceCost)
+	require.Len(t, usageRepo.created, 1)
+	log := <-usageRepo.created
+	require.EqualValues(t, 2, log.AccountID)
+	require.Equal(t, 3, log.InputTokens)
+	require.Equal(t, 4, log.OutputTokens)
+	require.Positive(t, log.ActualCost)
+}
 
 type routeCapabilityTestResponse struct {
 	status int
@@ -46,10 +151,9 @@ func (u *routeCapabilityTestUpstream) Do(req *http.Request, _ string, accountID 
 	}, nil
 }
 
-func newRouteCapabilityTestHandler(t *testing.T, upstream service.HTTPUpstream, maxSwitches int, retry400 bool) *OpenAIGatewayHandler {
-	t.Helper()
-	accounts := make([]service.Account, 0, 6)
-	for id := 1; id <= 6; id++ {
+func routeCapabilityTestAccounts(count int) []service.Account {
+	accounts := make([]service.Account, 0, count)
+	for id := 1; id <= count; id++ {
 		accounts = append(accounts, service.Account{
 			ID:          int64(id),
 			Name:        fmt.Sprintf("responses-account-%d", id),
@@ -66,6 +170,12 @@ func newRouteCapabilityTestHandler(t *testing.T, upstream service.HTTPUpstream, 
 			},
 		})
 	}
+	return accounts
+}
+
+func newRouteCapabilityTestHandler(t *testing.T, upstream service.HTTPUpstream, maxSwitches int, retry400 bool) *OpenAIGatewayHandler {
+	t.Helper()
+	accounts := routeCapabilityTestAccounts(6)
 	if retry400 {
 		accounts[0].Credentials["pool_mode_retry_status_codes"] = []any{float64(http.StatusBadRequest)}
 		accounts[0].Credentials["pool_mode_retry_count"] = float64(1)

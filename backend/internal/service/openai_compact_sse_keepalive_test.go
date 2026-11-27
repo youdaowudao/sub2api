@@ -312,6 +312,82 @@ func TestOpenAIStreamClientOutputStarted_IgnoresCompactKeepaliveBytes(t *testing
 	require.True(t, openAIStreamClientOutputStarted(c, false))
 }
 
+func TestOpenAIStreamQueueHeartbeatOutputBoundary(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI}
+	for _, tc := range []struct {
+		name                                string
+		queue, stream, compact, real, local bool
+		wantRecovery, wantLegacy            bool
+	}{
+		{"none", false, false, false, false, false, false, false},
+		{"queue", true, false, false, false, false, false, true},
+		{"stream", false, true, false, false, false, false, false},
+		{"compact", false, false, true, false, false, false, false},
+		{"queue_and_stream", true, true, false, false, false, false, true},
+		{"queue_and_compact", true, false, true, false, false, false, true},
+		{"stream_and_compact", false, true, true, false, false, false, false},
+		{"all_heartbeats", true, true, true, false, false, false, true},
+		{"real_bytes", true, true, true, true, false, true, true},
+		{"local_started", true, false, false, false, true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newCompactBridgeTestContext(t, true)
+			if tc.queue {
+				writeRecoveryQueueHeartbeat(t, c)
+			}
+			if tc.stream {
+				n, err := c.Writer.WriteString(": stream\n\n")
+				require.NoError(t, err)
+				recordOpenAIStreamKeepaliveBytes(c, n)
+			}
+			if tc.compact {
+				stop := StartOpenAICompactSSEKeepalive(c, keepaliveTestInterval)
+				defer stop()
+				waitForKeepaliveBeats()
+				stop()
+			}
+			if tc.real {
+				_, err := c.Writer.WriteString("model output")
+				require.NoError(t, err)
+			}
+			require.Equal(t, tc.wantRecovery, openAIHTTPStreamRecoveryOutputStarted(c, account, tc.local))
+			require.Equal(t, tc.wantLegacy, openAIStreamClientOutputStarted(c, tc.local))
+		})
+	}
+	for _, tc := range []struct {
+		name  string
+		count any
+	}{
+		{"absent", nil},
+		{"zero", 0},
+		{"under_count", 1},
+		{"over_count", 4},
+		{"wrong_type", int64(3)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newCompactBridgeTestContext(t, false)
+			_, err := c.Writer.WriteString(queueHeartbeatFrame)
+			require.NoError(t, err)
+			if tc.count != nil {
+				c.Set(GatewayStreamHeartbeatBytesKey, tc.count)
+			}
+			require.True(t, openAIHTTPStreamRecoveryOutputStarted(c, account, false))
+			require.True(t, openAIStreamClientOutputStarted(c, false))
+		})
+	}
+	t.Run("header_only", func(t *testing.T) {
+		c, _ := newCompactBridgeTestContext(t, false)
+		c.Writer.WriteHeaderNow()
+		require.True(t, openAIHTTPStreamRecoveryOutputStarted(c, account, false))
+	})
+	t.Run("other_platform", func(t *testing.T) {
+		c, _ := newCompactBridgeTestContext(t, false)
+		writeRecoveryQueueHeartbeat(t, c)
+		require.True(t, openAIHTTPStreamRecoveryOutputStarted(c, &Account{Platform: PlatformGrok}, false))
+		require.True(t, openAIHTTPStreamRecoveryOutputStarted(c, nil, false))
+	})
+}
+
 // fast policy block 在心跳未提交时保持 403 JSON 原语义。
 func TestWriteOpenAIFastPolicyBlockedResponse_BeforeKeepaliveCommit(t *testing.T) {
 	c, rec := newCompactBridgeTestContext(t, true)
