@@ -190,7 +190,7 @@ func TestDashboardRangePreciseSnapshot(t *testing.T) {
 
 func TestDashboardRangePreciseRejectsInvalidWindow(t *testing.T) {
 	for _, tc := range []struct{ name, query string }{
-		{"three hours", "start_time=2026-11-27T00:00:00Z&end_time=2026-11-27T03:00:00Z"},
+		{"over three hours", "start_time=2026-11-27T00:00:00Z&end_time=2026-11-27T03:01:00Z"},
 		{"start only", "start_time=2026-11-27T00:00:00Z"},
 		{"end only", "end_time=2026-11-27T01:00:00Z"},
 		{"invalid", "start_time=bad&end_time=2026-11-27T01:00:00Z"},
@@ -221,9 +221,9 @@ func TestDashboardRangePreciseSnapshotMidnight(t *testing.T) {
 	}
 }
 
-func TestDashboardRangePreciseSnapshotFiltersAndTwoHourLimit(t *testing.T) {
+func TestDashboardRangePreciseSnapshotFiltersAndThreeHourLimit(t *testing.T) {
 	router, repo := newPreciseDashboardRouter(t)
-	path := "/snapshot?include_stats=false&include_group_stats=true&timezone=UTC&start_time=2026-11-27T00:00:00Z&end_time=2026-11-27T02:00:00Z&granularity=hour&user_id=1&api_key_id=2&account_id=3&group_id=4&model=test-model&request_type=stream&native_compaction_v2=true&billing_type=1&upstream_model_mismatch=false"
+	path := "/snapshot?include_stats=false&include_group_stats=true&timezone=UTC&start_time=2026-11-27T00:00:00Z&end_time=2026-11-27T03:00:00Z&granularity=hour&user_id=1&api_key_id=2&account_id=3&group_id=4&model=test-model&request_type=stream&native_compaction_v2=true&billing_type=1&upstream_model_mismatch=false"
 	payload := preciseDashboardPayload(t, preciseDashboardRequest(router, path))
 	assert.Equal(t, "minute", payload["granularity"])
 	assert.Equal(t, 1, repo.minuteCalls)
@@ -239,7 +239,7 @@ func TestDashboardRangePreciseSnapshotFiltersAndTwoHourLimit(t *testing.T) {
 		BillingType: &billingType, UpstreamModelMismatch: &mismatch,
 	}
 	start := time.Date(2026, 11, 27, 0, 0, 0, 0, time.UTC)
-	end := start.Add(2 * time.Hour)
+	end := start.Add(3 * time.Hour)
 	assert.Equal(t, dashboardPreciseQuery{start, end, filters}, repo.modelQuery)
 	assert.Equal(t, dashboardPreciseQuery{start, end, filters}, repo.groupQuery)
 	assert.Equal(t, usagestats.ModelSourceRequested, repo.modelSource)
@@ -342,7 +342,7 @@ func TestGetUserBreakdownPreciseWindow(t *testing.T) {
 func TestDashboardRangePreciseRankingAndBreakdownRejectInvalidWindow(t *testing.T) {
 	for _, path := range []string{"/ranking", "/breakdown"} {
 		for _, tc := range []struct{ name, query string }{
-			{"too long", "start_time=2026-11-27T00:00:00Z&end_time=2026-11-27T02:01:00Z"},
+			{"too long", "start_time=2026-11-27T00:00:00Z&end_time=2026-11-27T03:01:00Z"},
 			{"start only", "start_time=2026-11-27T00:00:00Z"},
 			{"end only", "end_time=2026-11-27T01:00:00Z"},
 			{"invalid minute", "start_time=2026-11-27T00:00:01Z&end_time=2026-11-27T01:00:00Z"},

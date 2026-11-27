@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
+import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 
 import AccountsView from '../AccountsView.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
@@ -17,6 +18,7 @@ const {
   getAllGroups,
   refreshCredentials,
   startScheduleTimer,
+  setSchedulable,
   showSuccess,
   previewUpstreamGroup,
   updateAccount,
@@ -33,6 +35,7 @@ const {
   getAllGroups: vi.fn(),
   refreshCredentials: vi.fn(),
   startScheduleTimer: vi.fn(),
+  setSchedulable: vi.fn(),
   showSuccess: vi.fn(),
   previewUpstreamGroup: vi.fn(),
   updateAccount: vi.fn(),
@@ -56,6 +59,7 @@ vi.mock('@/api/admin', () => ({
       toggleSchedulable: vi.fn(),
       refreshCredentials,
       startScheduleTimer,
+      setSchedulable,
       previewUpstreamGroup,
       update: updateAccount
     },
@@ -63,6 +67,8 @@ vi.mock('@/api/admin', () => ({
     groups: { getAll: getAllGroups }
   }
 }))
+
+vi.mock('@/api/admin/accounts', async original => ({ ...await original<typeof import('@/api/admin/accounts')>(), update: updateAccount }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ showError, showWarning, showSuccess, showInfo: vi.fn() })
@@ -88,6 +94,7 @@ const DataTableStub = defineComponent({
         <slot name="cell-name" :row="row" :value="row.name" />
         <slot name="cell-groups" :row="row" />
         <slot name="cell-usage" :row="row" />
+        <slot name="cell-priority" :row="row" />
         <slot name="cell-actions" :row="row" />
       </div></template>
     </div>
@@ -114,10 +121,11 @@ const AccountStatsModalStub = defineComponent({
   template: '<div data-test="stats-account">{{ show ? account?.name : "" }}</div>'
 })
 
-function mountView(stubActionMenu = true, realUsageCell = false) {
+function mountView(stubActionMenu = true, realUsageCell = false, router?: Router) {
   return mount(AccountsView, {
     attachTo: document.body,
     global: {
+      plugins: router ? [router] : [],
       stubs: {
         AppLayout: { template: '<div><slot /></div>' },
         TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
@@ -180,7 +188,7 @@ const fullAccount = {
 async function chooseScheduleTimer(wrapper: ReturnType<typeof mountView>, hours: number) {
   await wrapper.getComponent(AccountScheduleTimer).get('button').trigger('click')
   const options = document.querySelectorAll<HTMLElement>('[role="option"]')
-  options[[6, 12, 24].indexOf(hours)]!.click()
+  options[[1, 2, 3, 6, 12, 24].indexOf(hours)]!.click()
   await flushPromises()
 }
 
@@ -197,6 +205,8 @@ describe('admin AccountsView lite account list', () => {
     getAllGroups.mockReset().mockResolvedValue([{ id: 7, name: 'codex', platform: 'openai' }])
     refreshCredentials.mockReset()
     startScheduleTimer.mockReset()
+    setSchedulable.mockReset()
+    updateAccount.mockReset()
     showSuccess.mockReset()
     showError.mockReset()
     showWarning.mockReset()
@@ -278,6 +288,43 @@ describe('admin AccountsView lite account list', () => {
     wrapper.unmount()
   })
 
+  it('locates the exact routed account using the existing list, with bulk actions disabled', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/accounts', component: { template: '<div />' } }] })
+    await router.push('/admin/accounts?account_id=42')
+    const wrapper = mountView(true, false, router)
+    await flushPromises()
+    expect(listAccounts).toHaveBeenCalledWith(1, 20, expect.objectContaining({ account_id: 42, lite: '1' }), expect.anything())
+    expect(wrapper.find('account-bulk-actions-bar-stub').exists()).toBe(false)
+    expect(wrapper.find('[data-account-name="compact row"]').exists()).toBe(true)
+    expect(getById).not.toHaveBeenCalled()
+    await router.replace('/admin/accounts')
+    await flushPromises()
+    expect(listAccounts.mock.lastCall?.[2].account_id).toBeUndefined()
+    expect(wrapper.find('account-bulk-actions-bar-stub').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('discards old rows and an in-flight bulk edit preview when entering account location', async () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/admin/accounts', component: { template: '<div />' } }] })
+    await router.push('/admin/accounts')
+    const wrapper = mountView(true, false, router)
+    try {
+      await flushPromises()
+      let finishPreview!: (value: unknown) => void, finishList!: (value: unknown) => void
+      listAccounts.mockImplementationOnce(() => new Promise(resolve => { finishPreview = resolve }))
+      wrapper.getComponent({ name: 'AccountBulkActionsBar' }).vm.$emit('edit-filtered')
+      listAccounts.mockImplementationOnce(() => new Promise(resolve => { finishList = resolve }))
+      await router.push('/admin/accounts?account_id=99'); await flushPromises()
+      expect(wrapper.find('[data-account-name="compact row"]').exists()).toBe(false)
+      expect(wrapper.find('account-bulk-actions-bar-stub').exists()).toBe(false)
+      finishPreview({items:[listRow],total:1,page:1,page_size:100,pages:1});await flushPromises()
+      expect(wrapper.getComponent({name:'BulkEditAccountModal'}).props('show')).toBe(false)
+      finishList({items:[{...listRow,id:99,name:'target row'}],total:1,page:1,page_size:20,pages:1});await flushPromises()
+      expect(wrapper.find('[data-account-name="target row"]').exists()).toBe(true)
+      expect(wrapper.find('[data-account-name="compact row"]').exists()).toBe(false)
+    } finally {wrapper.unmount()}
+  })
+
   it('keeps timer pending state and saved results when virtual rows unmount', async () => {
     let finish!: (value: unknown) => void
     startScheduleTimer.mockReturnValue(new Promise(resolve => { finish = resolve }))
@@ -306,7 +353,7 @@ describe('admin AccountsView lite account list', () => {
     }
   })
 
-  it.each([6, 12, 24])('saves %s hours and applies only the returned backend state', async hours => {
+  it.each([1, 2, 3, 6, 12, 24])('saves %s hours and applies only the returned backend state', async hours => {
     const result = { id: 42, schedulable: false, schedule_resume_at: '2026-11-21T06:00:00Z' }
     startScheduleTimer.mockResolvedValue(result)
     const wrapper = mountView()
@@ -319,6 +366,94 @@ describe('admin AccountsView lite account list', () => {
     } finally {
       wrapper.unmount()
     }
+  })
+
+  it('clears the saved timer immediately when the administrator manually opens the account', async () => {
+    const timer = { id: 42, schedulable: false, schedule_resume_at: '2026-11-21T06:00:00Z' }
+    listAccounts.mockResolvedValue({ items: [{ ...listRow, ...timer }], total: 1, page: 1, page_size: 20, pages: 1 })
+    setSchedulable.mockResolvedValue({ ...listRow, schedulable: true, schedule_resume_at: null })
+    const wrapper = mountView()
+    try {
+      await flushPromises()
+      const toggle = wrapper.findAll('button').find(b => b.attributes('title') === 'admin.accounts.schedulableDisabled')
+      expect(toggle).toBeDefined()
+      await toggle!.trigger('click')
+      await flushPromises()
+      expect(setSchedulable).toHaveBeenCalledWith(42, true)
+      expect(wrapper.getComponent(AccountScheduleTimer).props('account')).toMatchObject({ schedulable: true, schedule_resume_at: null })
+    } finally { wrapper.unmount() }
+  })
+
+  it('does not restore a cancelled timer from a list request started before manual opening', async () => {
+    const paused = { ...listRow, schedulable: false, schedule_resume_at: '2026-11-21T06:00:00Z' }
+    const stale = { items: [paused], total: 1, page: 1, page_size: 20, pages: 1 }
+    listAccounts.mockResolvedValue(stale)
+    setSchedulable.mockResolvedValue({ ...listRow, schedulable: true, schedule_resume_at: null })
+    const wrapper = mountView()
+    try {
+      await flushPromises()
+      let finish!: (value: unknown) => void
+      listAccounts.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+      await wrapper.findAll('button').find(b => b.attributes('title') === 'admin.accounts.schedulableDisabled')!.trigger('click')
+      await flushPromises()
+      finish(stale)
+      await flushPromises()
+      expect(wrapper.getComponent(AccountScheduleTimer).props('account')).toMatchObject({ schedulable: true, schedule_resume_at: null })
+    } finally { wrapper.unmount() }
+  })
+
+  it('does not restore a cancelled timer from an older credentials refresh response', async () => {
+    const paused = { ...listRow, schedulable:false, schedule_resume_at:'2026-11-21T06:00:00Z' }
+    listAccounts.mockResolvedValue({items:[paused],total:1,page:1,page_size:20,pages:1})
+    let finish!: (value: unknown) => void
+    refreshCredentials.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    setSchedulable.mockResolvedValue({...listRow,schedulable:true,schedule_resume_at:null})
+    const wrapper=mountView()
+    try {
+      await flushPromises()
+      wrapper.getComponent(AccountActionMenu).vm.$emit('refresh-token',paused)
+      await wrapper.findAll('button').find(b=>b.attributes('title')==='admin.accounts.schedulableDisabled')!.trigger('click')
+      await flushPromises()
+      finish({account:paused});await flushPromises()
+      expect(wrapper.getComponent(AccountScheduleTimer).props('account')).toMatchObject({schedulable:true,schedule_resume_at:null})
+    } finally {wrapper.unmount()}
+  })
+
+  it('keeps the cancelled timer cleared when a real inline priority save finishes late', async () => {
+    const paused={...listRow,schedulable:false,schedule_resume_at:'2026-11-21T06:00:00Z'}
+    listAccounts.mockResolvedValue({items:[paused],total:1,page:1,page_size:20,pages:1})
+    let finish!: (value:unknown)=>void
+    updateAccount.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
+    setSchedulable.mockResolvedValue({...listRow,schedulable:true,schedule_resume_at:null})
+    const w=mountView()
+    try {
+      await flushPromises()
+      await w.get('[data-testid="account-priority-value"]').trigger('click')
+      const input=w.get('[data-testid="account-priority-input"]')
+      await input.setValue('3');await input.trigger('keydown',{key:'Enter'})
+      expect(updateAccount).toHaveBeenCalledWith(42,{priority:3})
+      await w.findAll('button').find(b=>b.attributes('title')==='admin.accounts.schedulableDisabled')!.trigger('click');await flushPromises()
+      finish({...paused,priority:3});await flushPromises()
+      expect(w.getComponent(AccountScheduleTimer).props('account')).toMatchObject({schedulable:true,schedule_resume_at:null,priority:3})
+    } finally {w.unmount()}
+  })
+
+  it('does not reinsert a timer-paused row into the active filter from an older list', async () => {
+    localStorage.setItem('account-filter-values',JSON.stringify({platform:'',status:'active'}))
+    const stale={items:[listRow],total:1,page:1,page_size:20,pages:1}
+    const wrapper=mountView()
+    try {
+      await flushPromises()
+      let finish!: (value:unknown)=>void
+      listAccounts.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
+      await wrapper.get('[data-test="manual-refresh"]').trigger('click')
+      startScheduleTimer.mockResolvedValue({id:42,schedulable:false,schedule_resume_at:'2026-11-21T06:00:00Z'})
+      await chooseScheduleTimer(wrapper,1)
+      expect(wrapper.find('[data-account-name="compact row"]').exists()).toBe(false)
+      finish(stale);await flushPromises()
+      expect(wrapper.find('[data-account-name="compact row"]').exists()).toBe(false)
+    } finally {wrapper.unmount()}
   })
 
   it.each([

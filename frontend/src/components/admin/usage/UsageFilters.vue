@@ -25,9 +25,10 @@
             ✕
           </button>
           <div
-            v-if="showUserDropdown && (userResults.length > 0 || userKeyword)"
+            v-if="showUserDropdown && (userResults.length > 0 || userKeyword || showHistory)"
             class="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-white shadow-lg dark:bg-dark-800"
           >
+            <AdminUserHistoryList v-if="showHistory && !userKeyword.trim()" @select="item => selectUser({ id: item.id, email: item.email, deleted: false })" />
             <button
               v-for="u in userResults"
               :key="u.id"
@@ -181,12 +182,12 @@
         <button type="button" @click="$emit('refresh')" class="btn btn-secondary">
           {{ t('common.refresh') }}
         </button>
-        <button type="button" @click="$emit('reset')" class="btn btn-secondary">
+        <button type="button" @click="resetFilters" class="btn btn-secondary">
           {{ t('common.reset') }}
         </button>
         <slot name="after-reset" />
         <template v-if="mode === 'usage'">
-          <button type="button" @click="$emit('cleanup')" class="btn btn-danger">
+          <button type="button" @click="$emit('cleanup')" :disabled="disableCleanup" :title="disableCleanup ? t('admin.usage.recentRange.cleanupDateOnly') : undefined" class="btn btn-danger">
             {{ t('admin.usage.cleanup.button') }}
           </button>
           <button type="button" @click="$emit('export')" :disabled="exporting" class="btn btn-primary">
@@ -205,6 +206,8 @@ import { ref, onMounted, onUnmounted, toRef, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
+import AdminUserHistoryList from './AdminUserHistoryList.vue'
+import { useAdminUserHistory } from '@/composables/useAdminUserHistory'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 import type { SimpleApiKey, SimpleUser } from '@/api/admin/usage'
 
@@ -216,6 +219,7 @@ interface Props {
   startDate: string
   endDate: string
   showActions?: boolean
+  disableCleanup?: boolean
   modelOptions?: string[]
   /**
    * errors 模式:隐藏用量专属字段/按钮,显示错误类型+状态码(错误请求 tab 用)
@@ -242,6 +246,8 @@ const emit = defineEmits([
 
 const { t } = useI18n()
 const filters = toRef(props, 'modelValue')
+const history = useAdminUserHistory()
+const showHistory = computed(() => props.showActions && history.enabled.value && (history.entries.value.length > 0 || history.failed.value))
 
 const userSearchRef = ref<HTMLElement | null>(null)
 const apiKeySearchRef = ref<HTMLElement | null>(null)
@@ -257,6 +263,7 @@ const apiKeyKeyword = ref('')
 const apiKeyResults = ref<SimpleApiKey[]>([])
 const showApiKeyDropdown = ref(false)
 let apiKeySearchTimeout: ReturnType<typeof setTimeout> | null = null
+let apiKeySearchSequence = 0
 
 interface SimpleAccount {
   id: number
@@ -365,16 +372,23 @@ const debounceUserSearch = () => {
   }, 300)
 }
 
-const debounceApiKeySearch = () => {
+const invalidateApiKeySearch = () => {
   if (apiKeySearchTimeout) clearTimeout(apiKeySearchTimeout)
+  apiKeySearchTimeout = null
+  return ++apiKeySearchSequence
+}
+
+const debounceApiKeySearch = () => {
+  const seq = invalidateApiKeySearch()
+  const userId = filters.value.user_id
+  const keyword = apiKeyKeyword.value
   apiKeySearchTimeout = setTimeout(async () => {
+    apiKeySearchTimeout = null
     try {
-      apiKeyResults.value = await adminAPI.usage.searchApiKeys(
-        filters.value.user_id,
-        apiKeyKeyword.value || ''
-      )
+      const results = await adminAPI.usage.searchApiKeys(userId, keyword || '')
+      if (seq === apiKeySearchSequence && userId === filters.value.user_id) apiKeyResults.value = results
     } catch {
-      apiKeyResults.value = []
+      if (seq === apiKeySearchSequence && userId === filters.value.user_id) apiKeyResults.value = []
     }
   }, 300)
 }
@@ -385,15 +399,18 @@ const selectUser = async (u: SimpleUser) => {
   showUserDropdown.value = false
   filters.value.user_id = u.id
   clearApiKey()
+  if (props.showActions) history.record(u.id, u.email)
+  const selected = userSearchSequence
+  const seq = apiKeySearchSequence
 
-  // Auto-load API keys for this user
+  // Auto-load API keys for this user; a later user selection or input wins.
   try {
-    apiKeyResults.value = await adminAPI.usage.searchApiKeys(u.id, '')
+    const results = await adminAPI.usage.searchApiKeys(u.id, '')
+    if (seq === apiKeySearchSequence && filters.value.user_id === u.id) apiKeyResults.value = results
   } catch {
-    apiKeyResults.value = []
+    if (seq === apiKeySearchSequence && filters.value.user_id === u.id) apiKeyResults.value = []
   }
-
-  emitChange()
+  if (selected === userSearchSequence && filters.value.user_id === u.id) emitChange()
 }
 
 const clearUser = () => {
@@ -414,6 +431,7 @@ const selectApiKey = (k: SimpleApiKey) => {
 }
 
 const clearApiKey = () => {
+  invalidateApiKeySearch()
   apiKeyKeyword.value = ''
   apiKeyResults.value = []
   showApiKeyDropdown.value = false
@@ -423,6 +441,15 @@ const clearApiKey = () => {
 const onClearApiKey = () => {
   clearApiKey()
   emitChange()
+}
+
+const resetFilters = () => {
+  clearPendingUserSearch()
+  userKeyword.value = ''
+  userResults.value = []
+  showUserDropdown.value = false
+  clearApiKey()
+  emit('reset')
 }
 
 const debounceAccountSearch = () => {
@@ -498,6 +525,9 @@ watch(
   (userId) => {
     if (!userId) {
       clearPendingUserSearch()
+      invalidateApiKeySearch()
+      apiKeyKeyword.value = ''
+      apiKeyResults.value = []
       userKeyword.value = ''
       userResults.value = []
     }
@@ -536,12 +566,15 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearPendingUserSearch()
+  invalidateApiKeySearch()
   document.removeEventListener('click', onDocumentClick)
 })
 
 // 供外部(如用户排行下钻)在程序化设置 user_id 后回显选中的用户邮箱
 const setUserKeyword = (email: string) => {
   clearPendingUserSearch()
+  invalidateApiKeySearch()
+  apiKeyResults.value = []
   userKeyword.value = email
   userResults.value = []
   showUserDropdown.value = false

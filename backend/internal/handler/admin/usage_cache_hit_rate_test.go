@@ -32,7 +32,7 @@ func TestAdminCacheHitRateValidationAndCaching(t *testing.T) {
 	usageCacheHitRateCache = newSnapshotCache(30 * time.Second)
 	t.Cleanup(func() { usageCacheHitRateCache = newSnapshotCache(30 * time.Second) })
 	repo := &cacheRateRepoCapture{}
-	h := NewUsageHandler(service.NewUsageService(repo, nil, nil, nil), nil, nil, nil)
+	h := NewUsageHandler(service.NewUsageService(repo, nil, nil, nil), nil, nil, nil, nil)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/cache", h.CacheHitRate)

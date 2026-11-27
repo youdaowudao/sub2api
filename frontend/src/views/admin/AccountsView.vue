@@ -175,8 +175,14 @@
         </div>
       </template>
       <template #table>
-        <AccountBulkActionsBar
+        <div v-if="locatedAccountID" class="mb-2 flex items-center gap-2 text-sm">
+          <span>{{ t('admin.accounts.locatedAccount', { id: locatedAccountID }) }}</span>
+          <button class="btn btn-secondary btn-sm" type="button" @click="clearLocatedAccount">{{ t('common.clear') }}</button>
+          <span v-if="!loading && !accounts.length" class="text-gray-500">{{ t('admin.accounts.locateMissing') }}</span>
+        </div>
+        <AccountBulkActionsBar v-if="!locatedAccountID"
           :selected-ids="selIds"
+          :schedule-busy="selIds.some(isScheduleOperationPending)"
           :total-results="pagination.total"
           :selecting-all="selectingAllResults"
           :all-results-selected="allResultsSelected"
@@ -306,10 +312,10 @@
           </template>
           <template #cell-schedulable="{ row }">
             <div class="flex flex-wrap items-center gap-2">
-              <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+              <button @click="handleToggleSchedulable(row)" :disabled="isScheduleOperationPending(row.id)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
                 <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
               </button>
-              <AccountScheduleTimer :account="row" :busy="pendingScheduleTimers.has(row.id)" :disabled="togglingSchedulable === row.id" @start="handleStartScheduleTimer(row, $event)" />
+              <AccountScheduleTimer :account="row" :busy="pendingScheduleTimers.has(row.id)" :disabled="isScheduleOperationPending(row.id)" @start="handleStartScheduleTimer(row, $event)" />
             </div>
           </template>
           <template #cell-cache_hit_rate="{ row }">
@@ -510,6 +516,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -563,6 +570,11 @@ import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
+const accountRoute = useRoute()
+const accountRouter = useRouter()
+const parseLocatedAccount = (value: unknown) => typeof value === 'string' && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : undefined
+const locatedAccountID = ref(parseLocatedAccount(accountRoute?.query.account_id))
+const accountTargetAllowed = (id: number) => !locatedAccountID.value || locatedAccountID.value === id
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
@@ -642,8 +654,27 @@ const statsAcc = ref<Account | null>(null)
 const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
-const togglingSchedulable = ref<number | null>(null)
 const pendingScheduleTimers = reactive(new Set<number>())
+const pendingScheduleSwitches = reactive(new Set<number>())
+const isScheduleOperationPending = (id: number) => pendingScheduleTimers.has(id) || pendingScheduleSwitches.has(id)
+let scheduleRevision = 0
+type ScheduleFields = Pick<Account, 'schedulable' | 'schedule_resume_at'>
+const scheduleRevisionByID = new Map<number, { revision: number; schedulable: boolean; timer?: { revision: number; value: string | null } }>()
+const markScheduleSaved = (ids: number[], fields: ScheduleFields) => {
+  scheduleRevision++
+  ids.forEach(id => scheduleRevisionByID.set(id, {
+    revision: scheduleRevision,
+    schedulable: fields.schedulable,
+    timer: fields.schedule_resume_at !== undefined
+      ? { revision: scheduleRevision, value: fields.schedule_resume_at }
+      : scheduleRevisionByID.get(id)?.timer
+  }))
+}
+const preserveSavedSchedule = <T extends AccountListItem>(row: T, revision: number): T => {
+  const saved = scheduleRevisionByID.get(row.id)
+  if (!saved || saved.revision <= revision) return row
+  return { ...row, schedulable: saved.schedulable, ...(saved.timer && saved.timer.revision > revision ? { schedule_resume_at: saved.timer.value } : {}) }
+}
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
@@ -1159,9 +1190,22 @@ const {
   handlePageChange: baseHandlePageChange,
   handlePageSizeChange: baseHandlePageSizeChange
 } = useTableLoader<AccountListItem, any>({
-  fetchFn: adminAPI.accounts.list,
+  fetchFn: async (page, size, filters, options) => {
+    const revision = scheduleRevision
+    const result = await adminAPI.accounts.list(page, size, filters, options)
+    if (options?.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    if (revision === scheduleRevision) return result
+    // An already in-flight list must not put a successfully cancelled timer back.
+    const rows = result.items.flatMap(row => {
+      const saved = preserveSavedSchedule(row, revision)
+      return saved !== row && !accountMatchesCurrentFilters(saved) ? [] : [saved]
+    })
+    const total = Math.max(0, result.total - (result.items.length - rows.length))
+    return { ...result, items: rows, total, pages: Math.ceil(total / size) }
+  },
   initialParams: {
     ...loadInitialAccountFilterValues(),
+    ...(locatedAccountID.value ? { platform:'', status:'', account_id: locatedAccountID.value } : {}),
     type: '',
     privacy_mode: '',
     group: '',
@@ -1209,6 +1253,7 @@ const clearSelection = () => {
 }
 
 const selectPage = () => {
+  if (locatedAccountID.value) return
   selectCurrentPage()
 }
 
@@ -1225,7 +1270,9 @@ useSwipeSelect(accountTableRef, {
   batchUpdate
 }, swipeVirtualContext)
 
+let autoRefreshVersion = 0
 const resetAutoRefreshCache = () => {
+  autoRefreshVersion++
   autoRefreshETag.value = null
   upstreamBillingRateETag.value = null
 }
@@ -1325,6 +1372,7 @@ const applyUpstreamBillingRateSnapshots = async (
 }
 
 const refreshUpstreamBillingRates = async (force = false) => {
+  if (locatedAccountID.value) return
   if (upstreamBillingRateRefreshing.value || loading.value || accounts.value.length === 0) return
   if (!force && (
     probingUpstreamBilling.size > 0 ||
@@ -1347,7 +1395,7 @@ const refreshUpstreamBillingRates = async (force = false) => {
       buildUpstreamBillingRateFilters(),
       { etag: force ? null : upstreamBillingRateETag.value, signal: controller.signal }
     )
-    if (loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
+    if (locatedAccountID.value || loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
     if (result.etag) upstreamBillingRateETag.value = result.etag
     if (!result.notModified && result.data) await applyUpstreamBillingRateSnapshots(result.data)
   } catch (error) {
@@ -1534,6 +1582,8 @@ const refreshAccountsIncrementally = async () => {
   if (autoRefreshFetching.value) return
   syncAccountListDerivedParams()
   autoRefreshFetching.value = true
+  const version = autoRefreshVersion
+  const revision = scheduleRevision
   try {
     const result = await adminAPI.accounts.listWithEtag(
       pagination.page,
@@ -1552,6 +1602,7 @@ const refreshAccountsIncrementally = async () => {
       { etag: autoRefreshETag.value }
     )
 
+    if (version !== autoRefreshVersion || revision !== scheduleRevision) return
     if (result.etag) {
       autoRefreshETag.value = result.etag
     }
@@ -1912,16 +1963,17 @@ const toggleableColumns = computed(() =>
 // Filtered columns based on visibility
 const cols = computed(() =>
   allColumns.value.filter(col =>
-    col.key === 'select' || col.key === 'name' || col.key === 'actions' || !hiddenColumns.has(col.key)
+    (col.key !== 'select' || !locatedAccountID.value) && (col.key === 'select' || col.key === 'name' || col.key === 'actions' || !hiddenColumns.has(col.key))
   )
 )
 
 const accountDetailLoading = new Set<number>()
 const loadAccountDetails = async (account: Pick<AccountListItem, 'id'>): Promise<Account | null> => {
-  if (accountDetailLoading.has(account.id)) return null
+  if (!accountTargetAllowed(account.id) || accountDetailLoading.has(account.id)) return null
   accountDetailLoading.add(account.id)
   try {
-    return await adminAPI.accounts.getById(account.id)
+    const result = await adminAPI.accounts.getById(account.id)
+    return accountTargetAllowed(result.id) ? result : null
   } catch (error) {
     console.error('Failed to load account details:', error)
     appStore.showError(extractApiErrorMessage(error, t('common.error')))
@@ -1938,16 +1990,19 @@ const handleEdit = async (a: AccountListItem) => {
   showEdit.value = true
 }
 const openMenu = (a: Account, e: MouseEvent) => {
+  if (!accountTargetAllowed(a.id)) return
   menu.acc = a
   const target = e.currentTarget as HTMLElement
   menu.anchorRect = target.getBoundingClientRect()
   menu.show = true
 }
 const toggleSelectAllVisible = (event: Event) => {
+  if (locatedAccountID.value) return
   const target = event.target as HTMLInputElement
   toggleVisible(target.checked)
 }
 const handleBulkDelete = async () => {
+  if (locatedAccountID.value) return
   const accountIds = [...selIds.value]
   if (!confirm(t('admin.accounts.bulkActions.confirmDelete', { count: accountIds.length }))) return
   try {
@@ -1969,6 +2024,7 @@ const handleBulkDelete = async () => {
   }
 }
 const handleBulkResetStatus = async () => {
+  if (locatedAccountID.value) return
   if (!confirm(t('common.confirm'))) return
   try {
     const result = await adminAPI.accounts.batchClearError(selIds.value)
@@ -1985,6 +2041,7 @@ const handleBulkResetStatus = async () => {
   }
 }
 const handleBulkRefreshToken = async () => {
+  if (locatedAccountID.value) return
   if (!confirm(t('common.confirm'))) return
   const accountIds = [...selIds.value]
   try {
@@ -2004,6 +2061,7 @@ const handleBulkRefreshToken = async () => {
   }
 }
 const handleBulkProbeUpstreamBilling = async () => {
+  if (locatedAccountID.value) return
   const accountIDs = [...selIds.value]
   if (accountIDs.length === 0) {
     appStore.showError(t('admin.accounts.upstreamBilling.noEligibleAccounts'))
@@ -2040,7 +2098,7 @@ const handleBulkProbeUpstreamBilling = async () => {
 const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => {
   if (accountIds.length === 0) return
   const idSet = new Set(accountIds)
-  accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable } : account))
+  accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable, ...(schedulable ? { schedule_resume_at: null } : {}) } : account))
 }
 const normalizeBulkSchedulableResult = (
   result: {
@@ -2103,7 +2161,13 @@ const normalizeBulkSchedulableResult = (
   }
 }
 const handleBulkToggleSchedulable = async (schedulable: boolean) => {
+  if (locatedAccountID.value) return
   const accountIds = [...selIds.value]
+  if (accountIds.some(isScheduleOperationPending)) {
+    appStore.showError(t('admin.accounts.scheduleTimer.busyAccounts'))
+    return
+  }
+  accountIds.forEach(id => pendingScheduleSwitches.add(id))
   try {
     const result = await adminAPI.accounts.bulkUpdate(accountIds, { schedulable })
     const { successIds, failedIds, successCount, failedCount, hasIds, hasCounts } = normalizeBulkSchedulableResult(result, accountIds)
@@ -2117,6 +2181,8 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
     }
     if (successIds.length > 0) {
       updateSchedulableInList(successIds, schedulable)
+      markScheduleSaved(successIds, { schedulable, ...(schedulable ? { schedule_resume_at: null } : {}) })
+      enterAutoRefreshSilentWindow()
     }
     if (successCount > 0 && failedCount === 0) {
       const message = schedulable
@@ -2136,7 +2202,9 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
     }
   } catch (error) {
     console.error('Failed to bulk toggle schedulable:', error)
-    appStore.showError(t('common.error'))
+    appStore.showError(t('admin.accounts.scheduleTimer.switchUnknown'))
+  } finally {
+    accountIds.forEach(id => pendingScheduleSwitches.delete(id))
   }
 }
 const buildBulkEditFilterSnapshot = () => {
@@ -2155,6 +2223,7 @@ const buildBulkEditFilterSnapshot = () => {
 }
 
 const handleSelectAllResults = async () => {
+  if (locatedAccountID.value) return
   if (selectingAllResults.value || pagination.total === 0) return
 
   const requestVersion = ++selectionRequestVersion.value
@@ -2187,6 +2256,7 @@ const collectSelectionMetadata = (rows: Account[]) => {
 }
 
 const openBulkEditSelected = () => {
+  if (locatedAccountID.value) return
   bulkEditTarget.value = {
     mode: 'selected',
     accountIds: [...selIds.value],
@@ -2197,8 +2267,11 @@ const openBulkEditSelected = () => {
 }
 
 const openBulkEditFiltered = async () => {
+  if (locatedAccountID.value) return
+  const selectionVersion = selectionRequestVersion.value
   const filters = buildBulkEditFilterSnapshot()
   const preview = await adminAPI.accounts.list(1, 100, filters)
+  if (locatedAccountID.value || selectionVersion !== selectionRequestVersion.value) return
   const { selectedPlatforms, selectedTypes } = collectSelectionMetadata(preview.items)
   bulkEditTarget.value = {
     mode: 'filtered',
@@ -2220,6 +2293,7 @@ const handleDataImported = () => { showImportData.value = false; reload() }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({
+  account_id: locatedAccountID.value,
   platform: params.platform || '',
   type: params.type || '',
   status: params.status || '',
@@ -2231,6 +2305,7 @@ const buildAccountQueryFilters = () => ({
 })
 const accountMatchesCurrentFilters = (account: Account) => {
   const filters = buildAccountQueryFilters()
+  if (filters.account_id && account.id !== filters.account_id) return false
   if (filters.platform && account.platform !== filters.platform) return false
   if (filters.type && account.type !== filters.type) return false
   if (filters.status) {
@@ -2293,10 +2368,11 @@ const syncPaginationAfterLocalRemoval = () => {
   hasPendingListSync.value = nextTotal > 0
 }
 
-const patchAccountInList = (updatedAccount: Account) => {
+const patchAccountInList = (updatedAccount: Account, revision = scheduleRevision) => {
+  if (!accountTargetAllowed(updatedAccount.id)) return
   const index = accounts.value.findIndex(account => account.id === updatedAccount.id)
   if (index === -1) return
-  const mergedAccount = mergeRuntimeFields(accounts.value[index], updatedAccount)
+  const mergedAccount = mergeRuntimeFields(accounts.value[index], preserveSavedSchedule(updatedAccount, revision))
   if (!accountMatchesCurrentFilters(mergedAccount)) {
     accounts.value = accounts.value.filter(account => account.id !== mergedAccount.id)
     syncPaginationAfterLocalRemoval()
@@ -2328,7 +2404,7 @@ const refreshAccountsAfterUpstreamBillingProbe = async () => {
   await refreshUpstreamBillingSortedList(true)
 }
 const handleProbeUpstreamBilling = async (account: Account) => {
-  if (probingUpstreamBilling.has(account.id)) return
+  if (!accountTargetAllowed(account.id) || probingUpstreamBilling.has(account.id)) return
   probingUpstreamBilling.add(account.id)
   try {
     const result = await adminAPI.accounts.probeUpstreamBilling(account.id)
@@ -2343,13 +2419,19 @@ const handleProbeUpstreamBilling = async (account: Account) => {
     probingUpstreamBilling.delete(account.id)
   }
 }
-const handleAccountUpdated = (updatedAccount: Account) => {
-  patchAccountInList(updatedAccount)
+const handleAccountUpdated = (updatedAccount?: Account) => {
+  if (!updatedAccount) return
+  const current = accounts.value.find(row => row.id === updatedAccount.id)
+  if (!current) return
+  // Priority, quota and ordinary edit callbacks do not own scheduling. Keep
+  // the current switch/deadline instead of accepting their stale snapshot.
+  patchAccountInList({ ...updatedAccount, schedulable: current.schedulable, schedule_resume_at: current.schedule_resume_at })
   enterAutoRefreshSilentWindow()
 }
 const syncUpstreamGroup = async (account: AccountListItem) => {
-  if (syncingUpstreamGroup.has(account.id)) return
+  if (!accountTargetAllowed(account.id) || syncingUpstreamGroup.has(account.id)) return
   syncingUpstreamGroup.add(account.id)
+  const revision = scheduleRevision
   try {
     const fields = await adminAPI.accounts.previewUpstreamGroup({ account_id: account.id })
     if (!fields.name && !fields.notes) {
@@ -2359,7 +2441,9 @@ const syncUpstreamGroup = async (account: AccountListItem) => {
     if (fields.name === account.name) delete fields.name
     if (fields.notes === account.notes) delete fields.notes
     if (fields.name || fields.notes) {
-      handleAccountUpdated(await adminAPI.accounts.update(account.id, fields))
+      if (!accountTargetAllowed(account.id)) return
+      patchAccountInList(await adminAPI.accounts.update(account.id, fields), revision)
+      enterAutoRefreshSilentWindow()
     }
     appStore.showSuccess(t('admin.accounts.upstreamBilling.groupSynced'))
   } catch (error) {
@@ -2439,6 +2523,7 @@ const handleViewStats = async (a: AccountListItem) => {
   showStats.value = true
 }
 const handleSchedule = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
   scheduleAcc.value = a
   scheduleModelOptions.value = []
   showSchedulePanel.value = true
@@ -2450,10 +2535,10 @@ const handleSchedule = async (a: Account) => {
   }
 }
 const closeSchedulePanel = () => { showSchedulePanel.value = false; scheduleAcc.value = null; scheduleModelOptions.value = [] }
-const handleReAuth = (a: Account) => { reAuthAcc.value = a; showReAuth.value = true }
+const handleReAuth = (a: Account) => { if (accountTargetAllowed(a.id)) { reAuthAcc.value = a; showReAuth.value = true } }
 const duplicatingAccountIDs = new Set<number>()
 const handleDuplicateAccount = async (a: Account) => {
-  if (duplicatingAccountIDs.has(a.id)) return
+  if (!accountTargetAllowed(a.id) || duplicatingAccountIDs.has(a.id)) return
   duplicatingAccountIDs.add(a.id)
   try {
     const duplicate = await adminAPI.accounts.duplicate(a.id)
@@ -2470,6 +2555,8 @@ const lastManualRefreshAt = new Map<number, number>()
 const MANUAL_REFRESH_WARN_INTERVAL_MS = 60_000
 
 const handleRefresh = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
+  const revision = scheduleRevision
   // 只提醒不阻拦：短时间内反复手动刷新可能与后台自动刷新竞争同一份轮换令牌
   const lastAt = lastManualRefreshAt.get(a.id) ?? 0
   if (Date.now() - lastAt < MANUAL_REFRESH_WARN_INTERVAL_MS) {
@@ -2478,7 +2565,7 @@ const handleRefresh = async (a: Account) => {
   lastManualRefreshAt.set(a.id, Date.now())
   try {
     const result = await adminAPI.accounts.refreshCredentials(a.id)
-    patchAccountInList(result.account)
+    patchAccountInList(result.account, revision)
     enterAutoRefreshSilentWindow()
     if (result.warning) appStore.showWarning(result.message)
   } catch (error) {
@@ -2486,9 +2573,11 @@ const handleRefresh = async (a: Account) => {
   }
 }
 const handleRecoverState = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
+  const revision = scheduleRevision
   try {
     const updated = await adminAPI.accounts.recoverState(a.id)
-    patchAccountInList(updated)
+    patchAccountInList(updated, revision)
     enterAutoRefreshSilentWindow()
     appStore.showSuccess(t('admin.accounts.recoverStateSuccess'))
   } catch (error: any) {
@@ -2497,9 +2586,11 @@ const handleRecoverState = async (a: Account) => {
   }
 }
 const handleResetQuota = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
+  const revision = scheduleRevision
   try {
     const updated = await adminAPI.accounts.resetAccountQuota(a.id)
-    patchAccountInList(updated)
+    patchAccountInList(updated, revision)
     enterAutoRefreshSilentWindow()
     appStore.showSuccess(t('common.success'))
   } catch (error) {
@@ -2529,9 +2620,11 @@ const privacyResultMessageKey = (account: Account): { type: 'success' | 'error';
 }
 
 const handleSetPrivacy = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
+  const revision = scheduleRevision
   try {
     const updated = await adminAPI.accounts.setPrivacy(a.id)
-    patchAccountInList(updated)
+    patchAccountInList(updated, revision)
     enterAutoRefreshSilentWindow()
     const result = privacyResultMessageKey(updated)
     if (result.type === 'success') {
@@ -2545,6 +2638,7 @@ const handleSetPrivacy = async (a: Account) => {
   }
 }
 const onRevertFallback = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
   try {
     await adminAPI.accounts.revertProxyFallback(a.id)
     appStore.showSuccess(t('admin.accounts.revertProxySuccess'))
@@ -2555,12 +2649,13 @@ const onRevertFallback = async (a: Account) => {
   }
 }
 const handleCreateSparkShadow = (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
   creatingShadowAcc.value = a
   showCreateShadowDialog.value = true
 }
 const confirmCreateSparkShadow = async () => {
   const a = creatingShadowAcc.value
-  if (!a) return
+  if (!a || !accountTargetAllowed(a.id)) return
   try {
     await adminAPI.accounts.createSparkShadow(a.id, { name: `${a.name} (Spark)` })
     showCreateShadowDialog.value = false
@@ -2572,15 +2667,16 @@ const confirmCreateSparkShadow = async () => {
     appStore.showError(error?.response?.data?.message || t('admin.accounts.createSparkShadowFailed'))
   }
 }
-const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
-const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
+const handleDelete = (a: Account) => { if(accountTargetAllowed(a.id)) { deletingAcc.value = a; showDeleteDialog.value = true } }
+const confirmDelete = async () => { if(!deletingAcc.value || !accountTargetAllowed(deletingAcc.value.id)) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
 const handleStartScheduleTimer = async (account: Account, hours: number) => {
-  if (pendingScheduleTimers.has(account.id)) return
+  if (!accountTargetAllowed(account.id) || isScheduleOperationPending(account.id)) return
   pendingScheduleTimers.add(account.id)
   try {
     const result = await adminAPI.accounts.startScheduleTimer(account.id, hours)
     const current = accounts.value.find(row => row.id === result.id)
     if (current) patchAccountInList({ ...current, ...result })
+    markScheduleSaved([result.id], { schedulable: result.schedulable, schedule_resume_at: result.schedule_resume_at ?? null })
     enterAutoRefreshSilentWindow()
     appStore.showSuccess(t('admin.accounts.scheduleTimer.saved', {
       time: result.schedule_resume_at ? formatDateTime(result.schedule_resume_at) : ''
@@ -2598,17 +2694,23 @@ const handleStartScheduleTimer = async (account: Account, hours: number) => {
   }
 }
 const handleToggleSchedulable = async (a: Account) => {
+  if (!accountTargetAllowed(a.id) || isScheduleOperationPending(a.id)) return
   const nextSchedulable = !a.schedulable
-  togglingSchedulable.value = a.id
+  pendingScheduleSwitches.add(a.id)
   try {
     const updated = await adminAPI.accounts.setSchedulable(a.id, nextSchedulable)
-    updateSchedulableInList([a.id], updated?.schedulable ?? nextSchedulable)
+    if (updated) {
+      accounts.value = accounts.value.map(row => row.id === a.id ? {
+        ...row, schedulable: updated.schedulable, schedule_resume_at: updated.schedule_resume_at ?? null
+      } : row)
+      markScheduleSaved([a.id], { schedulable: updated.schedulable, schedule_resume_at: updated.schedule_resume_at ?? null })
+    }
     enterAutoRefreshSilentWindow()
   } catch (error) {
     console.error('Failed to toggle schedulable:', error)
-    appStore.showError(t('admin.accounts.failedToToggleSchedulable'))
+    appStore.showError(t('admin.accounts.scheduleTimer.switchUnknown'))
   } finally {
-    togglingSchedulable.value = null
+    pendingScheduleSwitches.delete(a.id)
   }
 }
 const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }
@@ -2665,6 +2767,32 @@ const handleClickOutside = (event: MouseEvent) => {
     showAutoRefreshDropdown.value = false
   }
 }
+
+const clearLocatedAccount = () => {
+  if (!accountRouter) return
+  const query = { ...accountRoute.query }
+  delete query.account_id
+  void accountRouter.replace({ query })
+}
+watch(() => accountRoute?.query.account_id, value => {
+  const next = parseLocatedAccount(value)
+  if (next === locatedAccountID.value) return
+  locatedAccountID.value = next
+  clearSelection()
+  accounts.value = []
+  pagination.total = 0; pagination.pages = 0
+  showBulkEdit.value = false; bulkEditTarget.value = null
+  menu.show = false; menu.acc = null
+  showEdit.value = false; edAcc.value = null
+  showReAuth.value = false; reAuthAcc.value = null
+  showDeleteDialog.value = false; deletingAcc.value = null
+  showCreateShadowDialog.value = false; creatingShadowAcc.value = null
+  showTempUnsched.value = false; tempUnschedAcc.value = null
+  closeTestModal(); closeStatsModal(); closeSchedulePanel()
+  params.account_id = next
+  if (next) Object.assign(params, { platform:'', type:'', status:'', group:'', search:'', privacy_mode:'' })
+  void reload()
+})
 
 onMounted(async () => {
   if (typeof window !== 'undefined') {

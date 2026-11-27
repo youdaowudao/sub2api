@@ -318,7 +318,14 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 // GET /api/v1/admin/dashboard/models
 // Query params: start_date, end_date (YYYY-MM-DD), user_id, api_key_id, account_id, group_id, request_type, stream, billing_type
 func (h *DashboardHandler) GetModelStats(c *gin.Context) {
-	startTime, endTime := parseTimeRange(c)
+	startTime, endTime, exact, err := parseAdminRecentRange(c, false)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if !exact {
+		startTime, endTime = parseTimeRange(c)
+	}
 
 	// Parse optional filter params
 	var userID, apiKeyID, accountID, groupID int64
@@ -391,7 +398,17 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 		return
 	}
 
-	stats, hit, err := h.getModelStatsCached(c.Request.Context(), startTime, endTime, userID, apiKeyID, accountID, groupID, modelSource, requestType, stream, nativeCompactionV2, billingType, upstreamModelMismatch)
+	var stats []usagestats.ModelStat
+	var hit bool
+	if exact {
+		stats, err = h.dashboardService.GetModelStatsWithUsageFiltersBySource(c.Request.Context(), startTime, endTime, usagestats.UsageLogFilters{
+			UserID: userID, APIKeyID: apiKeyID, AccountID: accountID, GroupID: groupID,
+			RequestType: requestType, Stream: stream, NativeCompactionV2: nativeCompactionV2,
+			BillingType: billingType, UpstreamModelMismatch: upstreamModelMismatch,
+		}, modelSource)
+	} else {
+		stats, hit, err = h.getModelStatsCached(c.Request.Context(), startTime, endTime, userID, apiKeyID, accountID, groupID, modelSource, requestType, stream, nativeCompactionV2, billingType, upstreamModelMismatch)
+	}
 	if err != nil {
 		response.Error(c, 500, "Failed to get model statistics")
 		return
@@ -401,7 +418,7 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 	response.Success(c, gin.H{
 		"models":     stats,
 		"start_date": startTime.Format("2006-01-02"),
-		"end_date":   endTime.Add(-24 * time.Hour).Format("2006-01-02"),
+		"end_date":   dashboardRangeEndDate(endTime, exact),
 	})
 }
 
@@ -569,7 +586,7 @@ func parseRankingLimit(raw string) int {
 // GET /api/v1/admin/dashboard/users-ranking
 func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 	startTime, endTime, precise, err := parseDashboardRange(c)
-	if err != nil || (precise && endTime.Sub(startTime) > 2*time.Hour) {
+	if err != nil || (precise && endTime.Sub(startTime) > maxAdminRecentRange) {
 		response.BadRequest(c, "invalid start_time/end_time")
 		return
 	}
@@ -709,7 +726,7 @@ func (h *DashboardHandler) GetBatchAPIKeysUsage(c *gin.Context) {
 // Query params: start_date, end_date, group_id, model, endpoint, endpoint_type, limit
 func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
 	startTime, endTime, precise, err := parseDashboardRange(c)
-	if err != nil || (precise && endTime.Sub(startTime) > 2*time.Hour) {
+	if err != nil || (precise && endTime.Sub(startTime) > maxAdminRecentRange) {
 		response.BadRequest(c, "invalid start_time/end_time")
 		return
 	}

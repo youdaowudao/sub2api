@@ -82,6 +82,8 @@ export interface CreateUsageCleanupTaskRequest {
 }
 
 export interface AdminUsageQueryParams extends UsageQueryParams {
+  start_time?: string
+  end_time?: string
   user_id?: number
   exact_total?: boolean
   billing_mode?: string
@@ -128,6 +130,8 @@ export async function getStats(params: {
   native_compaction_v2?: boolean | null
   upstream_model_mismatch?: boolean
   period?: string
+  start_time?: string
+  end_time?: string
   start_date?: string
   end_date?: string
   timezone?: string
@@ -208,7 +212,7 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
   return data
 }
 
-export async function getCacheHitRate(params: AdminUsageQueryParams & { dimension: 'total' | 'group' | 'account'; account_ids?: string; nocache?: number }): Promise<CacheHitRateResult> {
+export async function getCacheHitRate(params: AdminUsageQueryParams & { dimension: 'total' | 'group' | 'account'; account_ids?: string; nocache?: number; include_performance?: number; platform?: string }): Promise<CacheHitRateResult> {
   const { data } = await apiClient.get<CacheHitRateResult>('/admin/usage/cache-hit-rate', { params })
   return data
 }

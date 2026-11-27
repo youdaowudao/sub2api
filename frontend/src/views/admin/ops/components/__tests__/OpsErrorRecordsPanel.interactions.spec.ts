@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { reactive } from 'vue'
+import { createPinia } from 'pinia'
 import OpsErrorRecordsPanel from '../OpsErrorRecordsPanel.vue'
+import OpsErrorIdentityFilter from '../OpsErrorIdentityFilter.vue'
 import OpsErrorLogTable from '../OpsErrorLogTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
@@ -10,7 +12,7 @@ import { adminAPI } from '@/api/admin'
 
 enableAutoUnmount(afterEach)
 const route = reactive({ query: {} as Record<string, string>, path: '/admin/ops' })
-const auth = reactive({ user: { id: 987651 } })
+const auth = reactive({ user: { id: 987651 }, isAdmin: true })
 vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => ({ replace: vi.fn(async (target: { query: Record<string, string> }) => { route.query = target.query }) }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => auth }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => ({ showError: vi.fn() }) }))
@@ -40,6 +42,41 @@ beforeEach(() => {
   vi.mocked(opsAPI.listErrorRecordMembers).mockResolvedValue(memberResult)
 })
 afterEach(() => vi.restoreAllMocks())
+
+it('reads actual today and 3h error windows and keeps the returned window for pagination', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date(2026,10,27,15,10,0))
+  const wrapper=mountPanel()
+  try {
+    await flushPromises()
+    vi.mocked(opsAPI.listErrorRecords).mockClear()
+    const today={start_time:new Date(2026,10,27,0,0,0).toISOString(),end_time:new Date(2026,10,27,15,10,0).toISOString()}
+    vi.mocked(opsAPI.listErrorRecords).mockResolvedValue({...result,window_start:today.start_time,window_end:today.end_time})
+    await wrapper.setProps({timeRange:'today'});await flushPromises()
+    expect(opsAPI.listErrorRecords).toHaveBeenCalledTimes(1)
+    expect(opsAPI.listErrorRecords).toHaveBeenLastCalledWith(expect.objectContaining(today),expect.anything())
+    expect(vi.mocked(opsAPI.listErrorRecords).mock.lastCall?.[0].time_range).toBeUndefined()
+    vi.setSystemTime(new Date(2026,10,27,15,20,0))
+    table(wrapper).findComponent(Pagination).vm.$emit('update:page',2);await flushPromises()
+    expect(opsAPI.listErrorRecords).toHaveBeenLastCalledWith(expect.objectContaining({...today,page:2}),expect.anything())
+    await wrapper.setProps({refreshToken:1});await flushPromises()
+    expect(opsAPI.listErrorRecords).toHaveBeenLastCalledWith(expect.objectContaining({start_time:today.start_time,end_time:new Date(2026,10,27,15,20,0).toISOString()}),expect.anything())
+    await wrapper.setProps({timeRange:'3h'});await flushPromises()
+    expect(opsAPI.listErrorRecords).toHaveBeenLastCalledWith(expect.objectContaining({time_range:'3h'}),expect.anything())
+  } finally {wrapper.unmount();vi.useRealTimers()}
+})
+
+it('selects the shared browser user history in the real ops identity filter without user lookup', async () => {
+  localStorage.setItem('admin-user-query-history:987651',JSON.stringify([{id:42,email:'saved@example.test',lastQueriedAt:1,pinned:true}]))
+  const lookup=vi.spyOn(adminAPI.usage,'searchUsers').mockResolvedValue([])
+  const w=mount(OpsErrorIdentityFilter,{props:{kind:'user',label:'User'},global:{plugins:[createPinia()]}})
+  try {
+    await w.get('input').trigger('focus')
+    await w.findAll('button').find(b=>b.text().includes('saved@example.test'))!.trigger('click')
+    expect(w.emitted('update:id')).toEqual([[42]])
+    expect(lookup).not.toHaveBeenCalled()
+  } finally {w.unmount();localStorage.removeItem('admin-user-query-history:987651')}
+})
 
 describe('sorting stays consistent with requests', () => {
   it.each(['model', 'status'] as const)('restores main %s sorting after a failed page and retry', async key => {

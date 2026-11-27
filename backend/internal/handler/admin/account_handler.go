@@ -678,7 +678,16 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	var locateID int64
+	if raw, present := c.GetQuery("account_id"); present {
+		id, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || id <= 0 {
+			response.BadRequest(c, "invalid account_id")
+			return
+		}
+		locateID = id
+	}
+	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder, locateID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -858,7 +867,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 				CurrentRPM:         item.CurrentRPM,
 			}
 		}
-		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, true)
+		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, true, locateID)
 		if etag != "" {
 			c.Header("ETag", etag)
 			c.Header("Vary", "If-None-Match")
@@ -871,7 +880,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 		return
 	}
 
-	etag := buildAccountsListETag(result, total, page, pageSize, platform, accountType, status, search, false)
+	etag := buildAccountsListETag(result, total, page, pageSize, platform, accountType, status, search, false, locateID)
 	if etag != "" {
 		c.Header("ETag", etag)
 		c.Header("Vary", "If-None-Match")
@@ -890,7 +899,12 @@ func buildAccountsListETag[T any](
 	page, pageSize int,
 	platform, accountType, status, search string,
 	lite bool,
+	locateIDs ...int64,
 ) string {
+	var locateID int64
+	if len(locateIDs) > 0 {
+		locateID = locateIDs[0]
+	}
 	payload := struct {
 		Total       int64  `json:"total"`
 		Page        int    `json:"page"`
@@ -901,6 +915,7 @@ func buildAccountsListETag[T any](
 		Search      string `json:"search"`
 		Lite        bool   `json:"lite"`
 		Items       []T    `json:"items"`
+		AccountID   int64  `json:"account_id,omitempty"`
 	}{
 		Total:       total,
 		Page:        page,
@@ -911,6 +926,7 @@ func buildAccountsListETag[T any](
 		Search:      search,
 		Lite:        lite,
 		Items:       items,
+		AccountID:   locateID,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

@@ -95,7 +95,11 @@ export default {
       schedulableHint: 'Enable to include this account in API request scheduling',
       schedulableEnabled: 'Scheduling enabled',
       schedulableDisabled: 'Scheduling disabled',
+      locatedAccount: 'Account #{id}',
+      locateMissing: 'Account not found; it may have been deleted',
       scheduleTimer: {
+        busyAccounts: 'Some selected accounts are updating scheduling. Wait for them to finish and retry.',
+        switchUnknown: 'The change may have been saved. Refresh to check scheduling and the timer.',
         button: 'Pause for…',
         hours: 'Pause for {hours} hours',
         alreadyClosed: 'Scheduling is already disabled',

@@ -181,7 +181,7 @@ func parseOpsErrorRecordsFilter(c *gin.Context, members bool) (*service.OpsError
 			return nil, fmt.Errorf("结束时间必须晚于开始时间，请重新选择。")
 		}
 	} else {
-		tr, e := enum("time_range", "1h", "5m", "30m", "1h", "6h", "24h")
+		tr, e := enum("time_range", "1h", "5m", "30m", "1h", "3h", "6h", "24h")
 		if e != nil {
 			return nil, e
 		}

@@ -45,14 +45,6 @@ func TestScheduleTimerPersistsSwitchAndResumesAfterRestart(t *testing.T) {
 	saved, err = client.Account.Get(ctx, account.ID)
 	require.NoError(t, err)
 	require.True(t, result.ScheduleResumeAt.Equal(*saved.ScheduleResumeAt), "a duplicate must not extend the timer")
-	// Manual operations keep their original effect and do not create a second pause state.
-	require.NoError(t, repo.SetSchedulable(ctx, account.ID, true))
-	current, err := repo.GetByID(ctx, account.ID)
-	require.NoError(t, err)
-	require.True(t, current.IsSchedulable())
-	require.NotNil(t, current.ScheduleResumeAt, "manual enable does not cancel the scheduled action")
-	require.NoError(t, repo.SetSchedulable(ctx, account.ID, false))
-
 	// Accelerate the persisted timer, then construct the worker anew as after a restart.
 	_, err = integrationDB.Exec("UPDATE accounts SET schedule_resume_at = NOW() - INTERVAL '1 second' WHERE id = $1", account.ID)
 	require.NoError(t, err)
@@ -64,9 +56,61 @@ func TestScheduleTimerPersistsSwitchAndResumesAfterRestart(t *testing.T) {
 		return err == nil && row.Schedulable && row.ScheduleResumeAt == nil
 	}, 5*time.Second, 20*time.Millisecond, "a restarted backend must actually enable the saved switch")
 	worker.Stop()
-	current, err = repo.GetByID(ctx, account.ID)
+	current, err := repo.GetByID(ctx, account.ID)
 	require.NoError(t, err)
 	require.True(t, current.IsSchedulable(), "the ordinary selection predicate must see the enabled switch")
+}
+
+func TestScheduleTimerManualOpenCancels(t *testing.T) {
+	ctx := context.Background()
+	client, account := createScheduleTimerAccount(t)
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := repo.StartAccountScheduleTimer(ctx, account.ID, 6)
+	require.NoError(t, err)
+	// A worker may already have selected a due timer before the manual operation.
+	_, err = integrationDB.Exec("UPDATE accounts SET schedule_resume_at = NOW() - INTERVAL '1 second' WHERE id = $1", account.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.SetSchedulable(ctx, account.ID, true))
+	row, err := client.Account.Get(ctx, account.ID)
+	require.NoError(t, err)
+	require.True(t, row.Schedulable)
+	require.Nil(t, row.ScheduleResumeAt, "manual opening must cancel the persisted timer")
+	require.NoError(t, repo.SetSchedulable(ctx, account.ID, false))
+	changed, err := repo.resumeScheduleTimer(ctx, account.ID)
+	require.NoError(t, err)
+	require.False(t, changed)
+	row, err = client.Account.Get(ctx, account.ID)
+	require.NoError(t, err)
+	require.False(t, row.Schedulable)
+	require.Nil(t, row.ScheduleResumeAt)
+}
+
+func TestScheduleTimerBulkOpenCancels(t *testing.T) {
+	ctx := context.Background()
+	client, account := createScheduleTimerAccount(t)
+	repo := newAccountRepositoryWithSQL(client, integrationDB, nil)
+	_, err := repo.StartAccountScheduleTimer(ctx, account.ID, 6)
+	require.NoError(t, err)
+	_, err = integrationDB.Exec("UPDATE accounts SET schedule_resume_at = NOW() - INTERVAL '1 second' WHERE id = $1", account.ID)
+	require.NoError(t, err)
+	enabled := true
+	count, err := repo.BulkUpdate(ctx, []int64{account.ID}, service.AccountBulkUpdate{Schedulable: &enabled})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count)
+	row, err := client.Account.Get(ctx, account.ID)
+	require.NoError(t, err)
+	require.True(t, row.Schedulable)
+	require.Nil(t, row.ScheduleResumeAt, "bulk opening must cancel the persisted timer")
+	enabled = false
+	_, err = repo.BulkUpdate(ctx, []int64{account.ID}, service.AccountBulkUpdate{Schedulable: &enabled})
+	require.NoError(t, err)
+	changed, err := repo.resumeScheduleTimer(ctx, account.ID)
+	require.NoError(t, err)
+	require.False(t, changed)
+	row, err = client.Account.Get(ctx, account.ID)
+	require.NoError(t, err)
+	require.False(t, row.Schedulable)
+	require.Nil(t, row.ScheduleResumeAt)
 }
 
 func TestScheduleTimerDoesNotClearExistingProtection(t *testing.T) {

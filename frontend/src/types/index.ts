@@ -2614,10 +2614,19 @@ export interface CacheHitRateItem {
   cache_creation_tokens: number
   cache_read_tokens: number
   cache_hit_rate: number | null
+  average_duration_ms?: number | null
+  upstream_error_count?: number | null
+  rate_limit_count?: number | null
+  schedulable?: boolean | null
+  account_exists?: boolean
 }
 
 export interface CacheHitRateResult {
   start_date: string
   end_date: string
+  window_start?: string
+  window_end?: string
+  error_state?: 'available' | 'monitoring_disabled' | 'unsupported_filters'
+  generated_at?: string
   items: CacheHitRateItem[]
 }

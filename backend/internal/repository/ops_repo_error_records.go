@@ -81,6 +81,10 @@ func opsErrorGroupKeySQL() string {
 }
 
 func buildOpsErrorRecordsWhere(filter *service.OpsErrorRecordsFilter) (string, []any) {
+	return buildOpsErrorRecordsWhereWithArgs(filter, nil)
+}
+
+func buildOpsErrorRecordsWhereWithArgs(filter *service.OpsErrorRecordsFilter, existingArgs []any) (string, []any) {
 	f := filter.OpsErrorLogFilter
 	if f.View == "" {
 		f.View = "all"
@@ -93,7 +97,7 @@ func buildOpsErrorRecordsWhere(filter *service.OpsErrorRecordsFilter) (string, [
 	case "upstream":
 		predicate = opsRecordsUpstreamPredicate
 	}
-	clauses, args := appendOpsErrorCommonWhere([]string{predicate}, nil, &f)
+	clauses, args := appendOpsErrorCommonWhere([]string{predicate}, existingArgs, &f)
 	clauses = appendOpsErrorViewWhere(clauses, f.View)
 	switch filter.Finance {
 	case "include":

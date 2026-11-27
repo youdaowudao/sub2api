@@ -7,7 +7,7 @@ vi.mock('../client', () => ({ apiClient: { post } }))
 describe('account schedule timer API', () => {
   beforeEach(() => post.mockReset())
 
-  it.each([6, 12, 24])('sends %s hours to the backend and preserves its saved state', async hours => {
+  it.each([1, 2, 3, 6, 12, 24])('sends %s hours to the backend and preserves its saved state', async hours => {
     const saved = { id: 17, schedulable: false, schedule_resume_at: '2026-11-20T06:00:00Z' }
     post.mockResolvedValue({ data: saved })
     expect(await startScheduleTimer(17, hours)).toEqual(saved)

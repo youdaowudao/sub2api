@@ -108,4 +108,19 @@ describe('Ops request latency details', () => {
     expect(wrapper.text()).not.toContain('800 ms')
     wrapper.unmount()
   })
+
+  it.each(['today','3h'])('waits for and freezes the actual %s overview window across paging', async timeRange => {
+    const exactRange={start_time:'2026-11-27T00:00:00Z',end_time:'2026-11-27T03:00:00Z'}
+    const w=mount(OpsRequestDetailsModal,{props:{modelValue:true,timeRange,exactRange:null,preset:{title:'Details',sort:'ttft_desc'}},global:{stubs:{BaseDialog:{template:'<div><slot /></div>'},Pagination:true}}})
+    try {
+      await flushPromises()
+      expect(listRequestDetails).not.toHaveBeenCalled()
+      await w.setProps({exactRange});await flushPromises()
+      expect(listRequestDetails).toHaveBeenCalledTimes(1)
+      expect(listRequestDetails).toHaveBeenLastCalledWith(expect.objectContaining({...exactRange,page:1}))
+      w.getComponent({name:'Pagination'}).vm.$emit('update:page',2);await flushPromises()
+      expect(listRequestDetails).toHaveBeenCalledTimes(2)
+      expect(listRequestDetails).toHaveBeenLastCalledWith(expect.objectContaining({...exactRange,page:2}))
+    } finally {w.unmount()}
+  })
 })

@@ -2,10 +2,15 @@
   <AppLayout>
     <div class="space-y-6">
       <UsageStatsCards :stats="usageStats" :cache-hit-rate="cacheHitRateTotal" />
+      <p v-if="cacheHitRateTotal.window" class="text-xs text-gray-500">{{ t('usage.cacheRate') }}: {{ cacheHitRateTotal.window }}</p>
       <!-- Charts Section -->
       <div class="space-y-4">
         <div class="card p-4">
           <div class="flex flex-wrap items-center gap-4">
+            <button v-for="minutes in recentMinutes" :key="minutes" type="button" :class="['btn', recentMode === minutes ? 'btn-primary' : 'btn-secondary']" :aria-pressed="recentMode === minutes" @click="selectRecent(minutes)">{{ minutes === 60 ? t('admin.dashboard.lastHour') : t('admin.usage.recentRange.' + minutes) }}</button>
+            <button type="button" class="btn btn-secondary" @click="selectToday">{{ t('dates.today') }}</button>
+            <span v-if="preciseWindow" class="text-xs text-gray-500">{{ displayAdminWindow(preciseWindow.start_time, preciseWindow.end_time) }}</span>
+            <span v-if="invalidRange" class="text-sm text-rose-600">{{ t('admin.usage.recentRange.invalid') }}</span>
             <div class="flex items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
               <DateRangePicker
@@ -14,7 +19,7 @@
                 @change="onDateRangeChange"
               />
             </div>
-            <div class="ml-auto flex items-center gap-2">
+            <div v-if="recentMode === null" class="ml-auto flex items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
               <div class="w-28">
                 <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
@@ -32,8 +37,8 @@
             :loading="modelStatsLoading"
             :show-source-toggle="true"
             :show-metric-toggle="true"
-            :start-date="startDate"
-            :end-date="endDate"
+            :start-date="preciseWindow ? undefined : startDate"
+            :end-date="preciseWindow ? undefined : endDate"
             :filters="breakdownFilters"
           />
           <GroupDistributionChart
@@ -42,8 +47,8 @@
             :cache-hit-rate="cacheHitRateGroups"
             :loading="chartsLoading"
             :show-metric-toggle="true"
-            :start-date="startDate"
-            :end-date="endDate"
+            :start-date="preciseWindow ? undefined : startDate"
+            :end-date="preciseWindow ? undefined : endDate"
             :filters="breakdownFilters"
           />
         </div>
@@ -58,14 +63,14 @@
             :show-source-toggle="true"
             :show-metric-toggle="true"
             :title="t('usage.endpointDistribution')"
-            :start-date="startDate"
-            :end-date="endDate"
+            :start-date="preciseWindow ? undefined : startDate"
+            :end-date="preciseWindow ? undefined : endDate"
             :filters="breakdownFilters"
           />
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
       </div>
-      <AccountCacheHitRateTable :loading="cacheHitRateAccounts.loading" :error="cacheHitRateAccounts.error" :items="cacheHitRateAccounts.items" />
+      <AccountPerformanceTable :loading="cacheHitRateAccounts.loading" :error="cacheHitRateAccounts.error" :result="cacheHitRateAccounts.result" :filters="cacheHitRateAccounts.params" />
       <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
       <div class="card">
         <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
@@ -85,7 +90,7 @@
           </button>
         </div>
 
-        <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
+        <UsageFilters v-model="filters" ref="usageFiltersRef" flat :mode="activeTab" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :disable-cleanup="!!preciseWindow || invalidRange" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
           <template #after-reset>
             <div v-if="activeTab !== 'ranking'" class="relative" ref="columnDropdownRef">
               <button
@@ -169,11 +174,11 @@
           <OpsErrorDetailModal v-model:show="showErrorDetail" :error-id="errorDetailId" error-type="request" />
         </div>
         <!-- 懒挂载：首次切到该 tab 才请求排行数据，之后随筛选自动刷新 -->
-        <div v-if="rankingMounted" v-show="activeTab === 'ranking'" class="overflow-hidden rounded-b-2xl">
+        <div v-if="rankingMounted && !invalidRange" v-show="activeTab === 'ranking'" class="overflow-hidden rounded-b-2xl">
           <UserTokenRanking
             ref="rankingRef"
-            :start-date="startDate"
-            :end-date="endDate"
+            :start-date="preciseWindow ? undefined : startDate"
+            :end-date="preciseWindow ? undefined : endDate"
             :filters="breakdownFilters"
             :model="filters.model"
             @select-user="handleRankingSelectUser"
@@ -201,8 +206,9 @@
 
 <script setup lang="ts">
 import { getTodayRangeDates } from '@/utils/dateRange'
-import type { CacheHitRateItem } from '@/types'
-import AccountCacheHitRateTable from '@/components/admin/usage/AccountCacheHitRateTable.vue'
+import type { CacheHitRateResult } from '@/types'
+import AccountPerformanceTable from '@/components/admin/usage/AccountPerformanceTable.vue'
+import { recentMinutes, makeRecentRange, restoreRecentRange, displayAdminWindow, localMinuteLabel, type RecentMinutes, type PreciseAdminRange } from '@/utils/adminRecentRange'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -218,6 +224,7 @@ import OpsErrorDetailModal from './ops/components/OpsErrorDetailModal.vue'
 import { errorRecordRows } from './ops/useOpsErrorRecords'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
+import { useAdminUserHistory } from '@/composables/useAdminUserHistory'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
@@ -230,12 +237,13 @@ import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat,
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const userHistory = useAdminUserHistory()
 type DistributionMetric = 'tokens' | 'actual_cost'
 type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
 const route = useRoute()
 const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
-const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
+const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour' | 'minute'>('hour'); const recentMode = ref<RecentMinutes | null>(null); const preciseWindow = ref<PreciseAdminRange | null>(null); const invalidRange = ref(false)
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const modelDistributionSource = ref<ModelDistributionSource>('requested')
 const loadedModelSources = reactive<Record<ModelDistributionSource, boolean>>({
@@ -261,7 +269,7 @@ const showBalanceHistoryModal = ref(false)
 const balanceHistoryUser = ref<AdminUser | null>(null)
 
 const breakdownFilters = computed(() => {
-  const f: Record<string, any> = {}
+  const f: Record<string, any> = { ...(preciseWindow.value ?? {}) }
   if (filters.value.user_id) f.user_id = filters.value.user_id
   if (filters.value.api_key_id) f.api_key_id = filters.value.api_key_id
   if (filters.value.account_id) f.account_id = filters.value.account_id
@@ -277,8 +285,10 @@ const modelNameOptions = computed(() =>
 )
 
 const handleUserClick = async (userId: number) => {
+  const actor = userHistory.adminId.value
   try {
     const user = await adminAPI.users.getById(userId, true)
+    userHistory.record(user.id, user.email, actor)
     balanceHistoryUser.value = user
     showBalanceHistoryModal.value = true
   } catch {
@@ -289,7 +299,8 @@ const handleUserClick = async (userId: number) => {
 // Drill down from the per-user token ranking: scope the whole usage view to
 // that user and jump to the usage-detail tab so the drill-down is visible.
 const handleRankingSelectUser = (userId: number, email: string) => {
-  filters.value = { ...filters.value, user_id: userId }
+  userHistory.record(userId, email)
+  filters.value = { ...filters.value, user_id: userId, api_key_id: undefined }
   usageFiltersRef.value?.setUserKeyword?.(email || '')
   activeTab.value = 'usage'
   applyFilters()
@@ -328,6 +339,12 @@ const applyRouteQueryFilters = () => {
   const queryStartDate = getSingleQueryValue(route.query.start_date)
   const queryEndDate = getSingleQueryValue(route.query.end_date)
   const queryUserId = getNumericQueryValue(route.query.user_id)
+  const hasExact = route.query.start_time !== undefined || route.query.end_time !== undefined
+  if (hasExact) {
+    const restored = restoreRecentRange(route.query.start_time, route.query.end_time)
+    if (!restored || route.query.start_date !== undefined || route.query.end_date !== undefined) invalidRange.value = true
+    else { recentMode.value = restored.minutes; preciseWindow.value = restored.range }
+  }
 
   if (queryStartDate) {
     startDate.value = queryStartDate
@@ -345,11 +362,12 @@ const applyRouteQueryFilters = () => {
   for (const key of restoredStringFilters) { const value = getSingleQueryValue(route.query[key]); if (value) Object.assign(filters.value, { [key]: value }) }
   for (const key of restoredNumberFilters) { const value = getNumericQueryValue(route.query[key]); if (value !== undefined) Object.assign(filters.value, { [key]: value }) }
   for (const key of restoredBooleanFilters) { const value = getSingleQueryValue(route.query[key]); if (value === 'true' || value === 'false') Object.assign(filters.value, { [key]: value === 'true' }) }
-  granularity.value = getGranularityForRange(startDate.value, endDate.value)
+  granularity.value = preciseWindow.value ? 'minute' : getGranularityForRange(startDate.value, endDate.value)
 }
 
 const loadRouteUserFilterLabel = async () => {
   const requestedUserId = filters.value.user_id
+  const actor = userHistory.adminId.value
   if (!requestedUserId) return
   const userSearchRevision = usageFiltersRef.value?.getUserSearchRevision?.()
 
@@ -361,6 +379,7 @@ const loadRouteUserFilterLabel = async () => {
   try {
     const user = await adminAPI.users.getById(requestedUserId, true)
     if (!routeUserFilterIsCurrent()) return
+    userHistory.record(user.id, user.email, actor)
     usageFiltersRef.value?.setUserKeyword?.(user.email || String(requestedUserId))
   } catch {
     if (!routeUserFilterIsCurrent()) return
@@ -369,6 +388,7 @@ const loadRouteUserFilterLabel = async () => {
 }
 
 const onDateRangeChange = (range: { startDate: string; endDate: string; preset: string | null }) => {
+  invalidRange.value = false; recentMode.value = null; preciseWindow.value = null
   startDate.value = range.startDate
   endDate.value = range.endDate
   filters.value = {
@@ -378,6 +398,19 @@ const onDateRangeChange = (range: { startDate: string; endDate: string; preset: 
   }
   granularity.value = getGranularityForRange(range.startDate, range.endDate)
   applyFilters()
+}
+
+const selectRecent = (minutes: RecentMinutes) => {
+  invalidRange.value = false; recentMode.value = minutes; preciseWindow.value = makeRecentRange(minutes)
+  granularity.value = 'minute'; cleanupDialogVisible.value = false
+  applyFilters()
+}
+const selectToday = () => { const today = getTodayRangeDates(); onDateRangeChange({ startDate: today.start, endDate: today.end, preset: 'today' }) }
+const rangeParams = () => preciseWindow.value ?? { start_date: startDate.value, end_date: endDate.value }
+const readFilters = () => {
+  const rest = { ...filters.value }
+  delete rest.start_date; delete rest.end_date; delete rest.start_time; delete rest.end_time
+  return { ...rest, ...rangeParams() }
 }
 
 const buildUsageListParams = (
@@ -391,7 +424,7 @@ const buildUsageListParams = (
     page,
     page_size: pageSize,
     exact_total: exactTotal,
-    ...filters.value,
+    ...readFilters(),
     stream: legacyStream === null ? undefined : legacyStream,
     sort_by: sortState.sort_by,
     sort_order: sortState.sort_order
@@ -399,6 +432,7 @@ const buildUsageListParams = (
 }
 
 const loadLogs = async () => {
+  if (invalidRange.value) return
   abortController?.abort(); const c = new AbortController(); abortController = c; loading.value = true
   try {
     const res = await adminAPI.usage.list(
@@ -408,23 +442,29 @@ const loadLogs = async () => {
     if(!c.signal.aborted) { usageLogs.value = res.items; pagination.total = res.total }
   } catch (error: any) { if(error?.name !== 'AbortError') console.error('Failed to load usage logs:', error) } finally { if(abortController === c) loading.value = false }
 }
-const cacheHitRateTotal = reactive({ loading: false, error: null as string | null, rate: null as number | null })
-const cacheHitRateGroups = reactive({ loading: false, error: null as string | null, byId: {} as Record<number, number | null> })
-const cacheHitRateAccounts = reactive({ loading: false, error: null as string | null, items: [] as CacheHitRateItem[] })
+const cacheHitRateTotal = reactive({ loading: false, error: null as string | null, rate: null as number | null, window: '' })
+const cacheHitRateGroups = reactive({ loading: false, error: null as string | null, byId: {} as Record<number, number | null>, window: '' })
+const cacheHitRateAccounts = reactive({ loading: false, error: null as string | null, result: null as CacheHitRateResult | null, params: {} as AdminUsageQueryParams })
 let cacheHitRateReqSeq = 0
 const loadCacheHitRates = async (force = false) => {
   const seq = ++cacheHitRateReqSeq
-  const params = { ...filters.value, ...(force ? { nocache: 1 } : {}) }
+  const params = { ...readFilters(), ...(force ? { nocache: 1 } : {}) }
   const states = { total: cacheHitRateTotal, group: cacheHitRateGroups, account: cacheHitRateAccounts }
   await Promise.all((['total', 'group', 'account'] as const).map(async dimension => {
     const state = states[dimension]
     state.loading = true; state.error = null
+    if (dimension === 'account') cacheHitRateAccounts.result = null
+    if (dimension === 'total') cacheHitRateTotal.window = ''
+    if (dimension === 'group') cacheHitRateGroups.window = ''
     try {
-      const result = await adminAPI.usage.getCacheHitRate({ ...params, dimension })
+      const result = await adminAPI.usage.getCacheHitRate({ ...params, dimension, ...(dimension === 'account' ? { include_performance: 1 } : {}) })
       if (seq !== cacheHitRateReqSeq) return
-      if (dimension === 'total') cacheHitRateTotal.rate = result.items[0]?.cache_hit_rate ?? null
-      if (dimension === 'group') cacheHitRateGroups.byId = Object.fromEntries(result.items.map(item => [item.id, item.cache_hit_rate]))
-      if (dimension === 'account') cacheHitRateAccounts.items = result.items
+      if (dimension === 'total') { cacheHitRateTotal.rate = result.items[0]?.cache_hit_rate ?? null; cacheHitRateTotal.window = displayAdminWindow(result.window_start, result.window_end) || (result.start_date && result.end_date ? result.start_date + ' – ' + result.end_date : '') }
+      if (dimension === 'group') {
+        cacheHitRateGroups.byId = Object.fromEntries(result.items.map(item => [item.id, item.cache_hit_rate]))
+        cacheHitRateGroups.window = displayAdminWindow(result.window_start, result.window_end) || (result.start_date && result.end_date ? result.start_date + ' – ' + result.end_date : '')
+      }
+      if (dimension === 'account') { cacheHitRateAccounts.result = result; cacheHitRateAccounts.params = params }
     } catch (error) {
       if (seq !== cacheHitRateReqSeq) return
       state.error = extractApiErrorMessage(error)
@@ -435,6 +475,7 @@ const loadCacheHitRates = async (force = false) => {
 }
 
 const loadStats = async (force = false) => {
+  if (invalidRange.value) return
   void loadCacheHitRates(force)
   const seq = ++statsReqSeq
   endpointStatsLoading.value = true
@@ -442,7 +483,7 @@ const loadStats = async (force = false) => {
     const requestType = filters.value.request_type
     const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
     const s = await adminAPI.usage.getStats({
-      ...filters.value,
+      ...readFilters(),
       stream: legacyStream === null ? undefined : legacyStream,
       ...(force ? { nocache: 1 } : {}),
     })
@@ -470,6 +511,7 @@ const invalidateModelStatsCache = () => {
 }
 
 const loadModelStats = async (source: ModelDistributionSource, force = false) => {
+  if (invalidRange.value) return
   if (!force && loadedModelSources[source]) {
     return
   }
@@ -480,8 +522,7 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
     const requestType = filters.value.request_type
     const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
     const baseParams = {
-      start_date: filters.value.start_date || startDate.value,
-      end_date: filters.value.end_date || endDate.value,
+      ...rangeParams(),
       user_id: filters.value.user_id,
       model: filters.value.model,
       api_key_id: filters.value.api_key_id,
@@ -524,14 +565,14 @@ const loadModelStats = async (source: ModelDistributionSource, force = false) =>
 }
 
 const loadChartData = async () => {
+  if (invalidRange.value) return
   const seq = ++chartReqSeq
   chartsLoading.value = true
   try {
     const requestType = filters.value.request_type
     const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
     const snapshot = await adminAPI.dashboard.getSnapshotV2({
-      start_date: filters.value.start_date || startDate.value,
-      end_date: filters.value.end_date || endDate.value,
+      ...rangeParams(),
       granularity: granularity.value,
       user_id: filters.value.user_id,
       model: filters.value.model,
@@ -550,7 +591,7 @@ const loadChartData = async () => {
       include_users_trend: false
     })
     if (seq !== chartReqSeq) return
-    trendData.value = snapshot.trend || []
+    trendData.value = preciseWindow.value ? (snapshot.trend || []).map(point => ({ ...point, date: localMinuteLabel(point.date) })) : snapshot.trend || []
     groupStats.value = snapshot.groups || []
   } catch (error) { console.error('Failed to load chart data:', error) } finally { if (seq === chartReqSeq) chartsLoading.value = false }
 }
@@ -565,15 +606,18 @@ const applyFilters = () => {
   loadChartData()
 }
 const refreshData = () => {
+  const old = preciseWindow.value?.end_time
+  if (recentMode.value !== null) preciseWindow.value = makeRecentRange(recentMode.value)
   invalidateModelStatsCache()
   loadLogs()
   loadStats(true)
   loadModelStats(modelDistributionSource.value, true)
   loadChartData()
   if (activeTab.value === 'errors') void loadErrorRequests()
-  if (rankingMounted.value) rankingRef.value?.reload()
+  if (rankingMounted.value && old === preciseWindow.value?.end_time) rankingRef.value?.reload()
 }
 const resetFilters = () => {
+  invalidRange.value = false; recentMode.value = null; preciseWindow.value = null
   const range = getTodayRangeDates()
   startDate.value = range.start
   endDate.value = range.end
@@ -594,7 +638,7 @@ const handleIpGeoBatchFailed = () => {
   appStore.showError(t('usage.ipGeo.batchFailed'))
 }
 const cancelExport = () => exportAbortController?.abort()
-const openCleanupDialog = () => { cleanupDialogVisible.value = true }
+const openCleanupDialog = () => { if (!preciseWindow.value && !invalidRange.value) cleanupDialogVisible.value = true }
 const getRequestTypeLabel = (log: AdminUsageLog): string => {
   const requestType = resolveUsageRequestType(log)
   if (requestType === 'cyber') return t('usage.cyber')
@@ -606,10 +650,11 @@ const getRequestTypeLabel = (log: AdminUsageLog): string => {
 }
 
 const exportToExcel = async () => {
-  if (exporting.value) return; exporting.value = true; exportProgress.show = true
+  if (exporting.value || invalidRange.value) return; exporting.value = true; exportProgress.show = true
   const c = new AbortController(); exportAbortController = c
   try {
     let p = 1; let total = pagination.total; let exportedCount = 0
+    const frozenParams = buildUsageListParams(1, 100, true)
     const XLSX = await import('xlsx')
     const headers = [
       t('usage.time'), t('admin.usage.user'), t('usage.apiKeyFilter'),
@@ -627,7 +672,7 @@ const exportToExcel = async () => {
     const ws = XLSX.utils.aoa_to_sheet([headers])
     while (true) {
       const res = await adminUsageAPI.list(
-        buildUsageListParams(p, 100, true),
+        { ...frozenParams, page: p },
         { signal: c.signal }
       )
       if (c.signal.aborted) break; if (p === 1) { total = res.total; exportProgress.total = total }
@@ -862,11 +907,12 @@ async function loadErrorRequests() {
   errorTotal.value = 0
   errorListError.value = ''
 
+  if (invalidRange.value) { errorLoading.value = false; errorListError.value = t('admin.usage.recentRange.invalid'); return }
   const start = new Date(startDate.value + 'T00:00:00')
   const end = new Date(endDate.value + 'T00:00:00')
-  if (!startDate.value || !endDate.value ||
+  if (!preciseWindow.value && (!startDate.value || !endDate.value ||
       formatDateLocalInput(start) !== startDate.value ||
-      formatDateLocalInput(end) !== endDate.value || start > end) {
+      formatDateLocalInput(end) !== endDate.value || start > end)) {
     errorLoading.value = false
     errorListError.value = t('admin.ops.records.invalid')
     return
@@ -881,7 +927,7 @@ async function loadErrorRequests() {
   try {
     const response = await opsAPI.listErrorRecords({
       scope: 'request', view: 'all', finance: 'include', display: 'raw',
-      start_time: start.toISOString(), end_time: end.toISOString(),
+      ...(preciseWindow.value ?? { start_time: start.toISOString(), end_time: end.toISOString() }),
       user_id: user_id ?? undefined,
       api_key_id: api_key_id ?? undefined,
       account_id: account_id ?? undefined,

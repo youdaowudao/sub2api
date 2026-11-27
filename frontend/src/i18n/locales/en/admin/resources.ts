@@ -510,6 +510,36 @@ export default {
 
     // Usage Records
     usage: {
+      recentRange: {
+        '30': 'Last 30 minutes',
+        '180': 'Last 3 hours',
+        'invalid': 'Invalid time range. Select another range.',
+        'cleanupDateOnly': 'Cleanup requires a date range. Switch to date mode.',
+      },
+      performance: {
+        title: 'Account performance',
+        requests: 'Requests (usage records)',
+        errors: 'Upstream error records',
+        limits: '429 rate limits',
+        duration: 'Average duration',
+        errorsOnly: 'Errors only',
+        empty: 'No account records in this window',
+        failed: 'Could not load account performance. Refresh to retry.',
+        monitoring_disabled: 'Monitoring is disabled; error counts unavailable',
+        unsupported_filters: 'Error counts unavailable for these filters',
+        errorHint: 'Counts use the account assigned to each error record; other attempted accounts can be missing. This is not a failure rate.',
+        unsupportedRange: 'Select the last 30 minutes, 1 hour, 3 hours or today (Ops also supports 5 minutes)',
+      },
+      history: {
+        pinned: 'Pinned users',
+        recent: 'Recent queries',
+        pin: 'Pin',
+        unpin: 'Unpin',
+        remove: 'Remove entry',
+        clear: 'Clear history',
+        confirmClear: 'Confirm clear (including pinned)',
+        unavailable: 'History cannot be saved in this browser. It remains available for this session.',
+      },
       title: 'Usage Records',
       description: 'View and manage all user usage records',
       userFilter: 'User',

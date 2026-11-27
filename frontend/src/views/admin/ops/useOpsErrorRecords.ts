@@ -1,6 +1,7 @@
 import { computed, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { opsAPI, type OpsErrorRecord, type OpsErrorLog, type OpsErrorRecordsParams, type OpsErrorRecordsResponse } from '@/api/admin/ops'
+import { makeTodayOpsRange } from '@/utils/adminRecentRange'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 export interface OpsErrorRecordGlobals {
@@ -115,19 +116,20 @@ export function useOpsErrorRecords(props: OpsErrorRecordGlobals, prefix: () => s
     if (filters.status_codes_other && !['true', 'false'].includes(filters.status_codes_other)) return false
     if ([...filters.q].length > 512 || filters.error_source.length > 64) return false
     if (props.timeRange === 'custom') return !!props.customStartTime && !!props.customEndTime && Date.parse(props.customStartTime) < Date.parse(props.customEndTime)
-    return ['5m', '30m', '1h', '6h', '24h'].includes(props.timeRange)
+    return ['5m', '30m', '1h', '3h', '6h', '24h', 'today'].includes(props.timeRange)
   }
   function params(): OpsErrorRecordsParams {
     const extra: Record<string, string | number> = {}
     for (const field of Object.keys(routeFields) as Array<keyof typeof routeFields>) if (filters[field] !== '' && filters[field] != null) extra[field] = filters[field]!
-    const time = windowRange.value || (props.timeRange === 'custom' ? { start_time: props.customStartTime!, end_time: props.customEndTime! } : { time_range: props.timeRange })
+    const time = windowRange.value || (props.timeRange === 'custom' ? { start_time: props.customStartTime!, end_time: props.customEndTime! } : props.timeRange === 'today' ? makeTodayOpsRange() : { time_range: props.timeRange as OpsErrorRecordsParams['time_range'] })
     return { ...time, ...extra, platform: props.platform || undefined, group_id: props.groupId ?? undefined, scope: filters.scope, finance: filters.finance, view: filters.view, display: filters.display, page: page.value, page_size: pageSize.value, sort_by: sortBy.value, sort_order: sortOrder.value }
   }
   async function load() {
     const sequence = ++mainSequence; mainController?.abort(); mainController = new AbortController()
     error.value = ''
     if (!valid()) { loading.value = false; error.value = translate(invalidGlobalGroup.value ? 'admin.ops.records.invalidGroup' : 'admin.ops.records.invalid'); return }
-    const query = params(); loading.value = true
+    const query = params(); if (query.start_time && query.end_time && Date.parse(query.start_time) >= Date.parse(query.end_time)) { items.value = []; total.value = 0; totalRecords.value = 0; loading.value = false; return }
+    loading.value = true
     try {
       const data = await opsAPI.listErrorRecords(query, { signal: mainController.signal })
       if (sequence !== mainSequence || disposed) return

@@ -507,6 +507,36 @@ export default {
 
     // Usage Records
     usage: {
+      recentRange: {
+        '30': '最近 30 分钟',
+        '180': '最近 3 小时',
+        'invalid': '时间范围无效，请重新选择',
+        'cleanupDateOnly': '清理需要按日期选择范围，请切回日期模式',
+      },
+      performance: {
+        title: '账号运行表现',
+        requests: '请求数（使用记录）',
+        errors: '上游错误记录',
+        limits: '其中 429 限流',
+        duration: '平均耗时',
+        errorsOnly: '仅有错误',
+        empty: '该时段暂无账号记录',
+        failed: '无法读取账号表现，请刷新重试',
+        monitoring_disabled: '未开启运维监控，无法统计上游错误',
+        unsupported_filters: '当前筛选条件不支持错误统计',
+        errorHint: '按原上游记录的账号归属统计；同一请求中途切换的其他账号可能未计入，不是失败率。',
+        unsupportedRange: '请选择最近 30 分钟、1 小时、3 小时或今天（运维也支持 5 分钟）',
+      },
+      history: {
+        pinned: '重点关注',
+        recent: '最近查询',
+        pin: '置顶',
+        unpin: '取消置顶',
+        remove: '删除记录',
+        clear: '清空历史',
+        confirmClear: '确认清空（含置顶）',
+        unavailable: '浏览器无法保存查询历史，本次仍可使用',
+      },
       title: '使用记录',
       description: '查看和管理所有用户的使用记录',
       userFilter: '用户',

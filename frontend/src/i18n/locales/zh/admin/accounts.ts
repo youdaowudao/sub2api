@@ -93,7 +93,11 @@ export default {
       schedulableHint: '开启后账号参与API请求调度',
       schedulableEnabled: '调度已开启',
       schedulableDisabled: '调度已关闭',
+      locatedAccount: '定位账号 #{id}',
+      locateMissing: '未找到该账号，可能已删除',
       scheduleTimer: {
+        busyAccounts: '有选中的账号正在更新调度，请等待完成后重试',
+        switchUnknown: '可能已保存，请刷新核对调度和计时状态',
         button: '定时暂停',
         hours: '暂停 {hours} 小时',
         alreadyClosed: '账号已关闭调度',

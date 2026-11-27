@@ -208,6 +208,35 @@ describe('admin UsageView route filters', () => {
     vi.useRealTimers()
   })
 
+  it('uses the same exact three-hour window for every read path and leaves cleanup disabled', async () => {
+    const range = { start_time:'2026-11-26T22:00:00.000Z', end_time:'2026-11-27T01:00:00.000Z' }
+    Object.assign(routeQuery, range)
+    const wrapper = mountRouteFilteredUsageView()
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(150)
+    const calls = [list.mock.lastCall?.[0], getStats.mock.lastCall?.[0], getModelStats.mock.lastCall?.[0], getSnapshotV2.mock.lastCall?.[0]]
+    for (const call of calls) {
+      expect(call).toMatchObject(range)
+      expect(call.start_date).toBeUndefined()
+      expect(call.end_date).toBeUndefined()
+    }
+    expect(getSnapshotV2.mock.lastCall?.[0]).toMatchObject({ granularity:'minute' })
+    const vm = wrapper.vm as any
+    vm.openCleanupDialog()
+    expect(vm.cleanupDialogVisible).toBe(false)
+    expect(getCacheHitRate.mock.calls.slice(-3).filter(([params]) => params.dimension === 'account')[0][0]).toMatchObject({...range,include_performance:1})
+    wrapper.unmount()
+  })
+
+  it('does not fall back to today for a malformed precise route', async () => {
+    routeQuery.start_time = 'invalid'
+    list.mockClear();getStats.mockClear();getSnapshotV2.mockClear()
+    const wrapper=mountRouteFilteredUsageView(); await flushPromises();await vi.advanceTimersByTimeAsync(150)
+    expect(wrapper.text()).toContain('admin.usage.recentRange.invalid')
+    expect(list).not.toHaveBeenCalled();expect(getStats).not.toHaveBeenCalled();expect(getSnapshotV2).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('aligns cache-rate filters with the stats card and bypasses on refresh', async () => {
     const wrapper = mountRouteFilteredUsageView(); await flushPromises()
     const vm = wrapper.vm as any
@@ -241,6 +270,13 @@ describe('admin UsageView route filters', () => {
     expect((wrapper.vm as any).cacheHitRateTotal.rate).toBe(80)
     expect(wrapper.text()).not.toContain('Stale')
     expect((wrapper.vm as any).usageStats.total_requests).toBe(0)
+    getCacheHitRate.mockImplementation(async ({ dimension }) => {
+      if (dimension === 'total') throw new Error('total unavailable')
+      return {start_date:'2026-11-25',end_date:'2026-11-26',items:[{id:7,name:'Latest',platform:'openai',requests:2,input_tokens:20,cache_creation_tokens:0,cache_read_tokens:80,cache_hit_rate:80}]}
+    })
+    ;(wrapper.vm as any).applyFilters(); await flushPromises()
+    expect((wrapper.vm as any).cacheHitRateTotal.window).toBe('')
+    expect((wrapper.vm as any).cacheHitRateGroups.window).toBe('2026-11-25 – 2026-11-26')
     getCacheHitRate.mockReset().mockResolvedValue({ items: [] }); wrapper.unmount()
   })
 

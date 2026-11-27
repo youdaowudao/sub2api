@@ -30,6 +30,7 @@
         </button>
       </div>
     </div>
+    <p v-if="cacheHitRate?.window" class="mb-2 text-xs text-gray-500">{{ t('usage.cacheRate') }}: {{ cacheHitRate.window }}</p>
     <div v-if="loading" class="flex h-48 items-center justify-center">
       <LoadingSpinner />
     </div>
@@ -128,7 +129,7 @@ type DistributionMetric = 'tokens' | 'actual_cost'
 
 const props = withDefaults(defineProps<{
   groupStats: GroupStat[]
-  cacheHitRate?: { loading: boolean; error: string | null; byId: Record<number, number | null> }
+  cacheHitRate?: { loading: boolean; error: string | null; byId: Record<number, number | null>; window?: string }
   loading?: boolean
   metric?: DistributionMetric
   showMetricToggle?: boolean

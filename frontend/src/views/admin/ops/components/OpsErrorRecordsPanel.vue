@@ -83,6 +83,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAdminUserHistory } from '@/composables/useAdminUserHistory'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -111,6 +112,7 @@ const emit = defineEmits<{
   'retry-groups': []
 }>()
 const { t } = useI18n(); const auth = useAuthStore(); const app = useAppStore()
+const userHistory = useAdminUserHistory()
 const prefix = computed(() => auth.user?.id ? `admin-ops-error-records:${auth.user.id}:` : undefined)
 const { filters, page, pageSize, sortBy, sortOrder, items, total, totalRecords, loading, error, updatedAt, windowRange, changeFilters, reset, refresh, sort, group, showGroup, memberItems, memberTotal, memberPage, memberPageSize, memberSortBy, memberSortOrder, memberLoading, memberError, closeGroup, openGroup, loadMembers, sortMembers } = useOpsErrorRecords(props, () => prefix.value, t)
 const rows = computed(() => errorRecordRows(items.value)); const meta = computed(() => errorRecordMeta(items.value))
@@ -162,7 +164,7 @@ function openRecord(id: number, fromGroup = false) {
 }
 function backFromDetail() { showDetail.value = false; if (detailFromGroup && group.value) showGroup.value = true }
 const balanceUser = ref<AdminUser | null>(null)
-async function openUser(id: number) { try { balanceUser.value = await adminAPI.users.getById(id, true) } catch { app.showError(t('admin.usage.failedToLoadUser')) } }
+async function openUser(id: number) { const actor = userHistory.adminId.value; try { const user = await adminAPI.users.getById(id, true); userHistory.record(user.id, user.email, actor); balanceUser.value = user } catch { app.showError(t('admin.usage.failedToLoadUser')) } }
 async function focus() { await nextTick(); panel.value?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }) }
 defineExpose({ focus, refresh })
 </script>

@@ -28,6 +28,44 @@ beforeEach(() => {
   vi.mocked(opsAPI.getAdvancedSettings).mockResolvedValue({ auto_refresh_enabled: false, auto_refresh_interval_seconds: 30 } as never)
 })
 describe('dashboard and embedded errors', () => {
+  it('establishes the account range when the first overview failed and auto refresh recovers', async () => {
+    vi.useFakeTimers()
+    route.query={tr:'3h'}
+    vi.mocked(opsAPI.getAdvancedSettings).mockResolvedValue({auto_refresh_enabled:true,auto_refresh_interval_seconds:30} as never)
+    vi.mocked(opsAPI.getDashboardSnapshotV2).mockRejectedValueOnce(new Error('snapshot unavailable'))
+    vi.mocked(opsAPI.getDashboardOverview).mockRejectedValueOnce(new Error('overview unavailable'))
+    const window={start_time:'2026-11-27T00:00:00Z',end_time:'2026-11-27T03:00:00Z'}
+    vi.mocked(opsAPI.getDashboardSnapshotV2).mockResolvedValueOnce({overview:window} as never)
+    const w=mountDashboard()
+    try {
+      await flushPromises()
+      const panel=w.getComponent({name:'AccountPerformancePanel'})
+      expect(panel.props('range')).toBeNull()
+      await vi.advanceTimersByTimeAsync(32_000);await flushPromises()
+      expect(panel.props('range')).toMatchObject(window)
+      expect(panel.props('refreshToken')).toBe(0)
+    } finally {w.unmount();vi.useRealTimers()}
+  })
+  it('loads today using the local day and supports the three-hour toolbar without extra list refreshes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 10, 27, 15, 10, 0))
+    route.query = {tr:'today'}
+    const wrapper = mountDashboard()
+    try {
+      await flushPromises()
+      const header=wrapper.findComponent({name:'OpsDashboardHeader'})
+      const panel=wrapper.findComponent({name:'OpsErrorRecordsPanel'})
+      const first=vi.mocked(opsAPI.getDashboardSnapshotV2).mock.lastCall?.[0]
+      expect(first).toMatchObject({start_time:new Date(2026,10,27,0,0,0).toISOString(),end_time:new Date(2026,10,27,15,10,0).toISOString()})
+      expect(first?.time_range).toBeUndefined()
+      expect(panel.props('timeRange')).toBe('today')
+      expect(panel.props('customStartTime')).toBeNull()
+      expect(panel.props('refreshToken')).toBe(0)
+      header.vm.$emit('update:time-range','3h');await flushPromises()
+      expect(opsAPI.getDashboardSnapshotV2).toHaveBeenLastCalledWith(expect.objectContaining({time_range:'3h'}),expect.anything())
+      expect(panel.props('refreshToken')).toBe(0)
+    } finally {wrapper.unmount();vi.useRealTimers()}
+  })
   it('does not reload charts or reset query mode when only list route filters change', async () => {
     const wrapper = mountDashboard(); await flushPromises()
     expect(opsAPI.getDashboardSnapshotV2).toHaveBeenCalledTimes(1)
@@ -42,9 +80,12 @@ describe('dashboard and embedded errors', () => {
   it('manual refresh advances the list token once, while chart filter refreshes leave it alone', async () => {
     const wrapper = mountDashboard(); await flushPromises()
     const panel = wrapper.findComponent({ name: 'OpsErrorRecordsPanel' })
+    const accountPanel = wrapper.findComponent({ name: 'AccountPerformancePanel' })
     expect(panel.props('refreshToken')).toBe(0)
+    expect(accountPanel.props('refreshToken')).toBe(0)
     wrapper.findComponent({ name: 'OpsDashboardHeader' }).vm.$emit('refresh'); await flushPromises()
     expect(panel.props('refreshToken')).toBe(1)
+    expect(accountPanel.props('refreshToken')).toBe(1)
     expect(opsAPI.getDashboardSnapshotV2).toHaveBeenCalledTimes(2)
     route.query = { tr: 'custom', start_time: '2026-11-16T01:00:00Z', end_time: '2026-11-16T02:00:00Z' }; await flushPromises()
     expect(opsAPI.getDashboardSnapshotV2).toHaveBeenCalledTimes(3)

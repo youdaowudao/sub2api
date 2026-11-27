@@ -46,6 +46,7 @@ export async function list(
   page: number = 1,
   pageSize: number = 20,
   filters?: {
+    account_id?: number
     platform?: string
     type?: string
     status?: string
@@ -121,6 +122,7 @@ export async function listWithEtag(
   page: number = 1,
   pageSize: number = 20,
   filters?: {
+    account_id?: number
     platform?: string
     type?: string
     status?: string

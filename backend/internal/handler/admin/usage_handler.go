@@ -25,6 +25,7 @@ type UsageHandler struct {
 	apiKeyService  *service.APIKeyService
 	adminService   service.AdminService
 	cleanupService *service.UsageCleanupService
+	opsService     *service.OpsService
 }
 
 // NewUsageHandler creates a new admin usage handler
@@ -33,12 +34,14 @@ func NewUsageHandler(
 	apiKeyService *service.APIKeyService,
 	adminService service.AdminService,
 	cleanupService *service.UsageCleanupService,
+	opsService *service.OpsService,
 ) *UsageHandler {
 	return &UsageHandler{
 		usageService:   usageService,
 		apiKeyService:  apiKeyService,
 		adminService:   adminService,
 		cleanupService: cleanupService,
+		opsService:     opsService,
 	}
 }
 
@@ -162,26 +165,35 @@ func (h *UsageHandler) List(c *gin.Context) {
 	// Parse date range
 	var startTime, endTime *time.Time
 	userTZ := c.Query("timezone") // Get user's timezone from request
-	if startDateStr := c.Query("start_date"); startDateStr != "" {
-		t, err := timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
-			return
-		}
-		startTime = &t
+	preciseStart, preciseEnd, exact, err := parseAdminRecentRange(c, false)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
 	}
-
-	if endDateStr := c.Query("end_date"); endDateStr != "" {
-		t, err := timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
-			return
+	if exact {
+		startTime, endTime = &preciseStart, &preciseEnd
+	} else {
+		if startDateStr := c.Query("start_date"); startDateStr != "" {
+			t, err := timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
+			if err != nil {
+				response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
+				return
+			}
+			startTime = &t
 		}
-		// Use half-open range [start, end), move to next calendar day start (DST-safe).
-		t = t.AddDate(0, 0, 1)
-		endTime = &t
-	}
 
+		if endDateStr := c.Query("end_date"); endDateStr != "" {
+			t, err := timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
+			if err != nil {
+				response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
+				return
+			}
+			// Use half-open range [start, end), move to next calendar day start (DST-safe).
+			t = t.AddDate(0, 0, 1)
+			endTime = &t
+		}
+
+	}
 	params := pagination.PaginationParams{
 		Page:      page,
 		PageSize:  pageSize,
@@ -232,7 +244,14 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 	startDateStr := c.Query("start_date")
 	endDateStr := c.Query("end_date")
 
-	if startDateStr != "" && endDateStr != "" {
+	preciseStart, preciseEnd, exact, err := parseAdminRecentRange(c, false)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if exact {
+		startTime, endTime = preciseStart, preciseEnd
+	} else if startDateStr != "" && endDateStr != "" {
 		var err error
 		startTime, err = timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
 		if err != nil {
@@ -266,7 +285,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 
 	var stats *usagestats.UsageStats
 	// nocache: 绕过缓存直接回源,刷新者本人拿最新;不回写缓存(管理台"我刷新我自己拿最新"语义,非全局失效)。
-	if parseBoolQueryWithDefault(c.Query("nocache"), false) {
+	if exact || parseBoolQueryWithDefault(c.Query("nocache"), false) {
 		s, err := h.usageService.GetStatsWithFilters(c.Request.Context(), filters)
 		if err != nil {
 			response.ErrorFrom(c, err)
@@ -659,7 +678,16 @@ func (h *UsageHandler) CacheHitRate(c *gin.Context) {
 		response.BadRequest(c, "dimension must be total, group or account")
 		return
 	}
-	start, end, err := service.ResolveCacheHitRateWindow(c.Query("start_date"), c.Query("end_date"), c.Query("timezone"), time.Now())
+	performance := parseBoolQueryWithDefault(c.Query("include_performance"), false)
+	platform := strings.ToLower(strings.TrimSpace(c.Query("platform")))
+	if performance && dimension != "account" {
+		response.BadRequest(c, "account performance requires account dimension")
+		return
+	}
+	start, end, exact, err := parseAdminRecentRange(c, performance)
+	if err == nil && !exact {
+		start, end, err = service.ResolveCacheHitRateWindow(c.Query("start_date"), c.Query("end_date"), c.Query("timezone"), time.Now())
+	}
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
@@ -691,8 +719,12 @@ func (h *UsageHandler) CacheHitRate(c *gin.Context) {
 		accountIDs = normalizeCacheHitRateAccountIDs(accountIDs)
 	}
 	filters.StartTime, filters.EndTime = &start, &end
+	if performance {
+		h.accountPerformance(c, filters, accountIDs, platform, exact)
+		return
+	}
 	var items []usagestats.CacheHitRateItem
-	if parseBoolQueryWithDefault(c.Query("nocache"), false) {
+	if exact || parseBoolQueryWithDefault(c.Query("nocache"), false) {
 		items, err = h.usageService.GetCacheHitRateStats(c.Request.Context(), filters, dimension, accountIDs)
 	} else {
 		items, err = h.getCacheHitRateCached(c.Request.Context(), filters, dimension, accountIDs)
@@ -701,5 +733,9 @@ func (h *UsageHandler) CacheHitRate(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, usagestats.NewCacheHitRateResult(start, end, items))
+	result := usagestats.NewCacheHitRateResult(start, end, items)
+	if exact {
+		result.WindowStart, result.WindowEnd = start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano)
+	}
+	response.Success(c, result)
 }
