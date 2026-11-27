@@ -223,13 +223,15 @@ export default {
       openai: 'OpenAI',
       gemini: 'Gemini',
       domestic: 'Chinese AI',
-      other: 'Other'
+      image: 'Image',
+      other: 'Grok'
     },
     providerHints: {
       anthropic: 'Choose an available Anthropic / Claude group',
       openai: 'Choose an available OpenAI / GPT group',
       gemini: 'Choose an available Gemini group',
       domestic: 'Includes DeepSeek, Kimi, Zhipu GLM and MiniMax',
+      image: 'Choose an image generation group',
       other: 'Groups from other platforms'
     },
     selectGroup: 'Select a group',

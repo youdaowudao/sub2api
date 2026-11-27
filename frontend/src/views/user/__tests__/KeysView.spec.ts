@@ -58,7 +58,8 @@ const messages: Record<string, string> = {
   'keys.providers.anthropic': 'Anthropic',
   'keys.providers.gemini': 'Gemini',
   'keys.providers.domestic': '国产模型',
-  'keys.providers.other': '其他',
+  'keys.providers.image': '画图',
+  'keys.providers.other': 'Grok',
   'keys.id': 'ID',
   'keys.currentConcurrency': 'Current Concurrency',
   'keys.lastUsedAt': 'Last Used',
@@ -250,7 +251,7 @@ const PaginationStub = {
 
 const IconStub = {
   props: ['name'],
-  template: '<span data-test="icon">{{ name }}</span>',
+  template: '<span data-test="icon" :data-icon="name">{{ $attrs["aria-hidden"] ? "" : name }}</span>',
 }
 
 const mountView = async (realDialog = false, realBadge = false) => {
@@ -884,10 +885,10 @@ describe('user KeysView column settings', () => {
       await chooseProvider(wrapper, 'domestic')
       expect(optionIds(wrapper, ['国产模型'])).toEqual([3, 4, 5, 6])
       await chooseProvider(wrapper, 'other')
-      expect(optionIds(wrapper, ['其他'])).toEqual([9, 8, 11, 12, 10])
+      expect(optionIds(wrapper, ['Grok'])).toEqual([9, 8, 11, 12, 10])
       const tableOptions = wrapper.findAllComponents({ name: 'Select' })[0].props('options') as { kind?: string; disabled?: boolean; label: string }[]
       expect(tableOptions.filter(o => o.kind !== 'group')).toHaveLength(14)
-      expect(tableOptions.filter(o => o.kind === 'group').map(o => o.label)).toEqual(['OpenAI', 'Anthropic', 'Gemini', '国产模型', '其他'])
+      expect(tableOptions.filter(o => o.kind === 'group').map(o => o.label)).toEqual(['OpenAI', 'Anthropic', 'Gemini', '国产模型', 'Grok'])
       expect(tableOptions.filter(o => o.kind === 'group').every(o => o.disabled)).toBe(true)
     })
 
@@ -919,7 +920,7 @@ describe('user KeysView column settings', () => {
 
       await wrapper.get('[data-tour="key-group"]').trigger('click')
       const picker = groupPicker(wrapper)
-      expect(groupPickerTabs(wrapper).map(tab => tab.text())).toEqual([`${category} 1`])
+      expect(groupPickerTabs(wrapper).map(tab => tab.text())).toEqual([`${category} 1`, '画图 0'])
       expect(picker.getComponent({ name: 'GroupOptionItem' }).props('platform')).toBe(platform)
       await picker.get('[data-tour="key-group-option"]').trigger('click')
 
@@ -939,17 +940,17 @@ describe('user KeysView column settings', () => {
       wrapper.unmount()
     })
 
-    it('removes Other across controls after its last group is reclassified on reload', async () => {
+    it('removes the Grok label across controls after its last fallback group is reclassified on reload', async () => {
       const grok = availableGroups[7]
       const image = { ...availableGroups[1], allow_image_generation: true }
       const checkHeadings = async (expected: string[]) => {
         const wrapper = await openCreate()
-        expect(wrapper.find('input[value="other"]').exists()).toBe(expected.includes('其他'))
+        expect(wrapper.find('input[value="other"]').exists()).toBe(expected.includes('Grok'))
         await chooseProvider(wrapper, 'openai')
         expect(optionIds(wrapper, ['OpenAI'])).toEqual([2])
         await wrapper.get('[data-test="close-dialog"]').trigger('click')
         await wrapper.get('[data-tour="key-group"]').trigger('click')
-        expect(groupPickerTabs(wrapper).map(tab => tab.text())).toEqual(expected.map(category => `${category} 1`))
+        expect(groupPickerTabs(wrapper).map(tab => tab.text())).toEqual([...expected.filter(category => category !== 'Grok').map(category => `${category} 1`), '画图 0', ...expected.filter(category => category === 'Grok').map(category => `${category} 1`)])
         const filter = wrapper.findAllComponents({ name: 'Select' })[0].props('options') as { kind?: string; label: string }[]
         expect(filter.filter(option => option.kind === 'group').map(option => option.label)).toEqual(expected)
         await getButtonByText(wrapper, 'common.edit').trigger('click')
@@ -957,7 +958,7 @@ describe('user KeysView column settings', () => {
         wrapper.unmount()
       }
       getAvailableGroups.mockResolvedValue([image, grok])
-      await checkHeadings(['OpenAI', '其他'])
+      await checkHeadings(['OpenAI', 'Grok'])
       getAvailableGroups.mockResolvedValue([image, { ...grok, display_category: 'domestic' }])
       await checkHeadings(['OpenAI', '国产模型'])
     })
@@ -976,13 +977,45 @@ describe('user KeysView column settings', () => {
       const groupButton = wrapper.get('[data-tour="key-group"]')
       expect(groupButton.getComponent({ name: 'GroupBadge' }).props('platform')).toBe('openai')
       await groupButton.trigger('click')
-      expect(groupPickerTabs(wrapper).map(tab => tab.text())).toEqual(['国产模型 1'])
+      expect(groupPickerTabs(wrapper).map(tab => tab.text())).toEqual(['国产模型 1', '画图 0'])
       expect(groupPicker(wrapper).getComponent({ name: 'GroupOptionItem' }).props('platform')).toBe('openai')
       const filter = wrapper.findAllComponents({ name: 'Select' })[0].props('options') as { kind?: string; label: string }[]
       expect(filter.filter(option => option.kind === 'group').map(option => option.label)).toEqual(['国产模型'])
       await getButtonByText(wrapper, 'common.edit').trigger('click')
       expect(optionIds(wrapper, ['国产模型'])).toEqual([image.id])
       expect(groupSelect(wrapper).props('options')[1].platform).toBe('openai')
+      wrapper.unmount()
+    })
+
+    it('shows a manually assigned image group in the new provider and the existing group controls', async () => {
+      const image = { ...availableGroups[1], id: 100, name: 'Picture group', display_category: 'image' } as Group
+      getAvailableGroups.mockResolvedValue([...availableGroups, image])
+      listKeys.mockResolvedValueOnce({ items: [{ ...createApiKey(), group_id: image.id, group: image }], total: 1, page: 1, page_size: 20, pages: 1 })
+      const wrapper = await openCreate()
+      expect(wrapper.findAll('input[name="key-provider"]').map(input => input.attributes('value')))
+        .toEqual(['openai', 'anthropic', 'gemini', 'domestic', 'image', 'other'])
+      expect(wrapper.get('[data-tour="key-form-provider"] .grid').classes()).toContain('grid-cols-3')
+      expect(optionIds(wrapper, ['OpenAI'])).toEqual([2])
+      await chooseProvider(wrapper, 'image')
+      expect(optionIds(wrapper, ['画图'])).toEqual([100])
+      expect(groupSelect(wrapper).props('options')[1].platform).toBe('openai')
+      await wrapper.get('[data-test="close-dialog"]').trigger('click')
+      await wrapper.get('[data-tour="key-group"]').trigger('click')
+      expect(pickerTab(wrapper, '画图').attributes('aria-pressed')).toBe('true')
+      await pickerTab(wrapper, 'OpenAI').trigger('click')
+      await pickerTab(wrapper, '画图').trigger('click')
+      expect(groupPicker(wrapper).findAllComponents({ name: 'GroupOptionItem' }).map(item => item.props('name'))).toEqual(['Picture group'])
+      await groupPicker(wrapper).get('input').setValue('Picture')
+      expect(groupPicker(wrapper).findAllComponents({ name: 'GroupOptionItem' })).toHaveLength(1)
+      await groupPicker(wrapper).get('input').setValue('')
+      expect(updateKey).not.toHaveBeenCalled()
+      await getButtonByText(wrapper, 'common.edit').trigger('click')
+      const categories = ['OpenAI', 'Anthropic', 'Gemini', '国产模型', '画图', 'Grok']
+      expect(optionIds(wrapper, categories).filter(id => id === 100)).toEqual([100])
+      const editOptions = groupSelect(wrapper).props('options')
+      expect(editOptions[editOptions.findIndex((option: { label: string }) => option.label === '画图') + 1].value).toBe(100)
+      const filter = wrapper.findAllComponents({ name: 'Select' })[0].props('options') as { kind?: string; label: string }[]
+      expect(filter.filter(option => option.kind === 'group').map(option => option.label)).toEqual(categories)
       wrapper.unmount()
     })
 
@@ -1046,14 +1079,16 @@ describe('user KeysView column settings', () => {
       await wrapper.get('[data-tour="key-group"]').trigger('click')
       const popup = groupPicker(wrapper)
       const tabs = groupPickerTabs(wrapper)
-      expect(tabs.map(tab => tab.text())).toEqual(['OpenAI 1', 'Anthropic 1', 'Gemini 1', '国产模型 4', '其他 5'])
+      expect(tabs.map(tab => tab.text())).toEqual(['OpenAI 1', 'Anthropic 1', 'Gemini 1', '国产模型 4', '画图 0', 'Grok 5'])
       expect(tabs.every(tab => !tab.attributes('data-tour'))).toBe(true)
       expect(tabs.map(tab => tab.findAllComponents({ name: 'PlatformIcon' }).map(icon => icon.props('platform')))).toEqual([
-        ['openai'], ['anthropic'], ['gemini'], ['deepseek', 'kimi'], ['grok'],
+        ['openai'], ['anthropic'], ['gemini'], ['deepseek', 'kimi'], [], ['grok'],
       ])
       expect(tabs[0].classes()).toContain('text-green-600')
       expect(tabs[1].classes()).toContain('text-orange-600')
       expect(tabs[2].classes()).toContain('text-blue-600')
+      expect(tabs[4].classes()).toContain('text-purple-600')
+      expect(tabs[4].get('[data-icon="sparkles"]').attributes('aria-hidden')).toBe('true')
 
       const first = popup.get('[data-tour="key-group-option"]')
       expect(first.element.tagName).toBe('BUTTON')
@@ -1172,19 +1207,40 @@ describe('user KeysView column settings', () => {
     it('searches across categories, disables the tabs, and restores the active category on clear', async () => {
       getAvailableGroups.mockResolvedValue(pickerGroups)
       const view = await openPicker()
-      expect(tabs(view)).toEqual(['OpenAI 1', 'Anthropic 1', '其他 1'])
-      await pickerTab(view, '其他').trigger('click')
+      expect(tabs(view)).toEqual(['OpenAI 1', 'Anthropic 1', '画图 0', 'Grok 1'])
+      await pickerTab(view, 'Grok').trigger('click')
       await groupPicker(view).get('input').setValue('  rEfErEnCe ')
       expect(names(view)).toEqual(['GPT Reference', 'Claude Group'])
       expect(groupPickerTabs(view).every(tab => tab.element.hasAttribute('disabled'))).toBe(true)
       await pickerTab(view, 'OpenAI').trigger('click')
       await groupPicker(view).get('input').setValue(' ')
-      expect(pickerTab(view, '其他').attributes('aria-pressed')).toBe('true')
+      expect(pickerTab(view, 'Grok').attributes('aria-pressed')).toBe('true')
       expect(names(view)).toEqual(['Grok Group'])
       expect(updateKey).not.toHaveBeenCalled()
     })
 
-    it('renders a single Other tab if groups arrive after opening and none have a fixed category', async () => {
+    it('keeps the empty image tab blank and never assigns a group based on the import setting', async () => {
+      getPublicSettings.mockResolvedValue({ quick_import_image_group_id: 1 })
+      getAvailableGroups.mockResolvedValue(pickerGroups)
+      const view = await openPicker()
+      expect(tabs(view)).toEqual(['OpenAI 1', 'Anthropic 1', '画图 0', 'Grok 1'])
+      expect(names(view)).toEqual(['GPT Reference'])
+      vi.useFakeTimers()
+      await pickerTab(view, '画图').trigger('pointerenter')
+      await vi.advanceTimersByTimeAsync(150)
+      expect(pickerTab(view, '画图').attributes('aria-pressed')).toBe('true')
+      expect(names(view)).toEqual([])
+      expect(groupPicker(view).text()).not.toContain('keys.noGroupFound')
+      await groupPicker(view).get('input').setValue('Reference')
+      expect(names(view)).toEqual(['GPT Reference', 'Claude Group'])
+      await groupPicker(view).get('input').setValue('')
+      expect(names(view)).toEqual([])
+      await pickerTab(view, 'OpenAI').trigger('click')
+      expect(names(view)).toEqual(['GPT Reference'])
+      expect(updateKey).not.toHaveBeenCalled()
+    })
+
+    it('defaults to Grok instead of the empty image tab when only Grok groups arrive after opening', async () => {
       let release!: (value: typeof pickerGroups) => void
       getAvailableGroups.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
       const view = await openPicker()
@@ -1192,7 +1248,7 @@ describe('user KeysView column settings', () => {
       expect(names(view)).toEqual([])
       release([pickerGroups[2]])
       await flushPromises()
-      expect(tabs(view)).toEqual(['其他 1'])
+      expect(tabs(view)).toEqual(['画图 0', 'Grok 1'])
       expect(names(view)).toEqual(['Grok Group'])
     })
 
@@ -1206,7 +1262,7 @@ describe('user KeysView column settings', () => {
       getAvailableGroups.mockResolvedValueOnce(groups)
       const view = await openPicker()
       const expected = sortGroupsForDisplay(groups)
-      expect(tabs(view)).toEqual(['Gemini 4'])
+      expect(tabs(view)).toEqual(['Gemini 4', '画图 0'])
       expect(names(view)).toEqual(expected.map(group => group.name))
       expect(items(view).map(item => item.props('platform'))).toEqual(expected.map(group => group.display_icon))
       expect(items(view).every(item => item.props('wrapName') === true)).toBe(true)
@@ -1232,13 +1288,13 @@ describe('user KeysView column settings', () => {
       await anthropic.trigger('pointerenter')
       await vi.advanceTimersByTimeAsync(150)
       expect(names(view)).toEqual(['Claude Group'])
-      await pickerTab(view, '其他').trigger('pointerenter')
+      await pickerTab(view, 'Grok').trigger('pointerenter')
       await groupPicker(view).get('input').setValue('Reference')
       await vi.advanceTimersByTimeAsync(150)
       await groupPicker(view).get('input').setValue('')
       expect(names(view)).toEqual(['Claude Group'])
       await pickerTab(view, 'OpenAI').trigger('pointerenter')
-      await pickerTab(view, '其他').trigger('click')
+      await pickerTab(view, 'Grok').trigger('click')
       expect(names(view)).toEqual(['Grok Group'])
       await vi.advanceTimersByTimeAsync(150)
       expect(names(view)).toEqual(['Grok Group'])
@@ -1253,12 +1309,12 @@ describe('user KeysView column settings', () => {
       getAvailableGroups.mockResolvedValue(pickerGroups)
       const view = await openPicker()
       vi.useFakeTimers()
-      await pickerTab(view, '其他').trigger('pointerenter')
+      await pickerTab(view, 'Grok').trigger('pointerenter')
       await setGroups(pickerGroups.slice(0, 2))
       await vi.advanceTimersByTimeAsync(150)
       expect(names(view)).toEqual(['GPT Reference'])
       await setGroups(pickerGroups)
-      await pickerTab(view, '其他').trigger('click')
+      await pickerTab(view, 'Grok').trigger('click')
       await groupPicker(view).get('input').setValue('Reference')
       await setGroups(pickerGroups.slice(0, 2))
       expect(names(view)).toEqual(['GPT Reference', 'Claude Group'])

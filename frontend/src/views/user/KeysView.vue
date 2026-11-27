@@ -493,7 +493,7 @@
           <legend class="input-label">{{ t('keys.providerLabel') }}</legend>
           <div
             class="grid gap-2"
-            :class="createProviderOptions.length === 5 ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'"
+            :class="createProviderOptions.length === 6 ? 'grid-cols-3' : createProviderOptions.length === 5 ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-2 sm:grid-cols-4'"
           >
             <label
               v-for="provider in createProviderOptions"
@@ -515,6 +515,9 @@
                 :class="provider.count > 0 && 'hover:border-primary-300 dark:hover:border-primary-700'"
               >
                 <span class="flex h-8 items-center justify-center gap-1.5" aria-hidden="true">
+                  <span v-if="provider.value === 'image'" class="flex h-8 w-8 items-center justify-center rounded-lg" :class="platformBadgeLightClass('antigravity')">
+                    <Icon name="sparkles" size="lg" />
+                  </span>
                   <span
                     v-for="platform in KEY_GROUP_PROVIDER_ICONS[provider.value]"
                     :key="platform"
@@ -1202,7 +1205,7 @@
             type="button"
             class="inline-flex flex-none items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-1.5 text-xs font-semibold ring-inset"
             :class="[
-              platformBadgeLightClass(GROUP_DISPLAY_CATEGORY_ICONS[section.category][0]),
+              platformBadgeLightClass(section.category === 'image' ? 'antigravity' : GROUP_DISPLAY_CATEGORY_ICONS[section.category][0]),
               activeGroupCategory === section.category && 'ring-1 ring-current',
               searchingGroupPicker && 'opacity-50',
             ]"
@@ -1212,6 +1215,7 @@
             @pointerleave="cancelGroupCategoryHover"
             @click="selectGroupCategory(section.category)"
           >
+            <Icon v-if="section.category === 'image'" name="sparkles" size="xs" aria-hidden="true" />
             <PlatformIcon
               v-for="platform in GROUP_DISPLAY_CATEGORY_ICONS[section.category]"
               :key="platform"
@@ -1263,7 +1267,7 @@
             />
           </button>
           <!-- Empty state when search has no results -->
-          <div v-if="visibleGroupPickerOptions.length === 0" class="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
+          <div v-if="visibleGroupPickerOptions.length === 0 && (searchingGroupPicker || activeGroupCategory !== 'image')" class="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
             {{ t('keys.noGroupFound') }}
           </div>
         </div>
@@ -1620,7 +1624,7 @@ const createProviderOptions = computed(() => KEY_GROUP_PROVIDERS.map((value) => 
   value,
   label: groupCategoryLabel(value),
   count: groups.value.filter((group) => getKeyGroupProvider(group) === value).length
-})).filter(provider => provider.value !== 'other' || provider.count > 0))
+})).filter(provider => (provider.value !== 'other' && provider.value !== 'image') || provider.count > 0))
 
 const formGroupOptions = computed(() => {
   const eligible = showEditModal.value ? groups.value : groups.value.filter(group => getKeyGroupProvider(group) === createProvider.value)
@@ -1674,7 +1678,7 @@ const groupSearchQuery = ref('')
 const searchingGroupPicker = computed(() => groupSearchQuery.value.trim() !== '')
 const groupPickerListRef = ref<HTMLElement | null>(null)
 const activeGroupCategory = ref<KeyGroupProvider | null>(null)
-const groupPickerCategories = computed(() => groupGroupsByCategory(groups.value))
+const groupPickerCategories = computed(() => groupGroupsByCategory(groups.value, true))
 let groupCategoryHoverTimer: ReturnType<typeof setTimeout> | undefined
 
 function cancelGroupCategoryHover() {
@@ -1699,7 +1703,7 @@ watch([groupSelectorKeyId, groupPickerCategories], ([keyID, categories], [previo
     activeGroupCategory.value = null
   } else if (keyID !== previousKeyID || !categories.some(section => section.category === activeGroupCategory.value)) {
     const current = categories.find(section => section.groups.some(group => group.id === selectedKeyForGroup.value?.group_id))
-    activeGroupCategory.value = current?.category ?? categories[0]?.category ?? null
+    activeGroupCategory.value = current?.category ?? categories.find(section => section.groups.length > 0)?.category ?? null
   }
 })
 
