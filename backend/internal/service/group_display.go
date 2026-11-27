@@ -12,7 +12,7 @@ var groupDisplayIconPlatforms = []string{
 	"minimax", "deepseek", "opencode_go", "command_code", "cline",
 }
 
-var groupDisplayCategories = []string{"openai", "anthropic", "gemini", "domestic"}
+var groupDisplayCategories = []string{"openai", "anthropic", "gemini", "domestic", "image"}
 
 func normalizeGroupDisplayIcon(value string) (string, error) {
 	value = strings.TrimSpace(value)
@@ -25,7 +25,7 @@ func normalizeGroupDisplayIcon(value string) (string, error) {
 func normalizeGroupDisplayCategory(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value != "" && !slices.Contains(groupDisplayCategories, value) {
-		return "", infraerrors.BadRequest("INVALID_GROUP_DISPLAY_CATEGORY", "display_category must be empty or one of openai, anthropic, gemini, domestic")
+		return "", infraerrors.BadRequest("INVALID_GROUP_DISPLAY_CATEGORY", "display_category must be empty or one of openai, anthropic, gemini, domestic, image")
 	}
 	return value, nil
 }

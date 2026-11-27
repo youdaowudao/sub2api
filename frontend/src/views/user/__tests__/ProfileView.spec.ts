@@ -91,9 +91,31 @@ describe('ProfileView', () => {
     await flushPromises()
 
     expect(wrapper.findAll('.stat-card')).toHaveLength(0)
+    expect(wrapper.find('[data-testid="profile-balance-notify-card"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="profile-shell"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-info-card')
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-password-form')
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-totp-card')
   })
+
+  it('shows only the original balance notification card when enabled globally, with a missing preference off', async () => {
+    delete authState.user!.balance_notify_enabled
+    fetchPublicSettingsMock.mockResolvedValue({ balance_low_notify_enabled: true, balance_low_notify_threshold: 5 })
+    const wrapper = mount(ProfileView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          ProfileInfoCard: true,
+          ProfilePasswordForm: true,
+          ProfileTotpCard: true,
+          ProfilePasskeyCard: true,
+          ProfileBalanceNotifyCard: { props: ['enabled'], template: '<div data-testid="profile-balance-notify-card" :data-enabled="enabled" />' },
+          Icon: true
+        }
+      }
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="profile-balance-notify-card"]').attributes('data-enabled')).toBe('false')
+  })
+
 })

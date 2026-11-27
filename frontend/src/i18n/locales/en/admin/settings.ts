@@ -181,8 +181,6 @@ export default {
           },
         },
       },
-      emailTabDisabledTitle: 'Email Verification and Password Reset Are Not Enabled',
-      emailTabDisabledHint: 'Enable email verification or password reset in the Security tab to configure SMTP settings.',
       registration: {
         title: 'Registration Settings',
         description: 'Control user registration and verification',
@@ -1025,7 +1023,7 @@ export default {
       },
       balanceNotify: {
         title: 'Balance Low Notification',
-        description: 'Send email notification when user balance falls below threshold',
+        description: 'Allow users to opt in to low-balance email alerts from their profile.',
         enabled: 'Enable Balance Low Notification',
         threshold: 'Default Threshold',
         thresholdHint: 'Used when user has not set a custom value',
@@ -1049,6 +1047,12 @@ export default {
         enabled: 'Enable Recharge Success Notification',
         enabledHint: 'When enabled, users receive an email once a balance recharge order is credited. Subscription purchase emails are not affected.'
       },
+      subscriptionPurchaseNotify: {
+        title: 'Subscription Activation Notification',
+        description: 'Control whether users receive an email after a subscription is activated or renewed.',
+        enabled: 'Enable Subscription Activation Notification',
+        enabledHint: 'Turning this off stops the success email, without affecting activation or renewal.'
+      },
       subscriptionExpiryNotify: {
         title: 'Subscription Expiry Reminder',
         description: 'Control whether users receive subscription expiry reminder emails.',
@@ -1057,7 +1061,7 @@ export default {
       },
       smtp: {
         title: 'SMTP Settings',
-        description: 'Configure email sending for verification codes',
+        description: 'Configure email delivery for account verification and notifications',
         testConnection: 'Test Connection',
         testing: 'Testing...',
         host: 'SMTP Host',

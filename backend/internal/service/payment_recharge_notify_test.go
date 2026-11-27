@@ -37,36 +37,57 @@ func newRechargeNotifyService(values map[string]string) (*PaymentService, *recha
 func TestBalanceRechargeNotifySwitch(t *testing.T) {
 	ctx := context.Background()
 	order := &dbent.PaymentOrder{ID: 1, UserID: 7, UserEmail: "user@test.com", Amount: 5}
-
 	for name, values := range map[string]map[string]string{
-		"missing defaults to on": nil,
-		"on":                     {SettingKeyBalanceRechargeNotifyEnabled: "true"},
+		"missing": nil, "off": {SettingKeyBalanceRechargeNotifyEnabled: "false"}, "invalid": {SettingKeyBalanceRechargeNotifyEnabled: "invalid"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			svc, userRepo := newRechargeNotifyService(values)
-			require.Error(t, svc.sendBalanceRechargeSuccessNotification(ctx, order))
-			require.Equal(t, 1, userRepo.calls)
+			svc, repo := newRechargeNotifyService(values)
+			require.NoError(t, svc.sendBalanceRechargeSuccessNotification(ctx, order))
+			require.Zero(t, repo.calls)
 		})
 	}
-
-	t.Run("off skips recharge email only", func(t *testing.T) {
-		svc, userRepo := newRechargeNotifyService(map[string]string{SettingKeyBalanceRechargeNotifyEnabled: "false"})
-		require.NoError(t, svc.sendBalanceRechargeSuccessNotification(ctx, order))
-		require.Zero(t, userRepo.calls)
-		// 订阅购买邮件不归该开关管，仍会走到发信步骤。
-		require.Error(t, svc.sendSubscriptionPurchaseSuccessNotification(ctx, order))
+	t.Run("on", func(t *testing.T) {
+		svc, repo := newRechargeNotifyService(map[string]string{SettingKeyBalanceRechargeNotifyEnabled: "true"})
+		require.Error(t, svc.sendBalanceRechargeSuccessNotification(ctx, order))
+		require.Equal(t, 1, repo.calls)
+		require.NoError(t, svc.sendSubscriptionPurchaseSuccessNotification(ctx, order))
 	})
-
-	t.Run("read failure skips email", func(t *testing.T) {
-		svc, userRepo := newRechargeNotifyService(nil)
+	t.Run("read failure", func(t *testing.T) {
+		svc, repo := newRechargeNotifyService(nil)
 		svc.notificationEmailService = NewNotificationEmailService(&settingRepoStub{err: errors.New("db down")}, nil)
 		require.NoError(t, svc.sendBalanceRechargeSuccessNotification(ctx, order))
-		require.Zero(t, userRepo.calls)
+		require.Zero(t, repo.calls)
+		require.NoError(t, svc.sendSubscriptionPurchaseSuccessNotification(ctx, order))
 	})
+}
+
+func TestSubscriptionPurchaseNotifySwitch(t *testing.T) {
+	ctx := context.Background()
+	order := &dbent.PaymentOrder{ID: 1, UserID: 7, UserEmail: "user@test.com"}
+	for _, value := range []string{"", "false", "invalid", "true"} {
+		t.Run(value+"_value", func(t *testing.T) {
+			values := map[string]string{SettingKeyBalanceRechargeNotifyEnabled: "false"}
+			if value != "" {
+				values["subscription_purchase_notify_enabled"] = value
+			}
+			svc, repo := newRechargeNotifyService(values)
+			err := svc.sendSubscriptionPurchaseSuccessNotification(ctx, order)
+			if value == "true" {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			require.NoError(t, svc.sendBalanceRechargeSuccessNotification(ctx, order))
+			require.Zero(t, repo.calls)
+		})
+	}
 }
 
 func TestBalanceRechargeNotifySettingParse(t *testing.T) {
 	svc := newAuthService(&userRepoStub{}, map[string]string{}, nil, nil).settingService
-	require.True(t, svc.parseSettings(map[string]string{}).BalanceRechargeNotifyEnabled)
+	require.False(t, svc.parseSettings(map[string]string{}).BalanceRechargeNotifyEnabled)
 	require.False(t, svc.parseSettings(map[string]string{SettingKeyBalanceRechargeNotifyEnabled: "false"}).BalanceRechargeNotifyEnabled)
+	require.True(t, svc.parseSettings(map[string]string{SettingKeyBalanceRechargeNotifyEnabled: "true"}).BalanceRechargeNotifyEnabled)
+	require.False(t, svc.parseSettings(map[string]string{}).SubscriptionExpiryNotifyEnabled)
+	require.True(t, svc.parseSettings(map[string]string{SettingKeySubscriptionExpiryNotifyEnabled: "true"}).SubscriptionExpiryNotifyEnabled)
 }

@@ -1,12 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
-import { flushPromises, mount } from "@vue/test-utils";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 
 import enCommon from "@/i18n/locales/en/common";
 import enSettings from "@/i18n/locales/en/admin/settings";
 import zhCommon from "@/i18n/locales/zh/common";
 import zhSettings from "@/i18n/locales/zh/admin/settings";
 import SettingsView from "../SettingsView.vue";
+
+enableAutoUnmount(afterEach);
 
 const {
   getSettings,
@@ -544,6 +546,7 @@ const baseSettingsResponse = {
   balance_low_notify_threshold: 0,
   balance_low_notify_recharge_url: "",
   balance_recharge_notify_enabled: true,
+  subscription_purchase_notify_enabled: false,
   subscription_expiry_notify_enabled: true,
   account_quota_notify_enabled: false,
   account_quota_notify_emails: [],
@@ -574,6 +577,7 @@ function mountView() {
         BackupSettings: true,
         ForkEmailSignupFilterSettings: true,
         UserAccountBlockSettings: true,
+        EmailTemplateEditor: true,
       },
     },
   });
@@ -1278,12 +1282,11 @@ describe("admin SettingsView payment visible method controls", () => {
 
     const smtpTitle = "admin.settings.smtp.title";
     const frontendUrl = "admin.settings.registration.frontendUrl";
-    expect(wrapper.text()).toContain("admin.settings.emailTabDisabledTitle");
-    expect(wrapper.text()).not.toContain(smtpTitle);
+    expect(wrapper.text()).toContain(smtpTitle);
+    expect(wrapper.text()).toContain("admin.settings.testEmail.title");
     expect(wrapper.text()).not.toContain(frontendUrl);
 
     await toggleByLabel(wrapper, "admin.settings.registration.passwordReset").setValue(true);
-    expect(wrapper.text()).not.toContain("admin.settings.emailTabDisabledTitle");
     expect(wrapper.text()).toContain(smtpTitle);
     expect(wrapper.text()).toContain("admin.settings.testEmail.title");
     expect(wrapper.text()).toContain(frontendUrl);
@@ -1308,6 +1311,21 @@ describe("admin SettingsView payment visible method controls", () => {
     await flushPromises();
     expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({
       balance_recharge_notify_enabled: false,
+      subscription_expiry_notify_enabled: true,
+    });
+  });
+
+  it("订阅开通通知可独立开启并保存", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    const purchaseToggle = toggleByLabel(wrapper, "admin.settings.subscriptionPurchaseNotify.enabled");
+    expect((purchaseToggle.element as HTMLInputElement).checked).toBe(false);
+    await purchaseToggle.setValue(true);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings.mock.calls[0]?.[0]).toMatchObject({
+      balance_recharge_notify_enabled: true,
+      subscription_purchase_notify_enabled: true,
       subscription_expiry_notify_enabled: true,
     });
   });
@@ -1481,6 +1499,7 @@ describe("admin SettingsView payment visible method controls", () => {
           BackupSettings: true,
           ForkEmailSignupFilterSettings: true,
           UserAccountBlockSettings: true,
+        EmailTemplateEditor: true,
         },
       },
     });
@@ -1829,6 +1848,7 @@ describe("admin SettingsView payment visible method controls", () => {
           BackupSettings: true,
           ForkEmailSignupFilterSettings: true,
           UserAccountBlockSettings: true,
+        EmailTemplateEditor: true,
         },
       },
     });

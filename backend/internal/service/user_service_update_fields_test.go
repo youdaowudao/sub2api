@@ -81,3 +81,80 @@ func TestUpdateStatus_OnlyDeclaresStatus(t *testing.T) {
 	require.NoError(t, svc.UpdateStatus(context.Background(), 7, StatusDisabled))
 	require.Equal(t, []UserUpdateFields{{Status: true}}, repo.updateFields)
 }
+
+func TestUpdateProfile_NotificationChangeInvalidatesAuthCache(t *testing.T) {
+	concurrency := 3
+	for _, tc := range []struct {
+		name           string
+		req            UpdateProfileRequest
+		want           bool
+		fail           bool
+		initialEnabled bool
+	}{
+		{"enable", UpdateProfileRequest{BalanceNotifyEnabled: boolPtr(true)}, true, false, false},
+		{"disable", UpdateProfileRequest{BalanceNotifyEnabled: boolPtr(false)}, true, false, true},
+		{"combined", UpdateProfileRequest{BalanceNotifyEnabled: boolPtr(true), BalanceNotifyThreshold: float64Ptr(2), Concurrency: &concurrency}, true, false, false},
+		{"threshold", UpdateProfileRequest{BalanceNotifyThreshold: float64Ptr(2)}, true, false, false},
+		{"clear threshold", UpdateProfileRequest{BalanceNotifyThreshold: float64Ptr(0)}, true, false, false},
+		{"email", UpdateProfileRequest{Email: strPtr("new@example.com")}, true, false, false},
+		{"unchanged", UpdateProfileRequest{BalanceNotifyEnabled: boolPtr(false), BalanceNotifyThreshold: float64Ptr(5)}, false, false, false},
+		{"unchanged email", UpdateProfileRequest{Email: strPtr("old@example.com")}, false, false, false},
+		{"failed", UpdateProfileRequest{BalanceNotifyEnabled: boolPtr(true)}, false, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &mockUserRepo{getByIDUser: &User{ID: 7, Email: "old@example.com", BalanceNotifyThreshold: float64Ptr(5), BalanceNotifyEnabled: tc.initialEnabled}}
+			if tc.fail {
+				repo.updateFn = func(context.Context, *User) error { return ErrUserNotFound }
+			}
+			invalidator := &mockAuthCacheInvalidator{}
+			svc := NewUserService(repo, nil, invalidator, nil)
+			_, err := svc.UpdateProfile(context.Background(), 7, tc.req)
+			if tc.fail {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+			if tc.want {
+				require.Equal(t, []int64{7}, invalidator.invalidatedUserIDs)
+			} else {
+				require.Empty(t, invalidator.invalidatedUserIDs)
+			}
+		})
+	}
+}
+
+func TestNotifyEmailChangesInvalidateAuthCache(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		change func(*UserService) error
+		want   bool
+	}{
+		{"disable", func(s *UserService) error { return s.ToggleNotifyEmail(ctx, 7, "verified@example.com", true) }, true},
+		{"unchanged", func(s *UserService) error { return s.ToggleNotifyEmail(ctx, 7, "verified@example.com", false) }, false},
+		{"remove", func(s *UserService) error { return s.RemoveNotifyEmail(ctx, 7, "verified@example.com") }, true},
+		{"verify", func(s *UserService) error { return s.addOrVerifyNotifyEmail(ctx, 7, "unverified@example.com") }, true},
+		{"add", func(s *UserService) error { return s.addOrVerifyNotifyEmail(ctx, 7, "new@example.com") }, true},
+		{"already verified", func(s *UserService) error { return s.addOrVerifyNotifyEmail(ctx, 7, "verified@example.com") }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &mockUserRepo{getByIDUser: &User{ID: 7, BalanceNotifyExtraEmails: []NotifyEmailEntry{{Email: "verified@example.com", Verified: true}, {Email: "unverified@example.com"}}}}
+			invalidator := &mockAuthCacheInvalidator{}
+			svc := NewUserService(repo, nil, invalidator, nil)
+			require.NoError(t, tc.change(svc))
+			if tc.want {
+				require.Equal(t, []int64{7}, invalidator.invalidatedUserIDs)
+			} else {
+				require.Empty(t, invalidator.invalidatedUserIDs)
+			}
+		})
+	}
+}
+
+func TestNotifyEmailFailedWriteDoesNotInvalidateAuthCache(t *testing.T) {
+	repo := &mockUserRepo{getByIDUser: &User{ID: 7, BalanceNotifyExtraEmails: []NotifyEmailEntry{{Email: "old@example.com", Verified: true}}}, updateFn: func(context.Context, *User) error { return ErrUserNotFound }}
+	invalidator := &mockAuthCacheInvalidator{}
+	svc := NewUserService(repo, nil, invalidator, nil)
+	require.Error(t, svc.RemoveNotifyEmail(context.Background(), 7, "old@example.com"))
+	require.Empty(t, invalidator.invalidatedUserIDs)
+}

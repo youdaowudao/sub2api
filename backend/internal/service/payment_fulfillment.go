@@ -510,25 +510,23 @@ func (s *PaymentService) dispatchPaymentFulfillmentNotification(o *dbent.Payment
 	}()
 }
 
-// balanceRechargeNotifyEnabled 充值成功邮件开关：未设置默认开启，读取失败时不发信。
-func (s *PaymentService) balanceRechargeNotifyEnabled(ctx context.Context) bool {
-	settingRepo := s.notificationEmailService.settingRepo
-	if settingRepo == nil {
-		return true
-	}
-	value, err := settingRepo.GetValue(ctx, SettingKeyBalanceRechargeNotifyEnabled)
-	if err != nil {
-		if errors.Is(err, ErrSettingNotFound) {
-			return true
-		}
-		slog.Warn("read balance recharge notify switch failed", "err", err.Error())
+// Payment mail is opt-in. Missing or unreadable settings must not send mail.
+func (s *PaymentService) paymentNotifyEnabled(ctx context.Context, key string) bool {
+	if s.notificationEmailService == nil || s.notificationEmailService.settingRepo == nil {
 		return false
 	}
-	return !isFalseSettingValue(value)
+	value, err := s.notificationEmailService.settingRepo.GetValue(ctx, key)
+	if err != nil {
+		if !errors.Is(err, ErrSettingNotFound) {
+			slog.Warn("read payment notification switch failed", "setting", key, "err", err.Error())
+		}
+		return false
+	}
+	return isTrueSettingValue(value)
 }
 
 func (s *PaymentService) sendBalanceRechargeSuccessNotification(ctx context.Context, o *dbent.PaymentOrder) error {
-	if !s.balanceRechargeNotifyEnabled(ctx) {
+	if !s.paymentNotifyEnabled(ctx, SettingKeyBalanceRechargeNotifyEnabled) {
 		return nil
 	}
 	currentBalance := ""
@@ -553,6 +551,9 @@ func (s *PaymentService) sendBalanceRechargeSuccessNotification(ctx context.Cont
 }
 
 func (s *PaymentService) sendSubscriptionPurchaseSuccessNotification(ctx context.Context, o *dbent.PaymentOrder) error {
+	if !s.paymentNotifyEnabled(ctx, SettingKeySubscriptionPurchaseNotifyEnabled) {
+		return nil
+	}
 	variables := map[string]string{
 		"subscription_group": "Subscription",
 		"subscription_days":  "",

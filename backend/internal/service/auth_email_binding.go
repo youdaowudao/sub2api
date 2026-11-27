@@ -48,7 +48,8 @@ func (s *AuthService) BindEmailIdentity(
 	if err != nil {
 		return nil, err
 	}
-	firstRealEmailBind := !hasBindableEmailIdentitySubject(currentUser.Email)
+	oldEmail := currentUser.Email
+	firstRealEmailBind := !hasBindableEmailIdentitySubject(oldEmail)
 	if firstRealEmailBind && len(password) < 6 {
 		return nil, infraerrors.BadRequest("PASSWORD_TOO_SHORT", "password must be at least 6 characters")
 	}
@@ -70,6 +71,9 @@ func (s *AuthService) BindEmailIdentity(
 			return nil, err
 		}
 		s.revokeEmailIdentitySessions(ctx, userID)
+		if currentUser.Email != oldEmail && s.authCacheInvalidator != nil {
+			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+		}
 		return currentUser, nil
 	}
 
@@ -89,6 +93,9 @@ func (s *AuthService) BindEmailIdentity(
 	}
 
 	s.revokeEmailIdentitySessions(ctx, userID)
+	if currentUser.Email != oldEmail && s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+	}
 	return currentUser, nil
 }
 

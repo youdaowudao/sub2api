@@ -106,6 +106,11 @@ describe('BulkEditKeysModal', () => {
       heading('openai'), { value: 7, label: 'Image group' },
       heading('other'), { value: 8, label: 'Grok group' },
     ])
+    await wrapper.setProps({ groups: [{ ...image, display_category: 'image' }, grok] })
+    expect(options()).toEqual([
+      heading('image'), { value: 7, label: 'Image group' },
+      heading('other'), { value: 8, label: 'Grok group' },
+    ])
     await wrapper.setProps({ groups: [
       { ...image, display_category: 'domestic' }, { ...grok, display_category: 'domestic' },
     ] })

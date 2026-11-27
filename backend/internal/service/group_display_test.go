@@ -83,6 +83,32 @@ func TestGroupDisplayWriteAndPreserve(t *testing.T) {
 	}
 }
 
+func TestGroupDisplayImageCategoryPersists(t *testing.T) {
+	for _, mode := range []string{config.RunModeStandard, config.RunModeSimple} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			repo := &groupDisplayRepoStub{}
+			svc := &adminServiceImpl{cfg: &config.Config{RunMode: mode}, groupRepo: repo}
+			created, err := svc.CreateGroup(ctx, &CreateGroupInput{
+				Name: "display group", Platform: PlatformOpenAI, RateMultiplier: 1,
+				DisplayCategory: " image ",
+			})
+			require.NoError(t, err)
+			require.Equal(t, "image", repo.stored.DisplayCategory)
+			require.Equal(t, PlatformOpenAI, repo.stored.Platform)
+			_, err = svc.UpdateGroup(ctx, created.ID, &UpdateGroupInput{DisplayCategory: stringPtr("")})
+			require.NoError(t, err)
+			require.Empty(t, repo.stored.DisplayCategory)
+			_, err = svc.UpdateGroup(ctx, created.ID, &UpdateGroupInput{DisplayCategory: stringPtr(" image ")})
+			require.NoError(t, err)
+			require.Equal(t, "image", repo.stored.DisplayCategory)
+			require.Equal(t, PlatformOpenAI, repo.stored.Platform)
+			require.Equal(t, 1, repo.createCalls)
+			require.Equal(t, 2, repo.updateCalls)
+		})
+	}
+}
+
 func TestGroupDisplayRejectsInvalidValuesBeforeRepositoryCalls(t *testing.T) {
 	for _, tc := range []struct {
 		name, reason   string

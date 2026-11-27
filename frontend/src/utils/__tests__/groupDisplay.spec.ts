@@ -14,6 +14,7 @@ describe('group display', () => {
   it('uses plaza platform categories and keeps the real platform for other groups', () => {
     expect(groupPlazaPlatform({ platform: 'openai', display_category: 'gemini' })).toBe('gemini')
     expect(groupPlazaPlatform({ platform: 'openai', display_category: 'domestic' })).toBe('openai')
+    expect(groupPlazaPlatform({ platform: 'openai', display_category: 'image' })).toBe('openai')
     expect(groupPlazaPlatform({ platform: 'kimi', display_category: '' })).toBe('kimi')
     expect(groupPlazaPlatform({ platform: 'openai' })).toBe('openai')
   })
@@ -27,16 +28,32 @@ describe('group display', () => {
     expect(groupCategory({ platform })).toBe(category)
   })
 
-  it('accepts the four manual categories, with the same rule for image groups', () => {
+  it('accepts the five manual categories without automatically classifying image-capable groups', () => {
     const imageGroup = { platform: 'openai', allow_image_generation: true }
-    expect(GROUP_DISPLAY_CATEGORIES).toEqual(['openai', 'anthropic', 'gemini', 'domestic', 'other'])
+    expect(GROUP_DISPLAY_CATEGORIES).toEqual(['openai', 'anthropic', 'gemini', 'domestic', 'image', 'other'])
     expect(groupCategory(imageGroup)).toBe('openai')
-    for (const category of ['openai', 'anthropic', 'gemini', 'domestic']) {
+    for (const category of ['openai', 'anthropic', 'gemini', 'domestic', 'image']) {
       expect(groupCategory({ platform: 'grok', display_category: ` ${category} ` })).toBe(category)
     }
     expect(groupCategory({ ...imageGroup, display_category: ' domestic ' })).toBe('domestic')
     expect(groupCategory({ ...imageGroup, display_category: 'other' })).toBe('openai')
     expect(groupCategory({ ...imageGroup, display_category: 'invalid' })).toBe('openai')
+  })
+
+  it('includes an empty image section only when requested and keeps manually assigned groups exclusive', () => {
+    const openai = { id: 1, platform: 'openai', name: 'Image group' }
+    const grok = { id: 2, platform: 'grok', name: 'Grok' }
+    expect(groupGroupsByCategory([openai, grok], true)).toEqual([
+      { category: 'openai', groups: [openai] },
+      { category: 'image', groups: [] },
+      { category: 'other', groups: [grok] },
+    ])
+    expect(groupGroupsByCategory([], true)).toEqual([])
+    const image = { ...openai, display_category: 'image' }
+    expect(groupGroupsByCategory([image, grok])).toEqual([
+      { category: 'image', groups: [image] },
+      { category: 'other', groups: [grok] },
+    ])
   })
 
   it('uses only dedicated logos in the fixed order and otherwise follows the platform', () => {

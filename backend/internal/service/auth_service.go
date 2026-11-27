@@ -87,6 +87,7 @@ type AuthService struct {
 	defaultSubAssigner    DefaultSubscriptionAssigner
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 	mcpGrantRevoker       MCPGrantRevoker
+	authCacheInvalidator  APIKeyAuthCacheInvalidator
 }
 
 type CaptchaProof struct {
@@ -158,6 +159,10 @@ func (s *AuthService) SetTencentCaptchaService(tencentCaptchaService *TencentCap
 
 func (s *AuthService) SetAliyunCaptchaService(aliyunCaptchaService *AliyunCaptchaService) {
 	s.aliyunCaptchaService = aliyunCaptchaService
+}
+
+func (s *AuthService) SetAPIKeyAuthCacheInvalidator(invalidator APIKeyAuthCacheInvalidator) {
+	s.authCacheInvalidator = invalidator
 }
 
 func (s *AuthService) SetMCPGrantRevoker(revoker MCPGrantRevoker) {

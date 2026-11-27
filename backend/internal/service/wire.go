@@ -72,6 +72,7 @@ func ProvideAuthService(
 	affiliateService *AffiliateService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
 	mcpOAuthService *MCPOAuthService,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
 ) *AuthService {
 	svc := NewAuthService(
 		entClient,
@@ -90,6 +91,7 @@ func ProvideAuthService(
 	)
 	svc.SetTencentCaptchaService(tencentCaptchaService)
 	svc.SetAliyunCaptchaService(aliyunCaptchaService)
+	svc.SetAPIKeyAuthCacheInvalidator(authCacheInvalidator)
 	if mcpOAuthService != nil {
 		svc.SetMCPGrantRevoker(mcpOAuthService)
 	}

@@ -308,7 +308,8 @@ type SystemSettings struct {
 	BalanceLowNotifyRechargeURL string
 
 	// 充值到账通知
-	BalanceRechargeNotifyEnabled bool
+	BalanceRechargeNotifyEnabled      bool
+	SubscriptionPurchaseNotifyEnabled bool
 
 	// 订阅到期提醒
 	SubscriptionExpiryNotifyEnabled bool

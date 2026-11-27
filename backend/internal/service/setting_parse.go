@@ -328,7 +328,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		RegistrationEmailSuffixWhitelist:       ParseRegistrationEmailSuffixWhitelist(settings[SettingKeyRegistrationEmailSuffixWhitelist]),
 		RegistrationEmailDomainQuotaEnabled:    settings[SettingKeyRegistrationEmailDomainQuotaEnabled] == "true",
 		PromoCodeEnabled:                       settings[SettingKeyPromoCodeEnabled] != "false", // 默认启用
-		PasswordResetEnabled:                   settings[SettingKeyPasswordResetEnabled] == "true",
+		PasswordResetEnabled:                   passwordResetSettingEnabled(settings),
 		FrontendURL:                            settings[SettingKeyFrontendURL],
 		InvitationCodeEnabled:                  settings[SettingKeyInvitationCodeEnabled] == "true",
 		TotpEnabled:                            settings[SettingKeyTotpEnabled] == "true",
@@ -968,8 +968,9 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.BalanceLowNotifyThreshold = v
 	}
 	result.BalanceLowNotifyRechargeURL = settings[SettingKeyBalanceLowNotifyRechargeURL]
-	result.BalanceRechargeNotifyEnabled = !isFalseSettingValue(settings[SettingKeyBalanceRechargeNotifyEnabled])
-	result.SubscriptionExpiryNotifyEnabled = !isFalseSettingValue(settings[SettingKeySubscriptionExpiryNotifyEnabled])
+	result.BalanceRechargeNotifyEnabled = isTrueSettingValue(settings[SettingKeyBalanceRechargeNotifyEnabled])
+	result.SubscriptionPurchaseNotifyEnabled = isTrueSettingValue(settings[SettingKeySubscriptionPurchaseNotifyEnabled])
+	result.SubscriptionExpiryNotifyEnabled = isTrueSettingValue(settings[SettingKeySubscriptionExpiryNotifyEnabled])
 
 	// 账号限额通知
 	result.AccountQuotaNotifyEnabled = settings[SettingKeyAccountQuotaNotifyEnabled] == "true"
@@ -1028,6 +1029,12 @@ func clampAffiliateRebateRate(value float64) float64 {
 		return AffiliateRebateRateMax
 	}
 	return value
+}
+
+// Missing is the default; explicit stored values never get silently overwritten.
+func passwordResetSettingEnabled(settings map[string]string) bool {
+	value, exists := settings[SettingKeyPasswordResetEnabled]
+	return !exists || value == "true"
 }
 
 func isFalseSettingValue(value string) bool {

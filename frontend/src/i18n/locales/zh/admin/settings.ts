@@ -181,8 +181,6 @@ export default {
           },
         },
       },
-      emailTabDisabledTitle: '邮箱验证和忘记密码均未启用',
-      emailTabDisabledHint: '请先在「安全与认证」选项卡中启用邮箱验证或忘记密码，再配置 SMTP 设置。',
       registration: {
         title: '注册设置',
         description: '控制用户注册和验证',
@@ -1020,7 +1018,7 @@ export default {
       },
       balanceNotify: {
         title: '余额不足提醒',
-        description: '当用户余额低于阈值时发送邮件提醒',
+        description: '开启后允许用户在个人资料中主动开启余额不足邮件提醒。',
         enabled: '启用余额不足提醒',
         threshold: '默认提醒阈值',
         thresholdHint: '用户未自定义时使用此值',
@@ -1044,6 +1042,12 @@ export default {
         enabled: '启用充值成功通知',
         enabledHint: '开启后，余额充值订单到账时向用户发送一封邮件；购买订阅的邮件不受此开关影响。'
       },
+      subscriptionPurchaseNotify: {
+        title: '订阅开通成功通知',
+        description: '控制订阅订单成功开通或续期后是否发送邮件。',
+        enabled: '启用订阅开通成功通知',
+        enabledHint: '关闭后不发送成功邮件，不影响订阅开通或续期。'
+      },
       subscriptionExpiryNotify: {
         title: '订阅到期提醒',
         description: '控制是否向用户发送订阅即将到期的邮件提醒。',
@@ -1052,7 +1056,7 @@ export default {
       },
       smtp: {
         title: 'SMTP 设置',
-        description: '配置用于发送验证码的邮件服务',
+        description: '配置用于账户验证及各类邮件通知的邮件服务',
         testConnection: '测试连接',
         testing: '测试中...',
         host: 'SMTP 主机',

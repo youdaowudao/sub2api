@@ -152,6 +152,7 @@ func (s *UserRepoSuite) TestCreate() {
 	got, err := s.repo.GetByID(s.ctx, user.ID)
 	s.Require().NoError(err, "GetByID")
 	s.Require().Equal("create@test.com", got.Email)
+	s.Require().False(got.BalanceNotifyEnabled, "new users must opt in explicitly")
 }
 
 func (s *UserRepoSuite) TestGetByID_NotFound() {

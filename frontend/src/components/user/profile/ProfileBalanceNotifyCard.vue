@@ -13,7 +13,7 @@
       <div class="flex items-center justify-between">
         <label class="input-label mb-0">{{ t('profile.balanceNotify.enabled') }}</label>
         <label class="relative inline-flex items-center cursor-pointer">
-          <input type="checkbox" v-model="notifyEnabled" @change="handleToggle" class="sr-only peer" />
+          <input type="checkbox" v-model="notifyEnabled" :disabled="savingToggle" :aria-label="t('profile.balanceNotify.enabled')" @change="handleToggle" class="sr-only peer" />
           <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:after:border-gray-600 peer-checked:bg-primary-600"></div>
         </label>
       </div>
@@ -48,7 +48,13 @@
         <!-- Email list with toggles -->
         <div>
           <label class="input-label">{{ t('profile.balanceNotify.extraEmails') }}</label>
-          <p class="mb-2 text-xs text-yellow-600 dark:text-yellow-400">{{ t('profile.balanceNotify.extraEmailsHint') }}</p>
+          <div v-if="emailEntries.length === 0" class="mb-3 rounded-lg bg-gray-50 px-3 py-2 dark:bg-dark-700">
+            <p v-if="accountEmail" class="break-all text-sm text-gray-700 dark:text-gray-300">{{ t('profile.balanceNotify.accountRecipient', { email: accountEmail }) }}</p>
+            <p v-else class="text-sm text-gray-500 dark:text-gray-400">{{ t('profile.balanceNotify.noAccountRecipient') }}</p>
+          </div>
+          <p v-else class="mb-2 text-xs text-gray-500 dark:text-gray-400">{{ t('profile.balanceNotify.customRecipientsHint') }}</p>
+          <p v-if="emailEntries.length > 0 && !hasActiveRecipient" class="mb-2 text-xs text-yellow-600 dark:text-yellow-400">{{ t('profile.balanceNotify.noActiveRecipient') }}</p>
+          <p class="mb-2 text-xs text-gray-500 dark:text-gray-400">{{ t('profile.balanceNotify.extraEmailsHint') }}</p>
 
           <!-- Saved email entries -->
           <div v-if="emailEntries.length > 0" class="space-y-2 mb-3">
@@ -62,7 +68,8 @@
                 <span class="text-sm text-gray-700 dark:text-gray-300 truncate">{{ entry.email }}</span>
               </div>
               <div class="flex items-center gap-2 shrink-0">
-                <template v-if="!entry.verified">
+                <span v-if="isAccountEmail(entry.email)" class="text-xs text-gray-500 dark:text-gray-400">{{ t('profile.balanceNotify.primaryEmail') }}</span>
+                <template v-else-if="!entry.verified">
                   <!-- Inline verify flow for saved unverified emails -->
                   <template v-if="verifyingEmail === entry.email">
                     <input
@@ -157,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
@@ -195,6 +202,12 @@ const emailEntries = ref<NotifyEmailEntry[]>([...props.extraEmails])
 const pendingEmails = ref<PendingEmail[]>([])
 const newEmail = ref('')
 const savingThreshold = ref(false)
+const savingToggle = ref(false)
+
+const isUsableEmail = (email: string) => /^[^\s@]+@[^\s@]+$/.test(email.trim()) && !email.trim().toLowerCase().endsWith('.invalid')
+const accountEmail = computed(() => isUsableEmail(props.userEmail) ? props.userEmail.trim() : '')
+const isAccountEmail = (email: string) => Boolean(accountEmail.value) && email.trim().toLowerCase() === accountEmail.value.toLowerCase()
+const hasActiveRecipient = computed(() => emailEntries.value.some(entry => !entry.disabled && isUsableEmail(entry.email) && (entry.verified || isAccountEmail(entry.email))))
 
 // State for verifying saved unverified emails
 const verifyingEmail = ref('')
@@ -213,13 +226,6 @@ watch(() => props.enabled, (val) => { notifyEnabled.value = val })
 watch(() => props.threshold, (val) => { customThreshold.value = val })
 watch(() => props.extraEmails, (val) => { emailEntries.value = [...val] })
 
-// When list is empty on mount, pre-fill the add input with user's email
-onMounted(() => {
-  if (emailEntries.value.length === 0 && props.userEmail) {
-    newEmail.value = props.userEmail
-  }
-})
-
 onUnmounted(() => {
   disposed = true
   for (const pe of pendingEmails.value) {
@@ -229,12 +235,18 @@ onUnmounted(() => {
 })
 
 const handleToggle = async () => {
+  if (savingToggle.value) return
+  const next = notifyEnabled.value
+  savingToggle.value = true
   try {
-    const updated = await userAPI.updateProfile({ balance_notify_enabled: notifyEnabled.value })
+    const updated = await userAPI.updateProfile({ balance_notify_enabled: next })
     authStore.user = updated
+    notifyEnabled.value = updated.balance_notify_enabled
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('common.error')))
-    notifyEnabled.value = !notifyEnabled.value
+    notifyEnabled.value = !next
+  } finally {
+    savingToggle.value = false
   }
 }
 
@@ -257,7 +269,7 @@ async function handleEmailToggle(entry: NotifyEmailEntry) {
   try {
     const updated = await userAPI.toggleNotifyEmail(entry.email, newDisabled)
     authStore.user = updated
-    emailEntries.value = [...updated.balance_notify_extra_emails]
+    emailEntries.value = [...(updated.balance_notify_extra_emails ?? [])]
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('common.error')))
   }
@@ -266,6 +278,11 @@ async function handleEmailToggle(entry: NotifyEmailEntry) {
 function addPendingEmail() {
   const email = newEmail.value.trim()
   if (!email) return
+  if (isAccountEmail(email) && emailEntries.value.length === 0) {
+    appStore.showSuccess(t('profile.balanceNotify.accountAlreadyRecipient'))
+    newEmail.value = ''
+    return
+  }
   // Check duplicates
   const isDuplicate = emailEntries.value.some(e => e.email.toLowerCase() === email.toLowerCase())
     || pendingEmails.value.some(p => p.email.toLowerCase() === email.toLowerCase())
@@ -312,7 +329,7 @@ async function verifyPending(idx: number) {
     appStore.showSuccess(t('profile.balanceNotify.verifySuccess'))
     const updated = await userAPI.getProfile()
     authStore.user = updated
-    emailEntries.value = [...updated.balance_notify_extra_emails]
+    emailEntries.value = [...(updated.balance_notify_extra_emails ?? [])]
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('common.error')))
   } finally {
@@ -326,7 +343,7 @@ const handleRemoveEmail = async (email: string) => {
     appStore.showSuccess(t('profile.balanceNotify.removeSuccess'))
     const updated = await userAPI.getProfile()
     authStore.user = updated
-    emailEntries.value = [...updated.balance_notify_extra_emails]
+    emailEntries.value = [...(updated.balance_notify_extra_emails ?? [])]
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('common.error')))
   }
@@ -368,7 +385,7 @@ async function verifySavedEmail(email: string) {
     appStore.showSuccess(t('profile.balanceNotify.verifySuccess'))
     const updated = await userAPI.getProfile()
     authStore.user = updated
-    emailEntries.value = [...updated.balance_notify_extra_emails]
+    emailEntries.value = [...(updated.balance_notify_extra_emails ?? [])]
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('common.error')))
   } finally {

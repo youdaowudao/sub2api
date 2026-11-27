@@ -260,3 +260,49 @@ func TestUpdateSettingsQuickImportImageGroupOnlyAcceptsActiveOpenAI(t *testing.T
 		require.Equal(t, "4", repo.values[key])
 	}
 }
+
+func TestUpdateSettingsMailSwitchesIndependent(t *testing.T) {
+	h, repo := newStepUpSwitchTestHandler(t, map[string]string{
+		service.SettingKeyPasswordResetEnabled:            "false",
+		service.SettingKeyBalanceRechargeNotifyEnabled:    "true",
+		service.SettingKeySubscriptionExpiryNotifyEnabled: "true",
+	})
+	rec := doUpdateSettings(t, h, map[string]any{"subscription_purchase_notify_enabled": true}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values["subscription_purchase_notify_enabled"])
+	require.Equal(t, "false", repo.values[service.SettingKeyPasswordResetEnabled])
+	require.Equal(t, "true", repo.values[service.SettingKeyBalanceRechargeNotifyEnabled])
+	require.Equal(t, "true", repo.values[service.SettingKeySubscriptionExpiryNotifyEnabled])
+	rec = doUpdateSettings(t, h, map[string]any{"password_reset_enabled": true}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "true", repo.values[service.SettingKeyPasswordResetEnabled])
+	require.Equal(t, "true", repo.values["subscription_purchase_notify_enabled"])
+	rec = doUpdateSettings(t, h, map[string]any{"subscription_purchase_notify_enabled": false}, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "false", repo.values["subscription_purchase_notify_enabled"])
+	require.Equal(t, "true", repo.values[service.SettingKeyPasswordResetEnabled])
+}
+
+func TestUpdateSettingsPasswordResetOmissionDoesNotAuditFalseChange(t *testing.T) {
+	for name, stored := range map[string]map[string]string{"missing": {}, "explicit_on": {service.SettingKeyPasswordResetEnabled: "true"}} {
+		t.Run(name, func(t *testing.T) {
+			var auditLog bytes.Buffer
+			previousLogger := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&auditLog, nil)))
+			t.Cleanup(func() { slog.SetDefault(previousLogger) })
+			h, repo := newStepUpSwitchTestHandler(t, stored)
+			rec := doUpdateSettings(t, h, map[string]any{"site_name": "Example Gateway"}, nil)
+			require.Equal(t, http.StatusOK, rec.Code)
+			if name == "missing" {
+				require.NotContains(t, repo.values, service.SettingKeyPasswordResetEnabled)
+			} else {
+				require.Equal(t, "true", repo.values[service.SettingKeyPasswordResetEnabled])
+			}
+			require.NotContains(t, auditLog.String(), service.SettingKeyPasswordResetEnabled)
+			rec = doUpdateSettings(t, h, map[string]any{"password_reset_enabled": false}, nil)
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Equal(t, "false", repo.values[service.SettingKeyPasswordResetEnabled])
+			require.Contains(t, auditLog.String(), service.SettingKeyPasswordResetEnabled)
+		})
+	}
+}

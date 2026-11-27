@@ -409,16 +409,16 @@ describe('group display settings', () => {
       'minimax', 'deepseek', 'opencode_go', 'command_code', 'cline',
     ])
     expect(Array.from(category('create').element.options, option => option.value))
-      .toEqual(['', 'openai', 'anthropic', 'gemini', 'domestic'])
+      .toEqual(['', 'openai', 'anthropic', 'gemini', 'domestic', 'image'])
     expect(icon('create').element.value).toBe('')
     expect(category('create').element.value).toBe('')
     await wrapper.get('[data-tour="group-form-name"]').setValue('Compatible group')
     await icon('create').setValue('gemini')
-    await category('create').setValue('gemini')
+    await category('create').setValue('image')
     await submit('create')
     expect(createRequest).toHaveBeenCalledTimes(1)
     expect(createRequest).toHaveBeenCalledWith(expect.objectContaining({
-      name: 'Compatible group', display_icon: 'gemini', display_category: 'gemini',
+      name: 'Compatible group', display_icon: 'gemini', display_category: 'image',
     }))
     expect(wrapper.find('#create-group-form').exists()).toBe(false)
 
@@ -450,12 +450,12 @@ describe('group display settings', () => {
       expect(icon('edit').element.value).toBe('gemini')
       expect(category('edit').element.value).toBe('gemini')
       await icon('edit').setValue('deepseek')
-      await category('edit').setValue('domestic')
+      await category('edit').setValue('image')
       await submit('edit')
       expect(listGroups).toHaveBeenCalledTimes(2)
       await openEditor()
       expect(icon('edit').element.value).toBe('deepseek')
-      expect(category('edit').element.value).toBe('domestic')
+      expect(category('edit').element.value).toBe('image')
       await icon('edit').setValue('')
       await category('edit').setValue('')
       await submit('edit')

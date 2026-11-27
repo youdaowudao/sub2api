@@ -470,38 +470,38 @@ func (s *UserService) UnbindUserAuthProviderWithResult(ctx context.Context, user
 func (s *UserService) UpdateProfile(ctx context.Context, userID int64, req UpdateProfileRequest) (*User, error) {
 	if txRunner, ok := s.userRepo.(userProfileIdentityTxRunner); ok {
 		var (
-			updated        *User
-			oldConcurrency int
+			updated      *User
+			cacheChanged bool
 		)
 		if err := txRunner.WithUserProfileIdentityTx(ctx, func(txCtx context.Context) error {
 			var err error
-			updated, oldConcurrency, err = s.updateProfile(txCtx, userID, req)
+			updated, cacheChanged, err = s.updateProfile(txCtx, userID, req)
 			return err
 		}); err != nil {
 			return nil, err
 		}
-		if s.authCacheInvalidator != nil && updated != nil && updated.Concurrency != oldConcurrency {
+		if s.authCacheInvalidator != nil && cacheChanged {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
 		}
 		return updated, nil
 	}
 
-	updated, oldConcurrency, err := s.updateProfile(ctx, userID, req)
+	updated, cacheChanged, err := s.updateProfile(ctx, userID, req)
 	if err != nil {
 		return nil, err
 	}
-	if s.authCacheInvalidator != nil && updated.Concurrency != oldConcurrency {
+	if s.authCacheInvalidator != nil && cacheChanged {
 		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
 	}
 	return updated, nil
 }
 
-func (s *UserService) updateProfile(ctx context.Context, userID int64, req UpdateProfileRequest) (*User, int, error) {
+func (s *UserService) updateProfile(ctx context.Context, userID int64, req UpdateProfileRequest) (*User, bool, error) {
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("get user: %w", err)
+		return nil, false, fmt.Errorf("get user: %w", err)
 	}
-	oldConcurrency := user.Concurrency
+	cacheChanged := false
 
 	// fields 只登记本次请求真正带上的字段。余额、状态等列不由这里回写，
 	// 否则并发的扣费与状态变更会被这份快照回滚。
@@ -512,11 +512,12 @@ func (s *UserService) updateProfile(ctx context.Context, userID int64, req Updat
 		// 检查新邮箱是否已被使用
 		exists, err := s.userRepo.ExistsByEmail(ctx, *req.Email)
 		if err != nil {
-			return nil, oldConcurrency, fmt.Errorf("check email exists: %w", err)
+			return nil, false, fmt.Errorf("check email exists: %w", err)
 		}
 		if exists && *req.Email != user.Email {
-			return nil, oldConcurrency, ErrEmailExists
+			return nil, false, ErrEmailExists
 		}
+		cacheChanged = cacheChanged || user.Email != *req.Email
 		user.Email = *req.Email
 		fields.Email = true
 	}
@@ -529,34 +530,38 @@ func (s *UserService) updateProfile(ctx context.Context, userID int64, req Updat
 	if req.AvatarURL != nil {
 		avatar, err := s.SetAvatar(ctx, userID, *req.AvatarURL)
 		if err != nil {
-			return nil, oldConcurrency, err
+			return nil, false, err
 		}
 		applyUserAvatar(user, avatar)
 	}
 
 	if req.Concurrency != nil {
+		cacheChanged = cacheChanged || user.Concurrency != *req.Concurrency
 		user.Concurrency = *req.Concurrency
 		fields.Concurrency = true
 	}
 
 	if req.BalanceNotifyEnabled != nil {
+		cacheChanged = cacheChanged || user.BalanceNotifyEnabled != *req.BalanceNotifyEnabled
 		user.BalanceNotifyEnabled = *req.BalanceNotifyEnabled
 		fields.BalanceNotifySettings = true
 	}
 	if req.BalanceNotifyThreshold != nil {
 		if *req.BalanceNotifyThreshold <= 0 {
+			cacheChanged = cacheChanged || user.BalanceNotifyThreshold != nil
 			user.BalanceNotifyThreshold = nil // clear to system default
 		} else {
+			cacheChanged = cacheChanged || user.BalanceNotifyThreshold == nil || *user.BalanceNotifyThreshold != *req.BalanceNotifyThreshold
 			user.BalanceNotifyThreshold = req.BalanceNotifyThreshold
 		}
 		fields.BalanceNotifySettings = true
 	}
 
 	if err := s.userRepo.Update(ctx, user, fields); err != nil {
-		return nil, oldConcurrency, fmt.Errorf("update user: %w", err)
+		return nil, false, fmt.Errorf("update user: %w", err)
 	}
 
-	return user, oldConcurrency, nil
+	return user, cacheChanged, nil
 }
 
 func (s *UserService) SetAvatar(ctx context.Context, userID int64, raw string) (*UserAvatar, error) {
@@ -1344,7 +1349,7 @@ func (s *UserService) addOrVerifyNotifyEmail(ctx context.Context, userID int64, 
 		if strings.EqualFold(e.Email, email) {
 			if !e.Verified {
 				user.BalanceNotifyExtraEmails[i].Verified = true
-				return s.userRepo.Update(ctx, user, UserUpdateFields{BalanceNotifyExtraEmails: true})
+				return s.saveNotifyEmails(ctx, user)
 			}
 			return nil // Already verified
 		}
@@ -1357,7 +1362,7 @@ func (s *UserService) addOrVerifyNotifyEmail(ctx context.Context, userID int64, 
 		Disabled: false,
 		Verified: true,
 	})
-	return s.userRepo.Update(ctx, user, UserUpdateFields{BalanceNotifyExtraEmails: true})
+	return s.saveNotifyEmails(ctx, user)
 }
 
 // RemoveNotifyEmail removes an email from user's extra notification emails.
@@ -1380,7 +1385,7 @@ func (s *UserService) RemoveNotifyEmail(ctx context.Context, userID int64, email
 		return infraerrors.BadRequest("EMAIL_NOT_FOUND", "notification email not found")
 	}
 	user.BalanceNotifyExtraEmails = filtered
-	return s.userRepo.Update(ctx, user, UserUpdateFields{BalanceNotifyExtraEmails: true})
+	return s.saveNotifyEmails(ctx, user)
 }
 
 // ToggleNotifyEmail toggles the disabled state of a notification email entry.
@@ -1393,6 +1398,9 @@ func (s *UserService) ToggleNotifyEmail(ctx context.Context, userID int64, email
 	found := false
 	for i, e := range user.BalanceNotifyExtraEmails {
 		if strings.EqualFold(e.Email, email) {
+			if e.Disabled == disabled {
+				return nil
+			}
 			user.BalanceNotifyExtraEmails[i].Disabled = disabled
 			found = true
 			break
@@ -1402,7 +1410,18 @@ func (s *UserService) ToggleNotifyEmail(ctx context.Context, userID int64, email
 		return infraerrors.BadRequest("EMAIL_NOT_FOUND", "notification email not found")
 	}
 
-	return s.userRepo.Update(ctx, user, UserUpdateFields{BalanceNotifyExtraEmails: true})
+	return s.saveNotifyEmails(ctx, user)
+}
+
+// saveNotifyEmails invalidates the already-cached recipients only after a successful write.
+func (s *UserService) saveNotifyEmails(ctx context.Context, user *User) error {
+	if err := s.userRepo.Update(ctx, user, UserUpdateFields{BalanceNotifyExtraEmails: true}); err != nil {
+		return err
+	}
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
+	}
+	return nil
 }
 
 // notifyVerifyEmailTemplate is the HTML template for notify email verification.

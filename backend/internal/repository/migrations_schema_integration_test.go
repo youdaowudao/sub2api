@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 )
 
@@ -377,4 +378,51 @@ WHERE table_schema = 'public'
 	} else {
 		require.Equal(t, "NO", row.Nullable, "nullable mismatch for %s.%s", table, column)
 	}
+}
+
+func TestBalanceNotifyMigrationResetsOnlyOptInAndNewDefaults(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	// Temporary shadow tables confine the migration to test data, not integration fixtures.
+	_, err := tx.ExecContext(ctx, `CREATE TEMP TABLE users (id bigint PRIMARY KEY, balance_notify_enabled boolean NOT NULL DEFAULT true, balance_notify_threshold numeric, balance_notify_extra_emails text, other_column text) ON COMMIT DROP;
+ INSERT INTO users VALUES (1,true,5,'old-emails','preserve'),(2,false,8,'other-emails','preserve');`)
+	require.NoError(t, err)
+	raw, err := migrations.FS.ReadFile("257_balance_notify_opt_in.sql")
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, string(raw))
+	require.NoError(t, err)
+	var enabled bool
+	var threshold int
+	var emails, other string
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT balance_notify_enabled, balance_notify_threshold::int, balance_notify_extra_emails, other_column FROM users WHERE id=1`).Scan(&enabled, &threshold, &emails, &other))
+	require.False(t, enabled)
+	require.Equal(t, 5, threshold)
+	require.Equal(t, "old-emails", emails)
+	require.Equal(t, "preserve", other)
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT balance_notify_enabled, balance_notify_threshold::int, balance_notify_extra_emails FROM users WHERE id=2`).Scan(&enabled, &threshold, &emails))
+	require.False(t, enabled)
+	require.Equal(t, 8, threshold)
+	require.Equal(t, "other-emails", emails)
+	require.NoError(t, tx.QueryRowContext(ctx, `INSERT INTO users (id) VALUES (3) RETURNING balance_notify_enabled`).Scan(&enabled))
+	require.False(t, enabled)
+}
+
+func TestSubscriptionExpirySeedForNewAndExistingSettings(t *testing.T) {
+	ctx := context.Background()
+	tx := testTx(t)
+	_, err := tx.ExecContext(ctx, `CREATE TEMP TABLE settings (key text PRIMARY KEY, value text, updated_at timestamptz) ON COMMIT DROP`)
+	require.NoError(t, err)
+	raw, err := migrations.FS.ReadFile("141_subscription_expiry_notify_enabled.sql")
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, string(raw))
+	require.NoError(t, err)
+	var value string
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='subscription_expiry_notify_enabled'`).Scan(&value))
+	require.Equal(t, "false", value)
+	_, err = tx.ExecContext(ctx, `UPDATE settings SET value='true' WHERE key='subscription_expiry_notify_enabled'`)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, string(raw))
+	require.NoError(t, err)
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key='subscription_expiry_notify_enabled'`).Scan(&value))
+	require.Equal(t, "true", value)
 }

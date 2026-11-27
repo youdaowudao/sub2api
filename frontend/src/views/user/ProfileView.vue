@@ -36,7 +36,7 @@
 
       <ProfileBalanceNotifyCard
         v-if="user && balanceLowNotifyEnabled"
-        :enabled="user.balance_notify_enabled ?? true"
+        :enabled="user.balance_notify_enabled ?? false"
         :threshold="user.balance_notify_threshold"
         :extra-emails="user.balance_notify_extra_emails ?? []"
         :system-default-threshold="systemDefaultThreshold"
