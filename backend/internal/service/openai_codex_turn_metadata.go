@@ -1,13 +1,14 @@
 package service
 
 import (
-	"encoding/json"
 	"unicode/utf16"
 )
 
 // Turn metadata is also used as an HTTP header, including when carried in WS JSON.
-func marshalCodexTurnMetadata(metadata map[string]any) ([]byte, error) {
-	raw, err := json.Marshal(metadata)
+func marshalCodexTurnMetadata(metadata map[string]any, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	raw, err := wsMem.marshal(metadata)
 	if err != nil {
 		return nil, err
 	}

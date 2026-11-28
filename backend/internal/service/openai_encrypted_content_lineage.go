@@ -43,26 +43,32 @@ func openAIEncryptedLineageItemType(itemType string) bool {
 
 // collectOpenAIEncryptedContentDigestsRaw 收集 input 中 lineage 覆盖类型所携
 // 密文的摘要。payload 须遵守 replay 所有权不变式（零拷贝视图解析）。
-func collectOpenAIEncryptedContentDigestsRaw(payload []byte) []string {
+func collectOpenAIEncryptedContentDigestsRaw(payload []byte, memories ...*wsMaterializer) []string {
+	mem := firstWSMaterializer(memories)
 	if len(payload) == 0 {
 		return nil
 	}
-	input := gjson.Get(openAIWSPayloadStringView(payload), "input")
+	var input gjson.Result
+	if mem == nil {
+		input = gjson.Get(openAIWSPayloadStringView(payload), "input")
+	} else {
+		input = mem.get(payload, "input")
+	}
 	if !input.Exists() {
 		return nil
 	}
 	var digests []string
 	appendItem := func(item gjson.Result) {
-		if !openAIEncryptedLineageItemType(item.Get("type").String()) {
+		if !openAIEncryptedLineageItemType(mem.resultGet(item, "type").String()) {
 			return
 		}
-		encrypted := item.Get("encrypted_content")
+		encrypted := mem.resultGet(item, "encrypted_content")
 		if encrypted.Type == gjson.String && encrypted.String() != "" {
 			digests = append(digests, openAIEncryptedContentDigest(encrypted.String()))
 		}
 	}
 	if input.IsArray() {
-		input.ForEach(func(_, item gjson.Result) bool {
+		mem.forEachArray(input, func(_, item gjson.Result) bool {
 			appendItem(item)
 			return true
 		})
@@ -306,8 +312,13 @@ func (s *OpenAIGatewayService) markOpenAIWSInvalidEncryptedContentLineageFromPay
 	logKey string,
 	accountID int64,
 	turn int,
+	memories ...*wsMaterializer,
 ) {
-	digests := collectOpenAIEncryptedContentDigestsRaw(payload)
+	mem := firstWSMaterializer(memories)
+	digests := collectOpenAIEncryptedContentDigestsRaw(payload, mem)
+	if mem != nil && mem.err != nil {
+		return
+	}
 	if len(digests) == 0 {
 		return
 	}

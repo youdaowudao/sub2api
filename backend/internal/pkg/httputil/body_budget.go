@@ -14,9 +14,10 @@ var ErrRequestBodyMemoryBudget = errors.New("request body memory budget exhauste
 // counts chunks, their contiguous copy, decoded output and the decoder window;
 // it is not a bound on the application's total heap or protocol conversion.
 type BodyMemoryBudget struct {
-	mu    sync.Mutex
-	limit int64
-	used  int64
+	mu     sync.Mutex
+	limit  int64
+	used   int64
+	wsUsed int64
 }
 
 func NewBodyMemoryBudget(limit int64) *BodyMemoryBudget {
@@ -28,6 +29,7 @@ type bodyMemoryReservation struct {
 	budget *BodyMemoryBudget
 	bytes  int64
 	closed bool
+	ws     bool
 }
 
 type bodyMemoryReservationKey struct{}
@@ -57,7 +59,7 @@ func WithRequestBodyMemoryScope(ctx context.Context) (context.Context, func()) {
 	parent.mu.Lock()
 	closed := parent.closed
 	parent.mu.Unlock()
-	r := &bodyMemoryReservation{budget: parent.budget, closed: closed}
+	r := &bodyMemoryReservation{budget: parent.budget, closed: closed, ws: parent.ws}
 	return context.WithValue(ctx, bodyMemoryReservationKey{}, r), r.release
 }
 
@@ -94,6 +96,9 @@ func DetachRequestBodyMemory(ctx context.Context, n int64) (context.Context, fun
 		if parent.closed {
 			parent.budget.mu.Lock()
 			parent.budget.used -= moved
+			if parent.ws {
+				parent.budget.wsUsed -= moved
+			}
 			parent.budget.mu.Unlock()
 		} else {
 			parent.bytes += moved
@@ -114,6 +119,9 @@ func (r *bodyMemoryReservation) release() {
 	r.closed = true
 	r.budget.mu.Lock()
 	r.budget.used -= r.bytes
+	if r.ws {
+		r.budget.wsUsed -= r.bytes
+	}
 	r.budget.mu.Unlock()
 	r.bytes = 0
 }
@@ -149,10 +157,13 @@ func reserveBodyMemory(ctx context.Context, n int64) error {
 	}
 	r.budget.mu.Lock()
 	defer r.budget.mu.Unlock()
-	if n > r.budget.limit-r.budget.used {
+	if n > r.budget.limit-r.budget.used || (r.ws && n > r.budget.limit/2-r.budget.wsUsed) {
 		return ErrRequestBodyMemoryBudget
 	}
 	r.budget.used += n
+	if r.ws {
+		r.budget.wsUsed += n
+	}
 	r.bytes += n
 	return nil
 }
@@ -180,6 +191,9 @@ func releaseRequestBodyMemory(ctx context.Context, n int64) {
 	n = min(n, r.bytes)
 	r.budget.mu.Lock()
 	r.budget.used -= n
+	if r.ws {
+		r.budget.wsUsed -= n
+	}
 	r.budget.mu.Unlock()
 	r.bytes -= n
 }

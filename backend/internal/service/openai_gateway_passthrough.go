@@ -549,8 +549,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	c *gin.Context,
 	account *Account,
 	body []byte,
-	token string,
+	token string, memories ...*wsMaterializer,
 ) (*http.Request, error) {
+	wsMem := firstWSMaterializer(memories)
 	targetURL := openaiPlatformAPIURL
 	switch account.Type {
 	case AccountTypeOAuth:
@@ -575,7 +576,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
 
 	// DeepSeek / Kimi 原生 Responses 端点为无状态实现（见 normalizeDeepSeekResponsesRequestBody）。
-	body = normalizeDeepSeekResponsesRequestBody(account, body)
+	body = normalizeDeepSeekResponsesRequestBody(account, body, wsMem)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {

@@ -517,8 +517,10 @@ func trimGrokInvalidEncryptedContentRetryBody(body []byte) ([]byte, bool, error)
 	return retryBody, true, nil
 }
 
-func patchGrokResponsesBody(body []byte, upstreamModel string) ([]byte, error) {
-	return patchGrokResponsesBodyBase(body, upstreamModel)
+func patchGrokResponsesBody(body []byte, upstreamModel string, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	return patchGrokResponsesBodyBase(body, upstreamModel, wsMem)
 }
 
 func patchGrokResponsesBodyWithClientTools(body []byte, upstreamModel string) ([]byte, apicompat.ResponsesClientToolMapping, error) {
@@ -540,27 +542,32 @@ func patchGrokResponsesBodyWithClientTools(body []byte, upstreamModel string) ([
 	return patched, mapping, nil
 }
 
-func patchGrokResponsesBodyBase(body []byte, upstreamModel string) ([]byte, error) {
+func patchGrokResponsesBodyBase(body []byte, upstreamModel string, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if !json.Valid(body) {
 		return nil, fmt.Errorf("invalid json request body")
 	}
 	// sjson may reuse the input backing array; keep the caller's request bytes
 	// unchanged because the same body can be inspected for billing/retry paths.
-	out, err := sjson.SetBytes(append([]byte(nil), body...), "model", upstreamModel)
+	if wsMem == nil {
+		body = append([]byte(nil), body...)
+	}
+	out, err := wsMem.set(body, "model", upstreamModel)
 	if err != nil {
 		return nil, err
 	}
-	out, err = normalizeGrokResponsesReasoningEffort(out, upstreamModel)
+	out, err = normalizeGrokResponsesReasoningEffort(out, upstreamModel, wsMem)
 	if err != nil {
 		return nil, err
 	}
-	out, err = sanitizeGrokResponsesModelCapabilities(out, upstreamModel)
+	out, err = sanitizeGrokResponsesModelCapabilities(out, upstreamModel, wsMem)
 	if err != nil {
 		return nil, err
 	}
 	for _, unsupportedField := range []string{"prompt_cache_retention", "safety_identifier", "metadata"} {
-		if gjson.GetBytes(out, unsupportedField).Exists() {
-			out, err = sjson.DeleteBytes(out, unsupportedField)
+		if wsMem.get(out, unsupportedField).Exists() {
+			out, err = wsMem.delete(out, unsupportedField)
 			if err != nil {
 				return nil, err
 			}
@@ -568,8 +575,8 @@ func patchGrokResponsesBodyBase(body []byte, upstreamModel string) ([]byte, erro
 	}
 	if strings.EqualFold(upstreamModel, "grok-4.5") {
 		for _, unsupportedField := range []string{"presence_penalty", "presencePenalty", "frequency_penalty", "frequencyPenalty", "stop"} {
-			if gjson.GetBytes(out, unsupportedField).Exists() {
-				out, err = sjson.DeleteBytes(out, unsupportedField)
+			if wsMem.get(out, unsupportedField).Exists() {
+				out, err = wsMem.delete(out, unsupportedField)
 				if err != nil {
 					return nil, err
 				}
@@ -578,8 +585,8 @@ func patchGrokResponsesBodyBase(body []byte, upstreamModel string) ([]byte, erro
 	}
 	if grokModelRejectsLogprobs(upstreamModel) {
 		for _, unsupportedField := range []string{"logprobs", "top_logprobs"} {
-			if gjson.GetBytes(out, unsupportedField).Exists() {
-				out, err = sjson.DeleteBytes(out, unsupportedField)
+			if wsMem.get(out, unsupportedField).Exists() {
+				out, err = wsMem.delete(out, unsupportedField)
 				if err != nil {
 					return nil, err
 				}
@@ -590,27 +597,27 @@ func patchGrokResponsesBodyBase(body []byte, upstreamModel string) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	out, err = convertOpenAICompactInputsForGrok(out)
+	out, err = convertOpenAICompactInputsForGrok(out, wsMem)
 	if err != nil {
 		return nil, err
 	}
-	out, err = sanitizeGrokResponsesInput(out)
+	out, err = sanitizeGrokResponsesInput(out, wsMem)
 	if err != nil {
 		return nil, err
 	}
-	out, err = sanitizeGrokResponsesModelInput(out)
+	out, err = sanitizeGrokResponsesModelInput(out, wsMem)
 	if err != nil {
 		return nil, err
 	}
-	out, err = stripRedundantGrokViewImageTool(out)
+	out, err = stripRedundantGrokViewImageTool(out, wsMem)
 	if err != nil {
 		return nil, err
 	}
-	out, err = sanitizeGrokReasoningNullContent(out)
+	out, err = sanitizeGrokReasoningNullContent(out, wsMem)
 	if err != nil {
 		return nil, err
 	}
-	out, err = sanitizeGrokResponsesTools(out)
+	out, err = sanitizeGrokResponsesTools(out, wsMem)
 	if err != nil {
 		return nil, err
 	}
@@ -628,18 +635,20 @@ func grokModelRejectsLogprobs(model string) bool {
 	return strings.HasPrefix(model, "grok-4.20")
 }
 
-func sanitizeGrokResponsesModelCapabilities(body []byte, upstreamModel string) ([]byte, error) {
+func sanitizeGrokResponsesModelCapabilities(body []byte, upstreamModel string, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if !grokModelRejectsReasoningEffort(upstreamModel) {
 		return body, nil
 	}
 
 	out := body
 	for _, field := range []string{"reasoning", "reasoning_effort", "reasoningEffort"} {
-		if !gjson.GetBytes(out, field).Exists() {
+		if !wsMem.get(out, field).Exists() {
 			continue
 		}
 		var err error
-		out, err = sjson.DeleteBytes(out, field)
+		out, err = wsMem.delete(out, field)
 		if err != nil {
 			return nil, fmt.Errorf("remove unsupported Grok Composer %s: %w", field, err)
 		}
@@ -660,40 +669,42 @@ func grokModelRejectsReasoningEffort(model string) bool {
 	}
 }
 
-func normalizeGrokResponsesReasoningEffort(body []byte, upstreamModel string) ([]byte, error) {
+func normalizeGrokResponsesReasoningEffort(body []byte, upstreamModel string, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	supportsEffort := grokSupportsReasoningEffort(upstreamModel)
 	out := body
 	var err error
 	for _, field := range []string{"reasoning.effort", "reasoning_effort"} {
-		value := gjson.GetBytes(out, field)
+		value := wsMem.get(out, field)
 		if !value.Exists() {
 			continue
 		}
 		normalized, keep := normalizeGrokReasoningEffortValue(value.String(), upstreamModel)
 		if !supportsEffort || !keep {
-			out, err = sjson.DeleteBytes(out, field)
+			out, err = wsMem.delete(out, field)
 		} else {
-			out, err = sjson.SetBytes(out, field, normalized)
+			out, err = wsMem.set(out, field, normalized)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("normalize Grok reasoning field %s: %w", field, err)
 		}
 	}
-	if camel := gjson.GetBytes(out, "reasoningEffort"); camel.Exists() {
+	if camel := wsMem.get(out, "reasoningEffort"); camel.Exists() {
 		normalized, keep := normalizeGrokReasoningEffortValue(camel.String(), upstreamModel)
-		out, err = sjson.DeleteBytes(out, "reasoningEffort")
+		out, err = wsMem.delete(out, "reasoningEffort")
 		if err != nil {
 			return nil, fmt.Errorf("remove Grok reasoningEffort: %w", err)
 		}
-		if supportsEffort && keep && !gjson.GetBytes(out, "reasoning_effort").Exists() {
-			out, err = sjson.SetBytes(out, "reasoning_effort", normalized)
+		if supportsEffort && keep && !wsMem.get(out, "reasoning_effort").Exists() {
+			out, err = wsMem.set(out, "reasoning_effort", normalized)
 			if err != nil {
 				return nil, fmt.Errorf("set Grok reasoning_effort: %w", err)
 			}
 		}
 	}
-	if reasoning := gjson.GetBytes(out, "reasoning"); reasoning.Exists() && reasoning.IsObject() && len(reasoning.Map()) == 0 {
-		out, err = sjson.DeleteBytes(out, "reasoning")
+	if reasoning := wsMem.get(out, "reasoning"); reasoning.Exists() && reasoning.IsObject() && len(reasoning.Map()) == 0 {
+		out, err = wsMem.delete(out, "reasoning")
 		if err != nil {
 			return nil, fmt.Errorf("remove empty Grok reasoning: %w", err)
 		}
@@ -825,42 +836,44 @@ func deleteJSONFields(value any, fields map[string]struct{}) bool {
 // Responses schema rejects the carrier itself, but accepts supported tools at
 // the top level. Preserve top-level order, append newly discovered tools in
 // carrier order, then let sanitizeGrokResponsesTools filter unsupported types.
-func sanitizeGrokResponsesInput(body []byte) ([]byte, error) {
+func sanitizeGrokResponsesInput(body []byte, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if !bytes.Contains(body, []byte(`"additional_tools"`)) {
 		return body, nil
 	}
-	input := gjson.GetBytes(body, "input")
+	input := wsMem.get(body, "input")
 	if !input.Exists() || !input.IsArray() {
 		return body, nil
 	}
 
-	rawItems := input.Array()
+	rawItems := wsMem.array(input)
 	filtered := make([]json.RawMessage, 0, len(rawItems))
-	topLevelTools := gjson.GetBytes(body, "tools")
+	topLevelTools := wsMem.get(body, "tools")
 	mergedTools := make([]json.RawMessage, 0)
 	seenTools := make(map[string]struct{})
 	appendTool := func(tool gjson.Result) bool {
-		key := grokResponsesToolDedupKey(tool)
+		key := grokResponsesToolDedupKey(tool, wsMem)
 		if _, exists := seenTools[key]; exists {
 			return false
 		}
 		seenTools[key] = struct{}{}
-		mergedTools = append(mergedTools, json.RawMessage(tool.Raw))
+		mergedTools = append(mergedTools, json.RawMessage(wsMem.rawView(tool.Raw)))
 		return true
 	}
 	if topLevelTools.IsArray() {
-		for _, tool := range topLevelTools.Array() {
-			seenTools[grokResponsesToolDedupKey(tool)] = struct{}{}
-			mergedTools = append(mergedTools, json.RawMessage(tool.Raw))
+		for _, tool := range wsMem.array(topLevelTools) {
+			seenTools[grokResponsesToolDedupKey(tool, wsMem)] = struct{}{}
+			mergedTools = append(mergedTools, json.RawMessage(wsMem.rawView(tool.Raw)))
 		}
 	}
 
 	promoted := false
 	for _, item := range rawItems {
-		if strings.TrimSpace(item.Get("type").String()) == "additional_tools" {
-			tools := item.Get("tools")
+		if strings.TrimSpace(wsMem.resultGet(item, "type").String()) == "additional_tools" {
+			tools := wsMem.resultGet(item, "tools")
 			if tools.IsArray() {
-				for _, tool := range tools.Array() {
+				for _, tool := range wsMem.array(tools) {
 					if appendTool(tool) {
 						promoted = true
 					}
@@ -868,68 +881,70 @@ func sanitizeGrokResponsesInput(body []byte) ([]byte, error) {
 			}
 			continue
 		}
-		filtered = append(filtered, json.RawMessage(item.Raw))
+		filtered = append(filtered, json.RawMessage(wsMem.rawView(item.Raw)))
 	}
 	if len(filtered) == len(rawItems) {
 		return body, nil
 	}
-	encoded, err := json.Marshal(filtered)
+	encoded, err := wsMem.marshal(filtered)
 	if err != nil {
 		return nil, err
 	}
-	body, err = sjson.SetRawBytes(body, "input", encoded)
+	body, err = wsMem.setRaw(body, "input", encoded)
 	if err != nil || !promoted {
 		return body, err
 	}
-	encodedTools, err := json.Marshal(mergedTools)
+	encodedTools, err := wsMem.marshal(mergedTools)
 	if err != nil {
 		return nil, err
 	}
-	return sjson.SetRawBytes(body, "tools", encodedTools)
+	return wsMem.setRaw(body, "tools", encodedTools)
 }
 
 // An inline input_image is already visible to Grok. Keeping Codex's local
 // view_image tool in the same turn can make Grok announce a tool call without
 // actually calling it, so remove only that redundant automatic choice.
-func stripRedundantGrokViewImageTool(body []byte) ([]byte, error) {
-	input := gjson.GetBytes(body, "input")
+func stripRedundantGrokViewImageTool(body []byte, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	input := wsMem.get(body, "input")
 	if !input.IsArray() {
 		return body, nil
 	}
-	items := input.Array()
+	items := wsMem.array(input)
 	if len(items) == 0 {
 		return body, nil
 	}
 	current := items[len(items)-1]
-	if strings.TrimSpace(current.Get("role").String()) != "user" ||
+	if strings.TrimSpace(wsMem.resultGet(current, "role").String()) != "user" ||
 		!openAIJSONValueMayContainImageInput(current) {
 		return body, nil
 	}
 
-	toolChoice := gjson.GetBytes(body, "tool_choice")
-	if toolChoice.IsObject() && strings.TrimSpace(toolChoice.Get("type").String()) == "function" {
-		choiceName := strings.TrimSpace(toolChoice.Get("name").String())
+	toolChoice := wsMem.get(body, "tool_choice")
+	if toolChoice.IsObject() && strings.TrimSpace(wsMem.resultGet(toolChoice, "type").String()) == "function" {
+		choiceName := strings.TrimSpace(wsMem.resultGet(toolChoice, "name").String())
 		if choiceName == "" {
-			choiceName = strings.TrimSpace(toolChoice.Get("function.name").String())
+			choiceName = strings.TrimSpace(wsMem.resultGet(toolChoice, "function.name").String())
 		}
 		if choiceName == "view_image" {
 			return body, nil
 		}
 	}
 
-	tools := gjson.GetBytes(body, "tools")
+	tools := wsMem.get(body, "tools")
 	if !tools.IsArray() {
 		return body, nil
 	}
-	filtered := make([]json.RawMessage, 0, len(tools.Array()))
+	filtered := make([]json.RawMessage, 0, len(wsMem.array(tools)))
 	changed := false
-	for _, tool := range tools.Array() {
-		if strings.TrimSpace(tool.Get("type").String()) == "function" &&
-			strings.TrimSpace(tool.Get("name").String()) == "view_image" {
+	for _, tool := range wsMem.array(tools) {
+		if strings.TrimSpace(wsMem.resultGet(tool, "type").String()) == "function" &&
+			strings.TrimSpace(wsMem.resultGet(tool, "name").String()) == "view_image" {
 			changed = true
 			continue
 		}
-		filtered = append(filtered, json.RawMessage(tool.Raw))
+		filtered = append(filtered, json.RawMessage(wsMem.rawView(tool.Raw)))
 	}
 	if !changed {
 		return body, nil
@@ -939,38 +954,42 @@ func stripRedundantGrokViewImageTool(body []byte) ([]byte, error) {
 	}
 
 	if len(filtered) == 0 {
-		out, err := sjson.DeleteBytes(body, "tools")
+		out, err := wsMem.delete(body, "tools")
 		if err != nil {
 			return nil, err
 		}
-		return sjson.DeleteBytes(out, "parallel_tool_calls")
+		return wsMem.delete(out, "parallel_tool_calls")
 	}
-	encoded, err := json.Marshal(filtered)
+	encoded, err := wsMem.marshal(filtered)
 	if err != nil {
 		return nil, err
 	}
-	return sjson.SetRawBytes(body, "tools", encoded)
+	return wsMem.setRaw(body, "tools", encoded)
 }
-func grokResponsesToolDedupKey(tool gjson.Result) string {
-	toolType := strings.TrimSpace(tool.Get("type").String())
+func grokResponsesToolDedupKey(tool gjson.Result, memories ...*wsMaterializer) string {
+	wsMem := firstWSMaterializer(memories)
+
+	toolType := strings.TrimSpace(wsMem.resultGet(tool, "type").String())
 	if toolType != "" {
-		if name := strings.TrimSpace(tool.Get("name").String()); name != "" {
+		if name := strings.TrimSpace(wsMem.resultGet(tool, "name").String()); name != "" {
 			return "type:" + toolType + "\x00name:" + name
 		}
 		if toolType == "mcp" {
-			if label := strings.TrimSpace(tool.Get("server_label").String()); label != "" {
+			if label := strings.TrimSpace(wsMem.resultGet(tool, "server_label").String()); label != "" {
 				return "type:mcp\x00server_label:" + label
 			}
 		}
 	}
-	return "json:" + normalizeCompatSeedJSON(json.RawMessage(tool.Raw))
+	return "json:" + normalizeCompatSeedJSON(json.RawMessage(wsMem.rawView(tool.Raw)), wsMem)
 }
 
 // sanitizeGrokReasoningNullContent drops explicit JSON nulls from Responses
 // input items. xAI's untagged ModelInput decoder 422s on those fields.
 // Compaction items stay unmodified per the compact contract.
-func sanitizeGrokReasoningNullContent(body []byte) ([]byte, error) {
-	input := gjson.GetBytes(body, "input")
+func sanitizeGrokReasoningNullContent(body []byte, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	input := wsMem.get(body, "input")
 	if !input.Exists() || (!input.IsArray() && !input.IsObject()) {
 		return body, nil
 	}
@@ -990,7 +1009,7 @@ func sanitizeGrokReasoningNullContent(body []byte) ([]byte, error) {
 		return body, nil
 	}
 	decoded["input"] = cleaned
-	out, err := marshalOpenAIUpstreamJSON(decoded)
+	out, err := wsMem.encode(decoded)
 	if err != nil {
 		return nil, err
 	}
@@ -1074,49 +1093,51 @@ var grokResponsesSupportedToolTypes = map[string]struct{}{
 
 const grokSafeFunctionParameters = `{"type":"object","properties":{},"additionalProperties":true}`
 
-func sanitizeGrokResponsesTools(body []byte) ([]byte, error) {
-	tools := gjson.GetBytes(body, "tools")
+func sanitizeGrokResponsesTools(body []byte, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	tools := wsMem.get(body, "tools")
 	if !tools.Exists() {
-		return deleteGrokOrphanToolControls(body)
+		return deleteGrokOrphanToolControls(body, wsMem)
 	}
 	if !tools.IsArray() {
 		// xAI rejects tool_choice when tools is null/object. Drop the malformed
 		// collection and any orphan tool controls instead of forwarding a pair
 		// the Grok Responses endpoint cannot interpret.
-		body, err := sjson.DeleteBytes(body, "tools")
+		body, err := wsMem.delete(body, "tools")
 		if err != nil {
 			return nil, err
 		}
-		return deleteGrokOrphanToolControls(body)
+		return deleteGrokOrphanToolControls(body, wsMem)
 	}
 
-	rawTools := tools.Array()
+	rawTools := wsMem.array(tools)
 	filteredTools := make([]json.RawMessage, 0, len(rawTools))
 	toolsChanged := false
 	for _, tool := range rawTools {
-		toolType := strings.TrimSpace(tool.Get("type").String())
+		toolType := strings.TrimSpace(wsMem.resultGet(tool, "type").String())
 		if _, ok := grokResponsesSupportedToolTypes[toolType]; ok {
-			raw := json.RawMessage(tool.Raw)
-			if toolType == "function" && (!tool.Get("parameters").Exists() || tool.Get("parameters").Type == gjson.Null) {
+			raw := json.RawMessage(wsMem.rawView(tool.Raw))
+			if toolType == "function" && (!wsMem.resultGet(tool, "parameters").Exists() || wsMem.resultGet(tool, "parameters").Type == gjson.Null) {
 				var payload map[string]any
-				if err := decodeOpenAIJSONUseNumber(raw, &payload); err != nil {
+				if err := wsMem.decode(raw, &payload); err != nil {
 					return nil, err
 				}
 				payload["parameters"] = map[string]any{"type": "object", "properties": map[string]any{}}
-				encoded, err := marshalOpenAIUpstreamJSON(payload)
+				encoded, err := wsMem.encode(payload)
 				if err != nil {
 					return nil, err
 				}
 				raw = encoded
 				toolsChanged = true
-			} else if toolType == "function" && grokFunctionParametersHaveInvalidUnionRoot(tool.Get("parameters")) {
+			} else if toolType == "function" && grokFunctionParametersHaveInvalidUnionRoot(wsMem.resultGet(tool, "parameters"), wsMem) {
 				var err error
-				raw, err = sjson.SetRawBytes(raw, "parameters", []byte(grokSafeFunctionParameters))
+				raw, err = wsMem.setRaw(raw, "parameters", []byte(grokSafeFunctionParameters))
 				if err != nil {
 					return nil, err
 				}
-				if strict := tool.Get("strict"); strict.Exists() && strict.Bool() {
-					raw, err = sjson.SetBytes(raw, "strict", false)
+				if strict := wsMem.resultGet(tool, "strict"); strict.Exists() && strict.Bool() {
+					raw, err = wsMem.set(raw, "strict", false)
 					if err != nil {
 						return nil, err
 					}
@@ -1128,10 +1149,10 @@ func sanitizeGrokResponsesTools(body []byte) ([]byte, error) {
 	}
 	if !grokRawToolsContainType(filteredTools, "tool_search") {
 		for index, raw := range filteredTools {
-			if !gjson.GetBytes(raw, "defer_loading").Exists() {
+			if !wsMem.get(raw, "defer_loading").Exists() {
 				continue
 			}
-			cleaned, deleteErr := sjson.DeleteBytes(raw, "defer_loading")
+			cleaned, deleteErr := wsMem.delete(raw, "defer_loading")
 			if deleteErr != nil {
 				return nil, deleteErr
 			}
@@ -1143,29 +1164,29 @@ func sanitizeGrokResponsesTools(body []byte) ([]byte, error) {
 	var err error
 	if len(filteredTools) != len(rawTools) || toolsChanged {
 		if len(filteredTools) == 0 {
-			body, err = sjson.DeleteBytes(body, "tools")
+			body, err = wsMem.delete(body, "tools")
 		} else {
 			var encoded []byte
-			encoded, err = json.Marshal(filteredTools)
+			encoded, err = wsMem.marshal(filteredTools)
 			if err != nil {
 				return nil, err
 			}
-			body, err = sjson.SetRawBytes(body, "tools", encoded)
+			body, err = wsMem.setRaw(body, "tools", encoded)
 		}
 		if err != nil {
 			return nil, err
 		}
 	}
 	if len(filteredTools) == 0 {
-		return deleteGrokOrphanToolControls(body)
+		return deleteGrokOrphanToolControls(body, wsMem)
 	}
 
-	toolChoice := gjson.GetBytes(body, "tool_choice")
+	toolChoice := wsMem.get(body, "tool_choice")
 	if !toolChoice.Exists() {
 		return body, nil
 	}
-	if shouldDropGrokToolChoice(toolChoice, filteredTools) {
-		body, err = sjson.DeleteBytes(body, "tool_choice")
+	if shouldDropGrokToolChoice(toolChoice, filteredTools, wsMem) {
+		body, err = wsMem.delete(body, "tool_choice")
 		if err != nil {
 			return nil, err
 		}
@@ -1173,21 +1194,22 @@ func sanitizeGrokResponsesTools(body []byte) ([]byte, error) {
 	return body, nil
 }
 
-func grokFunctionParametersHaveInvalidUnionRoot(parameters gjson.Result) bool {
+func grokFunctionParametersHaveInvalidUnionRoot(parameters gjson.Result, memories ...*wsMaterializer) bool {
+	mem := firstWSMaterializer(memories)
 	if !parameters.Exists() || !parameters.IsObject() {
 		return false
 	}
 	for _, keyword := range []string{"anyOf", "oneOf"} {
-		branches := parameters.Get(keyword)
+		branches := mem.resultGet(parameters, keyword)
 		if !branches.IsArray() {
 			continue
 		}
-		values := branches.Array()
+		values := mem.array(branches)
 		if len(values) == 0 {
 			continue
 		}
 		for _, branch := range values {
-			if !strings.EqualFold(strings.TrimSpace(branch.Get("type").String()), "object") {
+			if !strings.EqualFold(strings.TrimSpace(mem.resultGet(branch, "type").String()), "object") {
 				return true
 			}
 		}
@@ -1204,13 +1226,15 @@ func grokRawToolsContainType(tools []json.RawMessage, want string) bool {
 	return false
 }
 
-func deleteGrokOrphanToolControls(body []byte) ([]byte, error) {
+func deleteGrokOrphanToolControls(body []byte, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	var err error
 	for _, field := range []string{"tool_choice", "parallel_tool_calls"} {
-		if !gjson.GetBytes(body, field).Exists() {
+		if !wsMem.get(body, field).Exists() {
 			continue
 		}
-		body, err = sjson.DeleteBytes(body, field)
+		body, err = wsMem.delete(body, field)
 		if err != nil {
 			return nil, err
 		}
@@ -1218,14 +1242,16 @@ func deleteGrokOrphanToolControls(body []byte) ([]byte, error) {
 	return body, nil
 }
 
-func shouldDropGrokToolChoice(toolChoice gjson.Result, tools []json.RawMessage) bool {
+func shouldDropGrokToolChoice(toolChoice gjson.Result, tools []json.RawMessage, memories ...*wsMaterializer) bool {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(tools) == 0 {
 		return true
 	}
 	if !toolChoice.IsObject() {
 		return false
 	}
-	choiceType := strings.TrimSpace(toolChoice.Get("type").String())
+	choiceType := strings.TrimSpace(wsMem.resultGet(toolChoice, "type").String())
 	if choiceType == "" {
 		return false
 	}
@@ -1233,9 +1259,9 @@ func shouldDropGrokToolChoice(toolChoice gjson.Result, tools []json.RawMessage) 
 		return true
 	}
 	if choiceType == "function" {
-		choiceName := strings.TrimSpace(toolChoice.Get("name").String())
+		choiceName := strings.TrimSpace(wsMem.resultGet(toolChoice, "name").String())
 		if choiceName == "" {
-			choiceName = strings.TrimSpace(toolChoice.Get("function.name").String())
+			choiceName = strings.TrimSpace(wsMem.resultGet(toolChoice, "function.name").String())
 		}
 		if choiceName == "" {
 			return false
@@ -1248,7 +1274,7 @@ func shouldDropGrokToolChoice(toolChoice gjson.Result, tools []json.RawMessage) 
 					Name string `json:"name"`
 				} `json:"function"`
 			}
-			if err := json.Unmarshal(tool, &item); err != nil {
+			if err := wsMem.unmarshal(tool, &item); err != nil {
 				continue
 			}
 			name := strings.TrimSpace(item.Name)

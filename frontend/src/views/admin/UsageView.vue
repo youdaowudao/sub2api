@@ -749,7 +749,7 @@ const exportToExcel = async () => {
     const frozenParams = buildUsageListParams(1, 100, true)
     const XLSX = await import('xlsx')
     const headers = [
-      t('usage.time'), t('admin.usage.user'), t('usage.apiKeyFilter'),
+      t('usage.time'), t('admin.usage.user'), t('admin.usage.username'), t('usage.apiKeyFilter'),
       t('admin.usage.account'), t('usage.requestedModel'), t('usage.sentUpstreamModel'), t('usage.upstreamResponseModel'), t('usage.upstreamModelMismatch'), t('usage.requestedReasoningEffort'), t('usage.reasoningEffort'), t('admin.usage.group'),
       t('usage.inboundEndpoint'), t('usage.upstreamEndpoint'),
       t('usage.type'),
@@ -769,7 +769,7 @@ const exportToExcel = async () => {
       )
       if (c.signal.aborted) break; if (p === 1) { total = res.total; exportProgress.total = total }
       const rows = (res.items || []).map((log: AdminUsageLog) => [
-        log.created_at, log.user?.email || '', log.api_key?.name || '', log.account?.name || '', log.model,
+        log.created_at, log.user?.email || '', log.user?.username?.trim() || '', log.api_key?.name || '', log.account?.name || '', log.model,
         log.upstream_model || log.model, log.upstream_response_model || '', log.upstream_model_mismatch == null ? '' : t(log.upstream_model_mismatch ? 'common.yes' : 'common.no'), formatReasoningEffort(log.reasoning_effort), formatReasoningEffort(log.upstream_reasoning_effort || log.reasoning_effort), log.group?.name || '',
         log.inbound_endpoint || '', log.upstream_endpoint || '', getRequestTypeLabel(log),
         log.input_tokens, log.output_tokens, log.cache_read_tokens, log.cache_creation_tokens,
@@ -809,6 +809,7 @@ const HIDDEN_COLUMNS_CURRENT_VERSION = 'upstream-request-id-hidden-by-default'
 
 const allColumns = computed(() => [
   { key: 'user', label: t('admin.usage.user'), sortable: false },
+  { key: 'username', label: t('admin.usage.username'), sortable: false },
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
   { key: 'account', label: t('admin.usage.account'), sortable: false },
   { key: 'model', label: t('usage.model'), sortable: true },
@@ -1107,12 +1108,39 @@ const handleColumnClickOutside = (event: MouseEvent) => {
   }
 }
 
-onMounted(() => {
+// 从仪表盘排行、订阅等页面带筛选条件跳转进来时，不套用默认分组，避免只看到默认分组内的数据
+const routeFilterKeys = ['user_id', ...restoredStringFilters, ...restoredNumberFilters, ...restoredBooleanFilters] as const
+const initializeDefaultGroup = () => {
+  if (routeFilterKeys.some(key => route.query[key] !== undefined)) return
+  let groupId: number
+  try {
+    const value = JSON.parse(localStorage.getItem('account-filter-values') ?? 'null')?.default_group
+    if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return
+    groupId = Number(value)
+  } catch {
+    return
+  }
+  const initialFilters = filters.value
+  const initialGroup = initialFilters.group_id
+  const initialUsageFilters = usageFiltersRef.value
+  return initialUsageFilters?.waitForGroups?.().then(groups => {
+    if (usageFiltersRef.value === initialUsageFilters && filters.value === initialFilters && filters.value.group_id === initialGroup && groups.some(group => group.id === groupId)) {
+      filters.value.group_id = groupId
+    }
+  })
+}
+
+onMounted(async () => {
   applyRouteQueryFilters()
   void loadRouteUserFilterLabel()
   loadSavedColumns()
   if (!errorVisibleColumnKeys.value.includes(errorSortBy.value === 'status_code' ? 'status' : errorSortBy.value)) { errorSortBy.value = 'created_at'; errorSortOrder.value = 'desc'; saveRecordPreference('admin-usage-', 'errors-sort', {sort_by: 'created_at',sort_order: 'desc'}) }
   if (!visibleColumns.value.some(col => col.key === sortState.sort_by)) { sortState.sort_by = 'created_at'; sortState.sort_order = 'desc'; saveRecordPreference('admin-usage-', 'usage-sort', {...sortState}) }
+  const defaultGroupInitialization = initializeDefaultGroup()
+  if (defaultGroupInitialization) {
+    await defaultGroupInitialization
+    if (!usageFiltersRef.value) return
+  }
   loadLogs()
   loadStats()
   loadModelStats(modelDistributionSource.value, true)

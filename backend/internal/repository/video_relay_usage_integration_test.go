@@ -28,7 +28,7 @@ func TestVideoRelayRepoUsageRecoversOwnedChargedTask(t *testing.T) {
 	_, _, err = repo.Settle(ctx, accepted, service.VideoRelaySettlement{Completed: true})
 	require.NoError(t, err)
 	apiKeys := NewAPIKeyRepository(testEntClient(t), integrationDB)
-	usage := handler.NewUsageHandler(service.NewUsageService(NewUsageLogRepository(testEntClient(t), integrationDB), nil, nil, nil), nil, nil, nil)
+	usage := handler.NewUsageHandler(service.NewUsageService(NewUsageLogRepository(testEntClient(t), integrationDB), nil, nil, nil), nil, nil, nil, nil)
 	read := func(userID int64) string {
 		t.Helper()
 		router := gin.New()

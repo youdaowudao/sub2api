@@ -35,7 +35,7 @@ vi.mock('@/api/admin', () => ({
       toggleSchedulable: vi.fn()
     },
     proxies: {
-      getAll: getAllProxies
+      getAllWithCount: getAllProxies
     },
     groups: {
       getAll: getAllGroups
@@ -150,6 +150,7 @@ function mountView() {
 describe('account cache rate column', () => {
   beforeEach(() => {
     localStorage.clear(); vi.clearAllMocks()
+    localStorage.setItem('account-table-sort-v2', JSON.stringify({ key: 'name', order: 'asc' }))
     period.start = period.end = '2026-10-26'
     listAccounts.mockResolvedValue({ items: [{ id: 7, name: 'Fixture', platform: 'anthropic', type: 'apikey', status: 'active', credentials: {}, extra: {}, groups: [] }], total: 1, page: 1, page_size: 20, pages: 1 })
     listWithEtag.mockResolvedValue({ notModified: true, etag: null, data: null })
@@ -158,6 +159,7 @@ describe('account cache rate column', () => {
   })
   it('loads visible current-page IDs and stops requests while hidden', async () => {
     const wrapper = mountView(); await flushPromises()
+    expect(listAccounts.mock.calls[0]?.[2]).toMatchObject({ sort_by: 'name', sort_order: 'asc' })
     expect((wrapper.vm as any).allColumns.map((c: { key: string }) => c.key)).toContain('cache_hit_rate')
     expect(getCacheHitRate).toHaveBeenCalledWith(expect.objectContaining({ dimension: 'account', account_ids: '7', start_date: '2026-10-26', end_date: '2026-10-26' }))
     expect(wrapper.findComponent(CacheHitRateCell).props('item').cache_hit_rate).toBe(90)

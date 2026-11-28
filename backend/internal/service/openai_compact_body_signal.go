@@ -2,9 +2,12 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -25,15 +28,64 @@ func MarkOpenAINativeCompactionV2(c *gin.Context) {
 
 // NormalizeCompactionTriggerInputOrder keeps a single compaction trigger as
 // the final Responses input item, as required by the upstream v2 wire format.
-func NormalizeCompactionTriggerInputOrder(body []byte) ([]byte, bool, error) {
+func NormalizeCompactionTriggerInputOrder(body []byte, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(body) == 0 {
 		return body, false, nil
 	}
-	if !compactionTriggerNeedsDecode(body) {
+	if !compactionTriggerNeedsDecode(body, wsMem) {
 		return body, false, nil
 	}
+	// WS keeps the existing budgeted decoder and its reservation ownership.
+	if wsMem != nil {
+		return normalizeCompactionTriggerInputOrderDecoded(body, wsMem)
+	}
+	// 直接读取历史项的类型，让普通长会话和图片请求复用原始字节。
+	// 重复键与异常输入沿用完整解码的既有语义。
+	root := parseRawJSONView(body)
+	if !json.Valid(body) || !utf8.Valid(body) || !root.IsObject() || hasDuplicateJSONObjectKeys(root) {
+		return normalizeCompactionTriggerInputOrderDecoded(body, wsMem)
+	}
+	input := root.Get("input")
+	if !input.IsArray() {
+		return body, false, nil
+	}
+	items := make([]string, 0)
+	triggerCount := 0
+	lastIsTrigger := false
+	duplicateKeys := false
+	input.ForEach(func(_, item gjson.Result) bool {
+		if item.IsObject() && hasDuplicateJSONObjectKeys(item) {
+			duplicateKeys = true
+			return false
+		}
+		typ := item.Get("type")
+		lastIsTrigger = item.IsObject() && typ.Type == gjson.String && typ.Str == "compaction_trigger"
+		if lastIsTrigger {
+			triggerCount++
+		} else {
+			items = append(items, item.Raw)
+		}
+		return true
+	})
+	if duplicateKeys {
+		return normalizeCompactionTriggerInputOrderDecoded(body, wsMem)
+	}
+	if triggerCount == 0 || (triggerCount == 1 && lastIsTrigger) {
+		return body, false, nil
+	}
+	// 重排前核对所有嵌套对象，使输出继续采用完整解码的末值语义。
+	if _, conflict := requestmodel.ConflictingField("application/json", body); conflict {
+		return normalizeCompactionTriggerInputOrderDecoded(body, wsMem)
+	}
+	items = append(items, `{"type":"compaction_trigger"}`)
+	return replaceOpenAIRawInput(body, input, items), true, nil
+}
+
+func normalizeCompactionTriggerInputOrderDecoded(body []byte, wsMem *wsMaterializer) ([]byte, bool, error) {
 	var payload map[string]any
-	if err := decodeOpenAIJSONUseNumber(body, &payload); err != nil {
+	if err := wsMem.decode(body, &payload); err != nil {
 		return body, false, err
 	}
 	input, ok := payload["input"].([]any)
@@ -60,7 +112,7 @@ func NormalizeCompactionTriggerInputOrder(body []byte) ([]byte, bool, error) {
 	}
 	normalized = append(normalized, map[string]any{"type": "compaction_trigger"})
 	payload["input"] = normalized
-	encoded, err := marshalOpenAIUpstreamJSON(payload)
+	encoded, err := wsMem.encode(payload)
 	if err != nil {
 		return body, false, err
 	}
@@ -79,7 +131,8 @@ var compactionTriggerToken = []byte("compaction_trigger")
 //
 // Either way the body is returned unchanged. Such a body must still be a valid
 // JSON object, so decode errors keep surfacing from the original path.
-func compactionTriggerNeedsDecode(body []byte) bool {
+func compactionTriggerNeedsDecode(body []byte, memories ...*wsMaterializer) bool {
+	mem := firstWSMaterializer(memories)
 	if JSONMayEscapePlainASCII(body) {
 		return true
 	}
@@ -88,7 +141,7 @@ func compactionTriggerNeedsDecode(body []byte) bool {
 		trimmed := bytes.TrimLeft(body, " \t\r\n")
 		return len(trimmed) == 0 || trimmed[0] != '{' || !gjson.ValidBytes(body)
 	case 1:
-		return !compactionTriggerIsLastInputItem(body) || !gjson.ValidBytes(body)
+		return !compactionTriggerIsLastInputItem(body, mem) || !gjson.ValidBytes(body)
 	default:
 		return true
 	}
@@ -96,13 +149,19 @@ func compactionTriggerNeedsDecode(body []byte) bool {
 
 // compactionTriggerIsLastInputItem reports whether the last element of the
 // top-level input array is an object whose type is "compaction_trigger".
-func compactionTriggerIsLastInputItem(body []byte) bool {
-	input := parseRawJSONView(body).Get("input")
+func compactionTriggerIsLastInputItem(body []byte, memories ...*wsMaterializer) bool {
+	mem := firstWSMaterializer(memories)
+	var input gjson.Result
+	if mem == nil {
+		input = parseRawJSONView(body).Get("input")
+	} else {
+		input = mem.get(body, "input")
+	}
 	if !input.IsArray() {
 		return false
 	}
 	var last gjson.Result
-	input.ForEach(func(_, item gjson.Result) bool {
+	mem.forEachArray(input, func(_, item gjson.Result) bool {
 		last = item
 		return true
 	})

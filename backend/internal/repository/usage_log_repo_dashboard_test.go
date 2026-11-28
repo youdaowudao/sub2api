@@ -2,11 +2,15 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -184,4 +188,58 @@ func TestUsageLogRepositoryDashboardTodayAverageDurationFromUsageLogs(t *testing
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}
+}
+
+func TestFillDashboardPerformanceStatsConnectionUsage(t *testing.T) {
+	now := time.Date(2026, 11, 28, 1, 5, 30, 123456000, time.UTC)
+	cols := []string{"request_count", "token_count", "ws_users", "http_users"}
+	for _, tc := range []struct {
+		name   string
+		values []int64
+		err    error
+	}{
+		{name: "counts", values: []int64{17, 43, 5, 6}},
+		{name: "zero", values: []int64{0, 0, 0, 0}},
+		{name: "empty result", err: sql.ErrNoRows},
+		{name: "query error", err: errors.New("query failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, mock, queries := newDashboardSQLRecorder(t)
+			expect := mock.ExpectQuery("global performance").WithArgs(now.Add(-5*time.Minute), now, int16(service.RequestTypeWSV2), int16(service.RequestTypeSync), int16(service.RequestTypeStream))
+			if tc.values != nil {
+				expect.WillReturnRows(sqlmock.NewRows(cols).AddRow(tc.values[0], tc.values[1], tc.values[2], tc.values[3]))
+			} else if errors.Is(tc.err, sql.ErrNoRows) {
+				expect.WillReturnRows(sqlmock.NewRows(cols))
+			} else {
+				expect.WillReturnError(tc.err)
+			}
+			stats := &DashboardStats{}
+			err := repo.fillDashboardPerformanceStats(context.Background(), stats, now)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.Nil(t, stats.ConnectionUsage)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.values[0]/5, stats.Rpm)
+				require.Equal(t, tc.values[1]/5, stats.Tpm)
+				require.Equal(t, &usagestats.DashboardConnectionUsage{WSUsers: tc.values[2], HTTPUsers: tc.values[3], WindowEnd: now.Format(time.RFC3339Nano)}, stats.ConnectionUsage)
+			}
+			require.Len(t, *queries, 1)
+			query := (*queries)[0]
+			require.Contains(t, query, "COUNT(*) as request_count, COALESCE(SUM(input_tokens + output_tokens), 0) as token_count")
+			require.Contains(t, query, "COUNT(DISTINCT user_id) FILTER (WHERE created_at < $2 AND (request_type = $3 OR (request_type = 0 AND openai_ws_mode = TRUE))) as ws_users")
+			require.Contains(t, query, "COUNT(DISTINCT user_id) FILTER (WHERE created_at < $2 AND ((request_type = $4 OR (request_type = 0 AND stream = FALSE AND openai_ws_mode = FALSE)) OR (request_type = $5 OR (request_type = 0 AND stream = TRUE AND openai_ws_mode = FALSE)))) as http_users")
+			require.Contains(t, query, "FROM usage_logs WHERE created_at >= $1")
+		})
+	}
+	t.Run("personal performance unchanged", func(t *testing.T) {
+		repo, mock, queries := newDashboardSQLRecorder(t)
+		mock.ExpectQuery("personal").WithArgs(sqlmock.AnyArg(), int64(77)).WillReturnRows(sqlmock.NewRows(cols[:2]).AddRow(17, 43))
+		rpm, tpm, err := repo.getPerformanceStats(context.Background(), 77)
+		require.NoError(t, err)
+		require.Equal(t, int64(3), rpm)
+		require.Equal(t, int64(8), tpm)
+		require.Len(t, *queries, 1)
+		require.Equal(t, "SELECT COUNT(*) as request_count, COALESCE(SUM(input_tokens + output_tokens), 0) as token_count FROM usage_logs WHERE created_at >= $1 AND user_id = $2", (*queries)[0])
+	})
 }

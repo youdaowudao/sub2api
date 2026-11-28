@@ -13,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 // codexFingerprintIDsContextKey 是暂存在 gin context 的收敛 ID 集合键。
@@ -436,7 +435,9 @@ func applyCodexFingerprintClientMetadata(reqBody map[string]any, ids *codexFinge
 // applyCodexFingerprintToClientMetadataMap 是 client_metadata 改写的共享核心，
 // map 版（非透传，body 已解码）与 raw 字节版（透传热路径）都经由它，保证两条
 // 路径的收敛语义永不漂移。
-func applyCodexFingerprintToClientMetadataMap(existing map[string]any, ids *codexFingerprintIDs) bool {
+func applyCodexFingerprintToClientMetadataMap(existing map[string]any, ids *codexFingerprintIDs, memories ...*wsMaterializer) bool {
+	wsMem := firstWSMaterializer(memories)
+
 	if existing == nil || ids == nil {
 		return false
 	}
@@ -451,7 +452,7 @@ func applyCodexFingerprintToClientMetadataMap(existing map[string]any, ids *code
 	if ids.mode == codexFingerprintDevice {
 		rewriteClientMetadataEmbeddedTurnMetadata(existing, map[string]any{
 			"installation_id": ids.installationID,
-		})
+		}, wsMem)
 		return modified
 	}
 
@@ -468,7 +469,7 @@ func applyCodexFingerprintToClientMetadataMap(existing map[string]any, ids *code
 		"turn_id":                 ids.turnID,
 		"window_id":               ids.windowID,
 		"turn_started_at_unix_ms": ids.turnStartedAtUnixMs,
-	})
+	}, wsMem)
 	return true
 }
 
@@ -532,7 +533,9 @@ func applyCodexFingerprintPromptCacheKey(reqBody map[string]any, ids *codexFinge
 // 其余字节原样保留；root prompt_cache_key 仅在可证明是 body session 默认值时
 // 做标量改写。语义与 applyCodexFingerprintClientMetadata 逐点一致（含
 // "非对象值整体替换为收敛集合"的行为）。
-func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintIDs) ([]byte, bool, error) {
+func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintIDs, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(body) == 0 || ids == nil {
 		return body, false, nil
 	}
@@ -545,9 +548,9 @@ func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintID
 	}
 
 	existing := map[string]any{}
-	if cm := gjson.GetBytes(body, "client_metadata"); cm.IsObject() {
-		captureCodexFingerprintOriginalBodySessionIDRaw(ids, gjson.GetBytes(body, "client_metadata.session_id"))
-		if err := json.Unmarshal([]byte(cm.Raw), &existing); err != nil {
+	if cm := wsMem.get(body, "client_metadata"); cm.IsObject() {
+		captureCodexFingerprintOriginalBodySessionIDRaw(ids, wsMem.get(body, "client_metadata.session_id"))
+		if err := wsMem.unmarshal(wsMem.rawView(cm.Raw), &existing); err != nil {
 			return body, false, fmt.Errorf("decode client_metadata for fingerprint: %w", err)
 		}
 	} else {
@@ -556,21 +559,21 @@ func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintID
 
 	next := body
 	modified := false
-	if applyCodexFingerprintToClientMetadataMap(existing, ids) {
-		raw, err := json.Marshal(existing)
+	if applyCodexFingerprintToClientMetadataMap(existing, ids, wsMem) {
+		raw, err := wsMem.marshal(existing)
 		if err != nil {
 			return body, false, fmt.Errorf("encode converged client_metadata: %w", err)
 		}
 		var setErr error
-		next, setErr = sjson.SetRawBytes(body, "client_metadata", raw)
+		next, setErr = wsMem.setRaw(body, "client_metadata", raw)
 		if setErr != nil {
 			return body, false, fmt.Errorf("splice converged client_metadata: %w", setErr)
 		}
 		modified = true
 	}
-	promptCacheKey := gjson.GetBytes(body, "prompt_cache_key")
+	promptCacheKey := wsMem.get(body, "prompt_cache_key")
 	if promptCacheKey.Exists() && promptCacheKey.Type == gjson.String && strings.TrimSpace(promptCacheKey.String()) != "" && shouldRewriteCodexFingerprintPromptCacheKey(ids, promptCacheKey.String()) {
-		rewritten, err := sjson.SetBytes(next, "prompt_cache_key", ids.sessionID)
+		rewritten, err := wsMem.set(next, "prompt_cache_key", ids.sessionID)
 		if err != nil {
 			return body, false, fmt.Errorf("splice converged prompt_cache_key: %w", err)
 		}
@@ -583,19 +586,21 @@ func applyCodexFingerprintClientMetadataRaw(body []byte, ids *codexFingerprintID
 // rewriteClientMetadataEmbeddedTurnMetadata 改写 client_metadata 中内嵌的
 // x-codex-turn-metadata JSON 字符串里的指定字段。非法/非对象值会重建，
 // 避免 flat client_metadata 与 embedded metadata 暴露两套身份。
-func rewriteClientMetadataEmbeddedTurnMetadata(clientMetadata map[string]any, fields map[string]any) {
+func rewriteClientMetadataEmbeddedTurnMetadata(clientMetadata map[string]any, fields map[string]any, memories ...*wsMaterializer) {
+	wsMem := firstWSMaterializer(memories)
+
 	raw, ok := clientMetadata["x-codex-turn-metadata"].(string)
 	if !ok || raw == "" {
 		return
 	}
 	var metadata map[string]any
-	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || metadata == nil {
+	if err := wsMem.unmarshal(wsMem.rawView(raw), &metadata); err != nil || metadata == nil {
 		metadata = make(map[string]any, len(fields))
 	}
 	for k, v := range fields {
 		metadata[k] = v
 	}
-	if rebuilt, err := marshalCodexTurnMetadata(metadata); err == nil {
-		clientMetadata["x-codex-turn-metadata"] = string(rebuilt)
+	if rebuilt, err := marshalCodexTurnMetadata(metadata, wsMem); err == nil {
+		clientMetadata["x-codex-turn-metadata"] = wsMem.string(rebuilt)
 	}
 }

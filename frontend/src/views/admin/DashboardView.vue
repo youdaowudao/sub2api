@@ -6,7 +6,7 @@
       </div>
 
       <template v-else-if="stats">
-        <div class="grid grid-cols-2 gap-4 lg:grid-cols-5" data-testid="dashboard-overview">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6" data-testid="dashboard-overview">
           <div class="card p-4">
             <div class="flex items-center gap-3">
               <div class="rounded-lg bg-green-100 p-2 dark:bg-green-900/30">
@@ -89,6 +89,26 @@
               </div>
             </div>
           </div>
+          <div class="card min-w-0 p-4" data-testid="connection-usage">
+            <div class="flex items-start gap-3">
+              <div class="shrink-0 rounded-lg bg-cyan-100 p-2 dark:bg-cyan-900/30">
+                <Icon name="globe" size="md" class="text-cyan-600 dark:text-cyan-400" :stroke-width="2" />
+              </div>
+              <div class="min-w-0 break-words">
+                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.connectionUsageTitle') }}</p>
+                <p class="text-sm font-semibold text-gray-900 dark:text-white">
+                  WS <span data-testid="connection-ws-users">{{ connectionUsage ? t('admin.dashboard.connectionUsageUsers', { count: formatNumber(connectionUsage.ws_users) }) : '—' }}</span>
+                </p>
+                <p class="text-sm font-semibold text-gray-900 dark:text-white">
+                  HTTP <span data-testid="connection-http-users">{{ connectionUsage ? t('admin.dashboard.connectionUsageUsers', { count: formatNumber(connectionUsage.http_users) }) : '—' }}</span>
+                </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400" data-testid="connection-usage-time">
+                  {{ connectionUsage ? t('admin.dashboard.connectionUsageAsOf', { time: formatDateTime(connectionUsage.window_end) }) : t('admin.dashboard.connectionUsageMissing') }}
+                </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.dashboard.connectionUsageScope') }}</p>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="card p-4">
@@ -154,6 +174,7 @@ import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import type { DashboardStats, GroupStat, ModelStat, TrendDataPoint, UserSpendingRankingItem } from '@/types'
+import { formatDateTime } from '@/utils/format'
 import { getGranularityForDateRange, getTodayRangeDates } from '@/utils/dateRange'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -171,6 +192,13 @@ const { t } = useI18n()
 const router = useRouter()
 const appStore = useAppStore()
 const stats = ref<DashboardStats | null>(null)
+const connectionUsage = computed(() => {
+  const usage = stats.value?.connection_usage
+  if (!usage || !Number.isSafeInteger(usage.ws_users) || usage.ws_users < 0 ||
+    !Number.isSafeInteger(usage.http_users) || usage.http_users < 0 ||
+    typeof usage.window_end !== 'string' || !Number.isFinite(Date.parse(usage.window_end))) return null
+  return usage
+})
 const loading = ref(false)
 const chartsLoading = ref(false)
 const rankingLoading = ref(false)

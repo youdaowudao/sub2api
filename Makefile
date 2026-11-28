@@ -54,6 +54,9 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/admin/__tests__/DashboardView.spec.ts \
 	src/views/admin/__tests__/UsageView.spec.ts \
 	src/views/admin/__tests__/AccountsView.lite.spec.ts \
+	src/views/admin/__tests__/AccountsView.cacheHitRate.spec.ts \
+	src/components/admin/usage/__tests__/UsageStatsCards.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsErrorDetailModal.spec.ts \
 	src/components/account/__tests__/AccountScheduleTimer.spec.ts \
 	src/api/__tests__/accounts.scheduleTimer.spec.ts \
 	src/components/admin/usage/__tests__/UsageFilters.spec.ts \

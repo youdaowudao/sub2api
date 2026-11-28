@@ -168,7 +168,7 @@ func TestVideoRelayRepoUsageRecoveryAfterLostSubmit(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, created)
-	usage := handler.NewUsageHandler(service.NewUsageService(usageRepo, nil, nil, nil), nil, nil, nil)
+	usage := handler.NewUsageHandler(service.NewUsageService(usageRepo, nil, nil, nil), nil, nil, nil, nil)
 	routes.RegisterUserRoutes(router.Group("/api/v1"), &handler.Handlers{Usage: usage},
 		middleware.NewJWTAuthMiddleware(auth, usersService, nil, nil), middleware.NewAuditLogMiddleware(nil),
 		nil, middleware.NewPanelRateLimiter(nil, nil))

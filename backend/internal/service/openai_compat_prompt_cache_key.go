@@ -170,17 +170,19 @@ func deriveAnthropicCacheControlPromptCacheKey(req *apicompat.AnthropicRequest) 
 	return fmt.Sprintf("anthropic-cache-%x", sum[:16])
 }
 
-func normalizeCompatSeedJSON(v json.RawMessage) string {
+func normalizeCompatSeedJSON(v json.RawMessage, memories ...*wsMaterializer) string {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(v) == 0 {
 		return ""
 	}
 	var tmp any
-	if err := json.Unmarshal(v, &tmp); err != nil {
-		return string(v)
+	if err := wsMem.unmarshal(v, &tmp); err != nil {
+		return wsMem.string(v)
 	}
-	out, err := json.Marshal(tmp)
+	out, err := wsMem.marshal(tmp)
 	if err != nil {
-		return string(v)
+		return wsMem.string(v)
 	}
-	return string(out)
+	return wsMem.string(out)
 }

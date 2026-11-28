@@ -76,8 +76,17 @@ type DashboardStats struct {
 	TodayAverageDurationMs *float64 `json:"today_average_duration_ms"` // 今日平均响应时间；无请求时为 nil
 
 	// 性能指标
-	Rpm int64 `json:"rpm"` // 近5分钟平均每分钟请求数
-	Tpm int64 `json:"tpm"` // 近5分钟平均每分钟Token数
+	Rpm             int64                     `json:"rpm"` // 近5分钟平均每分钟请求数
+	Tpm             int64                     `json:"tpm"` // 近5分钟平均每分钟Token数
+	ConnectionUsage *DashboardConnectionUsage `json:"connection_usage,omitempty"`
+}
+
+// DashboardConnectionUsage counts distinct users with usage records by type
+// in the five-minute window ending at WindowEnd. The groups can overlap.
+type DashboardConnectionUsage struct {
+	WSUsers   int64  `json:"ws_users"`
+	HTTPUsers int64  `json:"http_users"`
+	WindowEnd string `json:"window_end"`
 }
 
 // TrendDataPoint represents a single point in trend data
@@ -346,6 +355,8 @@ type AccountUsageHistory struct {
 	Cost       float64 `json:"cost"`        // 标准计费（total_cost）
 	ActualCost float64 `json:"actual_cost"` // 账号口径费用（total_cost * account_rate_multiplier）
 	UserCost   float64 `json:"user_cost"`   // 用户口径费用（actual_cost，受分组倍率影响）
+	// UpstreamErrors 当日上游错误次数；运维监控关闭时为 nil。
+	UpstreamErrors *int64 `json:"upstream_errors,omitempty"`
 }
 
 // AccountUsageSummary represents summary statistics for an account
@@ -362,7 +373,10 @@ type AccountUsageSummary struct {
 	AvgDailyRequests  float64 `json:"avg_daily_requests"`
 	AvgDailyTokens    float64 `json:"avg_daily_tokens"`
 	AvgDurationMs     float64 `json:"avg_duration_ms"`
-	Today             *struct {
+	// 上游错误次数；运维监控关闭时为 nil。
+	TotalUpstreamErrors *int64 `json:"total_upstream_errors,omitempty"`
+	TodayUpstreamErrors *int64 `json:"today_upstream_errors,omitempty"`
+	Today               *struct {
 		Date     string  `json:"date"`
 		Cost     float64 `json:"cost"`
 		UserCost float64 `json:"user_cost"`

@@ -276,6 +276,9 @@ type OpenAIForwardResult struct {
 	RequestedReasoningEffort *string
 	Stream                   bool
 	OpenAIWSMode             bool
+	// WSBridgeMeteredError marks an interrupted bridge turn with explicit usage
+	// and a confirmed upstream response ID, eligible for the normal deduplicated bill.
+	WSBridgeMeteredError bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
 	UpstreamTerminalEvent string
@@ -305,9 +308,33 @@ type OpenAIForwardResult struct {
 	// AudioUsage carries Voice billing units when present.
 	AudioUsage *AudioUsage
 
-	wsReplayInput                []json.RawMessage
-	wsReplayInputExists          bool
-	wsAccountFailoverReplayInput []json.RawMessage
+	wsReplayInput       []json.RawMessage
+	wsReplayInputExists bool
+	wsReplayMemory      *wsMemoryReplay
+	wsHistoryMemoryErr  error
+}
+
+// UsageSnapshotWithoutWSReplay leaves the private replay history in its
+// connection-owned result instead of retaining it in an asynchronous bill.
+func (r *OpenAIForwardResult) UsageSnapshotWithoutWSReplay() *OpenAIForwardResult {
+	if r == nil {
+		return nil
+	}
+	snapshot := *r
+	snapshot.wsReplayInput = nil
+	snapshot.wsReplayInputExists = false
+	snapshot.wsReplayMemory = nil
+	snapshot.wsHistoryMemoryErr = nil
+	return &snapshot
+}
+
+func (r *OpenAIForwardResult) releaseWSReplayMemory() {
+	if r != nil && r.wsReplayMemory != nil {
+		r.wsReplayMemory.drop()
+		r.wsReplayMemory = nil
+		r.wsReplayInput = nil
+		r.wsReplayInputExists = false
+	}
 }
 
 // SucceededForScheduling reports whether this result is an upstream success

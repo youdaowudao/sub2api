@@ -1782,6 +1782,19 @@ func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
 	t.Run("generic proxy failure still penalizes account", func(t *testing.T) {
 		require.True(t, shouldReportOpenAIWSProxyAccountFailure(errors.New("upstream websocket read failed")))
 	})
+	t.Run("unavailable bridge history does not penalize account", func(t *testing.T) {
+		got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+			firstPayload:         `{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_missing","input":"continue"}`,
+			ingressMode:          service.OpenAIWSIngressModeHTTPBridge,
+			bridgeReferenceProbe: true, directBridgeReferenceProbe: true,
+		})
+		require.Empty(t, got.upstreamPayloads)
+		require.Equal(t, "previous_response_not_found", gjson.GetBytes(got.clientEvents[0], "error.code").String())
+		var closeErr *service.OpenAIWSClientCloseError
+		require.ErrorAs(t, got.proxyErr, &closeErr)
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(got.proxyErr))
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(fmt.Errorf("wrapped: %w", got.proxyErr)))
+	})
 }
 
 func TestSetOpenAIClientTransportHTTP(t *testing.T) {
@@ -1931,12 +1944,24 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
-	simpleModeRejectAtRead int64
-	compositeResolver      *service.CompositeRouteResolver
-	accountPlatform        string
-	closeReason            string
-	closeStatus            coderws.StatusCode
-	firstPayload           string
+	simpleModeRejectAtRead    int64
+	standardMode              bool
+	standardInflight          bool
+	standardBillingCache      service.BillingCache
+	standardRPMCache          service.UserRPMCache
+	standardBillingRepo       service.UsageBillingRepository
+	standardSubscriptionSvc   *service.SubscriptionService
+	standardQuotaRepo         service.UserPlatformQuotaRepository
+	standard403Counter        service.OpenAI403CounterCache
+	standardWorker            *service.UsageRecordWorkerPool
+	standardBridgeRetryAt     int
+	standardBridgeSameAccount bool
+	afterCompleted            func(turn int)
+	compositeResolver         *service.CompositeRouteResolver
+	accountPlatform           string
+	closeReason               string
+	closeStatus               coderws.StatusCode
+	firstPayload              string
 	// midPayload 在首个 turn 完成后发送（如 session.update），上游桩会为它
 	// 回一个 response.completed，客户端按普通事件读取。
 	midPayload                string
@@ -1956,7 +1981,17 @@ type openAIResponsesWSUsageLogCase struct {
 	// accountRateMultiplier 覆盖账号倍率（利润门测试用）。
 	accountRateMultiplier *float64
 	// firstFrameCloseExpected：首帧即被拒（连接被 1008 关闭），不期待任何响应帧。
-	firstFrameCloseExpected bool
+	firstFrameCloseExpected    bool
+	bridgeReferenceProbe       bool // Test-only: capture the response and close before assertions.
+	bridgeStream               string
+	bridgeServe                func(http.ResponseWriter, *http.Request, int32)
+	bridgeIdleSeconds          int
+	bridgeProbeFollowup        bool
+	bridgeGuardHeader          http.Header
+	bridgeConcurrency          *concurrencyCacheMock
+	bridgeErrorProbe           bool
+	bridgeExpectedLogs         int
+	directBridgeReferenceProbe bool
 	// secondTurnCloseExpected：第二个 turn 被拒（连接被 1008 关闭）。
 	secondTurnCloseExpected bool
 	// midFrameCloseExpected：midPayload 被拒（连接被 1008 关闭），帧不到达上游。
@@ -1969,6 +2004,9 @@ type openAIResponsesWSUsageLogResult struct {
 	upstreamFirstPayload []byte
 	upstreamPayloads     [][]byte
 	clientEvents         [][]byte
+	closeStatus          coderws.StatusCode
+	closeReason          string
+	proxyErr             error
 }
 
 type openAIWSUsageHandlerAccountRepoStub struct {
@@ -2964,6 +3002,22 @@ func TestOpenAIResponsesWebSocket_FirstOutputTimeoutWithoutDownstreamReusesClien
 	require.NotContains(t, accountRepo.rateLimitedIDs, int64(9913), "healthy failover account must not be penalized")
 }
 
+// wsUsageLocalHTTPUpstream routes the synthetic OAuth requests to a local fake.
+type wsUsageLocalHTTPUpstream struct {
+	service.HTTPUpstream
+	url    string
+	client *http.Client
+}
+
+func (u *wsUsageLocalHTTPUpstream) Do(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	local, err := http.NewRequestWithContext(req.Context(), req.Method, u.url, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	local.Header = req.Header.Clone()
+	return u.client.Do(local)
+}
+
 func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSUsageLogCase) openAIResponsesWSUsageLogResult {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -2975,19 +3029,63 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	if strings.TrimSpace(tc.secondPayload) != "" {
 		turnCount++
 	}
-	upstreamPayloadCh := make(chan []byte, turnCount)
+	attemptCount := turnCount
+	if tc.standardBridgeRetryAt > 0 {
+		attemptCount++
+	}
+	upstreamPayloadCapacity := attemptCount
+	if tc.bridgeServe != nil {
+		upstreamPayloadCapacity += 2
+	}
+	upstreamPayloadCh := make(chan []byte, upstreamPayloadCapacity)
 	upstreamErrCh := make(chan error, 1)
 	var channelSvc *service.ChannelService
+	var bridgeTurns atomic.Int32
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if tc.accountPlatform == service.PlatformGrok {
+		if tc.accountPlatform == service.PlatformGrok || tc.ingressMode == service.OpenAIWSIngressModeHTTPBridge {
 			payload, err := io.ReadAll(r.Body)
 			if err != nil {
 				upstreamErrCh <- err
 				return
 			}
-			upstreamPayloadCh <- payload
+			select {
+			case upstreamPayloadCh <- payload:
+			case <-r.Context().Done():
+				return
+			}
+			attempt := bridgeTurns.Add(1)
+			if tc.standardBridgeRetryAt > 0 && attempt == int32(tc.standardBridgeRetryAt) {
+				w.Header().Set("Content-Type", "application/json")
+				if tc.standardBridgeSameAccount {
+					w.WriteHeader(http.StatusTooManyRequests)
+					_, _ = io.WriteString(w, `{"error":{"type":"rate_limit_error","message":"Temporary upstream rate limit"}}`)
+				} else {
+					w.Header().Set("Retry-After", "60")
+					w.WriteHeader(http.StatusTooManyRequests)
+					_, _ = io.WriteString(w, `{"error":{"type":"usage_limit_reached","message":"Temporary upstream rate limit"}}`)
+				}
+				return
+			}
+			if attempt == 1 && tc.afterFirstUpstreamRequest != nil {
+				if callbackErr := tc.afterFirstUpstreamRequest(channelSvc); callbackErr != nil {
+					upstreamErrCh <- callbackErr
+					return
+				}
+			}
 			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_grok_test\",\"model\":%q,\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n", gjson.GetBytes(payload, "model").String())
+			if tc.bridgeServe != nil {
+				tc.bridgeServe(w, r, attempt)
+				return
+			}
+			if tc.bridgeStream != "" {
+				_, _ = io.WriteString(w, tc.bridgeStream)
+				return
+			}
+			responseID := "resp_grok_test"
+			if tc.standardMode {
+				responseID = fmt.Sprintf("resp_usage_e2e_%d", attempt)
+			}
+			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":%q,\"model\":%q,\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n", responseID, gjson.GetBytes(payload, "model").String())
 			return
 		}
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{
@@ -3067,6 +3165,12 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 
 	cfg := &config.Config{}
 	cfg.RunMode = config.RunModeSimple
+	if tc.standardMode {
+		cfg.RunMode = config.RunModeStandard
+	}
+	if tc.standardInflight {
+		cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}
+	}
 	cfg.Default.RateMultiplier = 1
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
@@ -3077,8 +3181,37 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+	cfg.Gateway.StreamDataIntervalTimeout = tc.bridgeIdleSeconds
+	if tc.bridgeConcurrency != nil {
+		cfg.Gateway.OpenAIWS.MaxIngressConnectionsPerAPIKey = 2
+	}
 
-	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
+	var httpUpstream service.HTTPUpstream = &compositeWSHTTPUpstream{}
+	if tc.standardBridgeSameAccount {
+		// The OAuth fixture is strictly loopback: no provider endpoint is contacted.
+		account.Type = service.AccountTypeOAuth
+		account.Credentials["access_token"] = "fixture-access"
+		account.Extra["openai_oauth_responses_websockets_v2_mode"] = service.OpenAIWSIngressModeHTTPBridge
+		cfg.Gateway.OpenAIWS.OAuthEnabled = true
+		httpUpstream = &wsUsageLocalHTTPUpstream{url: upstreamServer.URL, client: upstreamServer.Client()}
+	}
+	var accountRepo service.AccountRepository = &openAIWSUsageHandlerAccountRepoStub{account: account}
+	var rateLimitSvc *service.RateLimitService
+	if tc.standardBridgeRetryAt > 0 && !tc.standardBridgeSameAccount {
+		account.Priority = 1
+		replacement := account
+		replacement.ID++
+		replacement.Priority = 2
+		accountRepo = &openAIWSFailoverHandlerAccountRepoStub{accounts: []service.Account{account, replacement}}
+		cfg.Gateway.MaxAccountSwitches = 3
+		rateLimitSvc = service.NewRateLimitService(accountRepo, nil, cfg, nil, nil)
+	}
+	if tc.standard403Counter != nil {
+		if rateLimitSvc == nil {
+			rateLimitSvc = service.NewRateLimitService(accountRepo, nil, cfg, nil, nil)
+		}
+		rateLimitSvc.SetOpenAI403CounterCache(tc.standard403Counter)
+	}
 	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, turnCount)}
 
 	if len(tc.channelMapping) > 0 {
@@ -3100,33 +3233,8 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cfg.SimpleModeKeyRateLimitEnabled = true
 		keyRepo = &simpleModeWSRateLimitRepo{rejectAt: tc.simpleModeRejectAtRead}
 	}
-	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, keyRepo, nil, nil, cfg, nil)
+	billingCacheSvc := service.NewBillingCacheService(tc.standardBillingCache, nil, nil, keyRepo, tc.standardRPMCache, nil, cfg, tc.standardQuotaRepo)
 	t.Cleanup(billingCacheSvc.Stop)
-	gatewaySvc := service.NewOpenAIGatewayService(
-		accountRepo,
-		usageRepo,
-		nil,
-		nil,
-		nil,
-		nil,
-		nil,
-		cfg,
-		nil,
-		nil,
-		service.NewBillingService(cfg, nil),
-		nil,
-		billingCacheSvc,
-		&compositeWSHTTPUpstream{},
-		&service.DeferredService{},
-		nil,
-		nil,
-		nil,
-		channelSvc,
-		nil,
-		nil,
-		nil, // userPlatformQuotaRepo
-	)
-
 	cache := &concurrencyCacheMock{
 		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
 			return true, nil
@@ -3135,13 +3243,50 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			return true, nil
 		},
 	}
+	if tc.bridgeConcurrency != nil {
+		cache = tc.bridgeConcurrency
+	}
+	concurrencySvc := service.NewConcurrencyService(cache)
+	var schedulerConcurrency *service.ConcurrencyService
+	if tc.bridgeConcurrency != nil {
+		// The first account slot is acquired by the gateway scheduler, and
+		// follow-up slots by the handler. Observe the real shared dependency.
+		schedulerConcurrency = concurrencySvc
+	}
+	gatewaySvc := service.NewOpenAIGatewayService(
+		accountRepo,
+		usageRepo,
+		tc.standardBillingRepo,
+		nil,
+		nil,
+		nil,
+		nil,
+		cfg,
+		nil,
+		schedulerConcurrency,
+		service.NewBillingService(cfg, nil),
+		rateLimitSvc,
+		billingCacheSvc,
+		httpUpstream,
+		&service.DeferredService{},
+		nil,
+		nil,
+		nil,
+		channelSvc,
+		nil,
+		nil,
+		tc.standardQuotaRepo, // userPlatformQuotaRepo
+	)
+
 	h := &OpenAIGatewayHandler{
-		cfg:                 cfg,
-		compositeResolver:   tc.compositeResolver,
-		gatewayService:      gatewaySvc,
-		billingCacheService: billingCacheSvc,
-		apiKeyService:       &service.APIKeyService{},
-		concurrencyHelper:   NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Second),
+		cfg:                   cfg,
+		usageRecordWorkerPool: tc.standardWorker,
+		maxAccountSwitches:    cfg.Gateway.MaxAccountSwitches,
+		compositeResolver:     tc.compositeResolver,
+		gatewayService:        gatewaySvc,
+		billingCacheService:   billingCacheSvc,
+		apiKeyService:         &service.APIKeyService{},
+		concurrencyHelper:     NewConcurrencyHelper(concurrencySvc, SSEPingFormatNone, time.Second),
 	}
 
 	apiKey := &service.APIKey{
@@ -3162,26 +3307,70 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		apiKey.Group = tc.group
 	}
 	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
-		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
-		if tc.apiKeyService != nil && apiKey.Group != nil {
-			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, apiKey.Group))
+	if tc.standardMode {
+		require.NotNil(t, tc.apiKeyService)
+		router.Use(gin.HandlerFunc(middleware.NewAPIKeyAuthMiddleware(tc.apiKeyService, tc.standardSubscriptionSvc, cfg)))
+		router.Use(middleware.RequireGroupAssignment(service.NewSettingService(nil, cfg), func(c *gin.Context, status int, message string) {
+			c.AbortWithStatusJSON(status, gin.H{"error": message})
+		}))
+	} else {
+		router.Use(func(c *gin.Context) {
+			c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
+			if tc.apiKeyService != nil && apiKey.Group != nil {
+				c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Group, apiKey.Group))
+			}
+			c.Next()
+		})
+	}
+	routePath := "/openai/v1/responses"
+	if tc.standardMode {
+		routePath = "/v1/responses"
+	}
+	handlerDone := make(chan struct{})
+	directErrCh := make(chan error, 1)
+	router.GET(routePath, func(c *gin.Context) {
+		defer close(handlerDone)
+		if !tc.directBridgeReferenceProbe {
+			h.ResponsesWebSocket(c)
+			return
 		}
-		c.Next()
+		// Test-only direct service route observes the actual returned cause.
+		conn, err := coderws.Accept(c.Writer, c.Request, nil)
+		if err != nil {
+			directErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		readCtx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		_, frame, err := conn.Read(readCtx)
+		cancel()
+		if err == nil {
+			err = gatewaySvc.ProxyResponsesWebSocketFromClient(c.Request.Context(), c, conn, &account, "test-token", frame, nil)
+		}
+		directErrCh <- err
+		var closeErr *service.OpenAIWSClientCloseError
+		if errors.As(err, &closeErr) {
+			_ = conn.Close(closeErr.StatusCode(), closeErr.Reason())
+		}
 	})
-	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
 	handlerServer := httptest.NewServer(router)
 	defer handlerServer.Close()
 
-	headers := http.Header{}
+	headers := tc.bridgeGuardHeader.Clone()
+	if headers == nil {
+		headers = http.Header{}
+	}
+	if tc.standardMode {
+		headers.Set("Authorization", "Bearer "+tc.apiKeyCredential)
+	}
 	if tc.userAgent != nil {
 		headers.Set("User-Agent", *tc.userAgent)
 	}
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
 	clientConn, _, err := coderws.Dial(
 		dialCtx,
-		"ws"+strings.TrimPrefix(handlerServer.URL, "http")+"/openai/v1/responses",
+		"ws"+strings.TrimPrefix(handlerServer.URL, "http")+routePath,
 		&coderws.DialOptions{HTTPHeader: headers, CompressionMode: coderws.CompressionContextTakeover},
 	)
 	cancelDial()
@@ -3194,6 +3383,91 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(tc.firstPayload))
 	cancelWrite()
 	require.NoError(t, err)
+
+	if tc.bridgeErrorProbe {
+		// A synthetic upstream ended after delivering part of a legitimate generation.
+		// Collect the actual close and all available settlement evidence, including zero.
+		probe := openAIResponsesWSUsageLogResult{}
+		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelRead()
+		followupSent := false
+		for {
+			_, event, readErr := clientConn.Read(readCtx)
+			if readErr != nil {
+				var closeErr coderws.CloseError
+				require.ErrorAs(t, readErr, &closeErr, "expected a real client failure rather than a read timeout")
+				probe.closeStatus, probe.closeReason = closeErr.Code, closeErr.Reason
+				break
+			}
+			probe.clientEvents = append(probe.clientEvents, append([]byte(nil), event...))
+			if tc.bridgeServe != nil && gjson.GetBytes(event, "type").String() == "response.completed" {
+				if tc.bridgeProbeFollowup && !followupSent {
+					followupSent = true
+					require.NoError(t, clientConn.Write(readCtx, coderws.MessageText, []byte(tc.secondPayload)))
+				} else {
+					// The old implementation can finish on the late terminal. Close normally
+					// and let the caller's business assertion report that difference.
+					probe.closeStatus = coderws.StatusNormalClosure
+					_ = clientConn.Close(coderws.StatusNormalClosure, "fixture complete")
+					break
+				}
+			}
+		}
+		select {
+		case <-handlerDone:
+		case <-time.After(3 * time.Second):
+			t.Fatal("bridge handler did not finish after the upstream error")
+		}
+		for len(upstreamPayloadCh) > 0 {
+			probe.upstreamPayloads = append(probe.upstreamPayloads, <-upstreamPayloadCh)
+		}
+		for len(probe.logs) < tc.bridgeExpectedLogs {
+			select {
+			case usageLog := <-usageRepo.created:
+				probe.logs = append(probe.logs, usageLog)
+			case <-time.After(3 * time.Second):
+				t.Fatal("expected bridge settlement did not complete")
+			}
+		}
+		for len(usageRepo.created) > 0 {
+			probe.logs = append(probe.logs, <-usageRepo.created)
+		}
+		return probe
+	}
+	if tc.bridgeReferenceProbe {
+		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+		_, event, readErr := clientConn.Read(readCtx)
+		cancelRead()
+		require.NoError(t, readErr)
+		probe := openAIResponsesWSUsageLogResult{clientEvents: [][]byte{event}}
+		if gjson.GetBytes(event, "type").String() == "error" {
+			closeCtx, cancelClose := context.WithTimeout(context.Background(), 3*time.Second)
+			_, _, readErr = clientConn.Read(closeCtx)
+			cancelClose()
+			var closeErr coderws.CloseError
+			require.ErrorAs(t, readErr, &closeErr)
+			probe.closeStatus, probe.closeReason = closeErr.Code, closeErr.Reason
+		} else {
+			// The old implementation returns a normal terminal. Close and wait
+			// before asserting; a timeout is not a valid RED result.
+			_ = clientConn.Close(coderws.StatusNormalClosure, "done")
+		}
+		select {
+		case <-handlerDone:
+		case <-time.After(3 * time.Second):
+			t.Fatal("handler did not finish after reference probe")
+		}
+		if tc.directBridgeReferenceProbe {
+			probe.proxyErr = <-directErrCh
+		}
+		for len(upstreamPayloadCh) > 0 {
+			probe.upstreamPayloads = append(probe.upstreamPayloads, <-upstreamPayloadCh)
+		}
+		for len(usageRepo.created) > 0 {
+			probe.logs = append(probe.logs, <-usageRepo.created)
+		}
+		return probe
+	}
 
 	if tc.closeReason == "" {
 		tc.closeReason = "not available for this group"
@@ -3231,6 +3505,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		require.NoError(t, readErr)
 		require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
 		clientEvents = append(clientEvents, append([]byte(nil), event...))
+		if tc.afterCompleted != nil {
+			tc.afterCompleted(len(clientEvents))
+		}
 	}
 	readCompleted()
 	if tc.midPayload != "" {
@@ -3294,8 +3571,8 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		}
 	}
 
-	upstreamPayloads := make([][]byte, 0, turnCount)
-	for len(upstreamPayloads) < turnCount {
+	upstreamPayloads := make([][]byte, 0, attemptCount)
+	for len(upstreamPayloads) < attemptCount {
 		select {
 		case payload := <-upstreamPayloadCh:
 			upstreamPayloads = append(upstreamPayloads, payload)
@@ -3304,7 +3581,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		}
 	}
 
-	if tc.accountPlatform == service.PlatformGrok {
+	if tc.accountPlatform == service.PlatformGrok || tc.ingressMode == service.OpenAIWSIngressModeHTTPBridge {
 		upstreamErrCh <- nil
 	}
 	select {
@@ -3314,6 +3591,13 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		t.Fatal("等待上游 WebSocket 结束超时")
 	}
 
+	if tc.standardMode {
+		select {
+		case <-handlerDone:
+		case <-time.After(3 * time.Second):
+			t.Fatal("standard websocket handler did not finish")
+		}
+	}
 	return openAIResponsesWSUsageLogResult{
 		log:                  usageLogs[0],
 		logs:                 usageLogs,
@@ -3424,4 +3708,19 @@ func TestOpenAIResponsesWebSocketSimpleModeRechecksKeyWindows(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestOpenAIResponsesWebSocket_HTTPBridgeRejectsUnavailableFirstReference(t *testing.T) {
+	got := runOpenAIResponsesWebSocketUsageLogCase(t, openAIResponsesWSUsageLogCase{
+		firstPayload:         `{"type":"response.create","model":"gpt-5.1","previous_response_id":"resp_missing","input":"continue"}`,
+		ingressMode:          service.OpenAIWSIngressModeHTTPBridge,
+		bridgeReferenceProbe: true,
+	})
+	require.Empty(t, got.upstreamPayloads, "unavailable reference must not send an upstream request")
+	require.Empty(t, got.logs, "locally rejected reference must not produce usage")
+	require.Len(t, got.clientEvents, 1)
+	require.Equal(t, "error", gjson.GetBytes(got.clientEvents[0], "type").String())
+	require.Equal(t, "previous_response_not_found", gjson.GetBytes(got.clientEvents[0], "error.code").String())
+	require.Equal(t, coderws.StatusPolicyViolation, got.closeStatus)
+	require.Contains(t, got.closeReason, "reconnect with full input")
 }

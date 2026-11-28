@@ -26,6 +26,17 @@ type dashboardPreciseRepo struct {
 	breakdownDim                                                     usagestats.UserBreakdownDimension
 	breakdownLimit                                                   int
 	modelSource                                                      string
+	statsCalls                                                       int
+	dashboardStats                                                   *usagestats.DashboardStats
+}
+
+func (r *dashboardPreciseRepo) GetDashboardStats(_ context.Context) (*usagestats.DashboardStats, error) {
+	r.statsCalls++
+	return r.dashboardStats, nil
+}
+
+func (r *dashboardPreciseRepo) GetDashboardStatsWithRange(ctx context.Context, _, _ time.Time) (*usagestats.DashboardStats, error) {
+	return r.GetDashboardStats(ctx)
 }
 
 type dashboardPreciseQuery struct {
@@ -91,6 +102,7 @@ func newPreciseDashboardRouter(t *testing.T) (*gin.Engine, *dashboardPreciseRepo
 	h := NewDashboardHandler(service.NewDashboardService(repo, nil, nil, nil), nil)
 	router := gin.New()
 	router.GET("/snapshot", h.GetSnapshotV2)
+	router.GET("/stats", h.GetStats)
 	router.GET("/ranking", h.GetUserSpendingRanking)
 	router.GET("/breakdown", h.GetUserBreakdown)
 	return router, repo
@@ -355,6 +367,47 @@ func TestDashboardRangePreciseRankingAndBreakdownRejectInvalidWindow(t *testing.
 				assert.Zero(t, repo.rankingCalls)
 				assert.Zero(t, repo.breakdownCalls)
 				assert.Empty(t, dashboardUsersRankingCache.items)
+			})
+		}
+	}
+}
+
+func TestDashboardSnapshotConnectionUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name, query string
+		cached      bool
+	}{
+		{"precise", "start_time=2026-11-27T00:37:00Z&end_time=2026-11-27T01:37:00Z", false},
+		{"date", "start_date=2026-11-26&end_date=2026-11-27", true},
+	} {
+		for _, usage := range []*usagestats.DashboardConnectionUsage{nil, {WSUsers: 0, HTTPUsers: 2, WindowEnd: "2026-11-28T01:05:30Z"}, {WSUsers: 5, HTTPUsers: 6, WindowEnd: "2026-11-28T01:05:30Z"}} {
+			t.Run(tc.name, func(t *testing.T) {
+				router, repo := newPreciseDashboardRouter(t)
+				repo.dashboardStats = &usagestats.DashboardStats{ConnectionUsage: usage, Rpm: 9}
+				base := "/snapshot?include_trend=false&include_model_stats=false&include_group_stats=false&include_users_trend=false&timezone=UTC&group_id=7&" + tc.query
+				got := preciseDashboardPayload(t, preciseDashboardRequest(router, base+"&include_stats=false"))
+				require.NotContains(t, got, "stats")
+				require.Zero(t, repo.statsCalls)
+				for i := 0; i < 2; i++ {
+					got = preciseDashboardPayload(t, preciseDashboardRequest(router, base+"&include_stats=true"))
+					stats, ok := got["stats"].(map[string]any)
+					require.True(t, ok)
+					require.Equal(t, float64(9), stats["rpm"])
+					if usage == nil {
+						require.NotContains(t, stats, "connection_usage")
+					} else {
+						require.Equal(t, map[string]any{"ws_users": float64(usage.WSUsers), "http_users": float64(usage.HTTPUsers), "window_end": usage.WindowEnd}, stats["connection_usage"])
+					}
+				}
+				want := 2
+				if tc.cached {
+					want = 1
+				}
+				require.Equal(t, want, repo.statsCalls)
+				old := preciseDashboardPayload(t, preciseDashboardRequest(router, "/stats"))
+				require.NotContains(t, old, "connection_usage")
+				require.Equal(t, float64(9), old["rpm"])
+				require.Equal(t, want+1, repo.statsCalls)
 			})
 		}
 	}

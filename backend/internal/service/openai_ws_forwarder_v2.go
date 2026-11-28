@@ -863,9 +863,11 @@ readLoop:
 // Spark rejects that tool upstream with HTTP 400 (invalid_request_error, param=tools);
 // Codex clients advertise it by default. Returns the (possibly unchanged) payload,
 // whether it changed, and any JSON decode error.
-func stripCodexSparkImageGenerationToolFromRawPayload(payload []byte, model string) ([]byte, bool, error) {
+func stripCodexSparkImageGenerationToolFromRawPayload(payload []byte, model string, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if !isCodexSparkModel(model) {
 		return payload, false, nil
 	}
-	return stripOpenAIImageGenerationToolsFromRawPayload(payload)
+	return stripOpenAIImageGenerationToolsFromRawPayload(payload, wsMem)
 }

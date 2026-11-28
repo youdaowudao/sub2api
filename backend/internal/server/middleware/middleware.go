@@ -151,6 +151,9 @@ func RequireGroupAssignment(settingService *service.SettingService, writeError G
 		}
 		// 未分组 Key — 检查系统设置
 		if settingService.IsUngroupedKeySchedulingAllowed(c.Request.Context()) {
+			if _, ok := GetWSGenerationAuthRefresh(c); ok {
+				c.Set(wsUngroupedPolicyContextKey, settingService.IsUngroupedKeySchedulingAllowed)
+			}
 			c.Next()
 			return
 		}
