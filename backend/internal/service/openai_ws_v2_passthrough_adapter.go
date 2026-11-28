@@ -1075,6 +1075,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						payload = s.ReplaceModelInBody(payload, upstreamModel)
 					}
 				}
+				if hooks != nil && hooks.BeforeForward != nil {
+					if err := hooks.BeforeForward(turnNo, payload, requestModelForThisFrame); err != nil {
+						return payload, nil, err
+					}
+				}
 			}
 			// 在评估策略前先刷新 capturedSessionModel：客户端可能通过
 			// session.update 修改 session-level model（Realtime /

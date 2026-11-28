@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -128,47 +129,12 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		// ── 3. 基础鉴权（始终执行） ─────────────────────────────────
 
-		// disabled / 未知状态 → 无条件拦截（expired 和 quota_exhausted 留给计费阶段）
-		if !apiKey.IsActive() &&
-			apiKey.Status != service.StatusAPIKeyExpired &&
-			apiKey.Status != service.StatusAPIKeyQuotaExhausted {
-			MarkIngressRejected(c, IngressRejectAPIKeyDisabled)
-			AbortWithError(c, 401, "API_KEY_DISABLED", "API key is disabled（API Key 已被停用）")
-			return
+		clientIP := ""
+		if apiKey != nil && (len(apiKey.IPWhitelist) > 0 || len(apiKey.IPBlacklist) > 0) {
+			clientIP = ip.GetSecurityClientIP(c, cfg.TrustForwardedIPForAPIKeyACL())
 		}
-
-		// 检查 IP 限制（白名单/黑名单）
-		// 注意：错误信息故意模糊，避免暴露具体的 IP 限制机制
-		if len(apiKey.IPWhitelist) > 0 || len(apiKey.IPBlacklist) > 0 {
-			clientIP := ip.GetSecurityClientIP(c, cfg.TrustForwardedIPForAPIKeyACL())
-			allowed, _ := ip.CheckIPRestrictionWithCompiledRules(clientIP, apiKey.CompiledIPWhitelist, apiKey.CompiledIPBlacklist)
-			if !allowed {
-				if clientIP == "" {
-					clientIP = "unknown"
-				}
-				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonIPRestriction)
-				MarkIngressRejected(c, IngressRejectIPRestricted)
-				AbortWithError(c, 403, "ACCESS_DENIED", fmt.Sprintf("Access denied. Your IP is %s", clientIP))
-				return
-			}
-		}
-
-		// 检查关联的用户
-		if apiKey.User == nil {
-			AbortWithError(c, 401, "USER_NOT_FOUND", "User associated with API key not found")
-			return
-		}
-
-		// 检查用户状态
-		if !apiKey.User.IsActive() {
-			MarkIngressRejected(c, IngressRejectUserInactive)
-			AbortWithError(c, 401, "USER_INACTIVE", "User account is not active（账户已停用，请联系管理员）")
-			return
-		}
-		if abortIfAPIKeyGroupUnavailable(c, apiKey) {
-			return
-		}
-		if abortIfAPIKeyGroupNotAllowed(c, apiKey) {
+		if rejected := validateAPIKeyIdentity(apiKey, clientIP); rejected != nil {
+			rejected.abortHTTP(c)
 			return
 		}
 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
@@ -230,57 +196,15 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// ── 6. 计费执行（skipBilling 时整块跳过） ────────────────────
 
 		if !skipBilling && !videoRead {
-			// Key 状态检查
-			switch apiKey.Status {
-			case service.StatusAPIKeyQuotaExhausted:
-				abortWithAPIKeyQuotaError(c)
-				return
-			case service.StatusAPIKeyExpired:
-				AbortWithError(c, 403, "API_KEY_EXPIRED", "API key 已过期")
+			var rejected *WSGenerationAuthRejection
+			subscription, rejected = validateAPIKeyGenerationBilling(c.Request.Context(), apiKey, subscription, subscriptionService, cfg)
+			if rejected != nil {
+				rejected.abortHTTP(c)
 				return
 			}
-
-			// 运行时过期/配额检查（即使状态是 active，也要检查时间和用量）
-			if apiKey.IsExpired() {
-				AbortWithError(c, 403, "API_KEY_EXPIRED", "API key 已过期")
-				return
-			}
-			if apiKey.IsQuotaExhausted() {
-				abortWithAPIKeyQuotaError(c)
-				return
-			}
-
-			// 订阅模式：验证订阅限额
-			if subscription != nil {
-				needsMaintenance, validateErr := subscriptionService.ValidateAndCheckLimits(subscription, apiKey.Group)
-				if needsMaintenance {
-					refreshed, maintenanceErr := subscriptionService.EnsureWindowMaintenance(c.Request.Context(), subscription)
-					if maintenanceErr != nil {
-						AbortWithError(c, 500, "SUBSCRIPTION_MAINTENANCE_FAILED", "Failed to maintain subscription usage windows")
-						return
-					}
-					subscription = refreshed
-					_, validateErr = subscriptionService.ValidateAndCheckLimits(subscription, apiKey.Group)
-				}
-				if validateErr != nil {
-					code := "SUBSCRIPTION_INVALID"
-					status := 403
-					if errors.Is(validateErr, service.ErrDailyLimitExceeded) ||
-						errors.Is(validateErr, service.ErrWeeklyLimitExceeded) ||
-						errors.Is(validateErr, service.ErrMonthlyLimitExceeded) {
-						code = "USAGE_LIMIT_EXCEEDED"
-						status = 429
-					}
-					AbortWithError(c, status, code, validateErr.Error())
-					return
-				}
-			} else {
-				// 非订阅模式 或 订阅模式但 subscriptionService 未注入：回退到余额检查
-				if apiKeyBalanceBelowAuthThreshold(apiKey.User.Balance, cfg) {
-					AbortWithError(c, 403, "INSUFFICIENT_BALANCE", "Insufficient account balance（账户余额不足，请及时充值）")
-					return
-				}
-			}
+		}
+		if isResponsesWebSocketRoute(c) {
+			bindWSGenerationAuthRefresh(c, apiKeyService, subscriptionService, cfg, apiKeyString)
 		}
 
 		// ── 7. 设置上下文 → Next ─────────────────────────────────────
@@ -301,6 +225,180 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		c.Next()
 	}
+}
+
+// WSGenerationAuthRejection is a safe policy decision, shared by HTTP
+// authentication and the per-generation WebSocket authorization check.
+type WSGenerationAuthRejection struct {
+	Status    int
+	Code      string
+	Message   string
+	ingress   IngressRejectReason
+	opsReason string
+}
+
+func (r *WSGenerationAuthRejection) abortHTTP(c *gin.Context) {
+	if r.ingress != "" {
+		MarkIngressRejected(c, r.ingress)
+	}
+	if r.opsReason != "" {
+		service.MarkOpsClientBusinessLimited(c, r.opsReason)
+	}
+	if r.Code == "API_KEY_QUOTA_EXHAUSTED" {
+		abortWithAPIKeyQuotaError(c)
+		return
+	}
+	AbortWithError(c, r.Status, r.Code, r.Message)
+}
+
+func validateAPIKeyIdentity(key *service.APIKey, clientIP string) *WSGenerationAuthRejection {
+	if key == nil {
+		return &WSGenerationAuthRejection{Status: 401, Code: "INVALID_API_KEY", Message: "Invalid API key（API Key 无效，请检查是否填写正确）"}
+	}
+	if !key.IsActive() && key.Status != service.StatusAPIKeyExpired && key.Status != service.StatusAPIKeyQuotaExhausted {
+		return &WSGenerationAuthRejection{Status: 401, Code: "API_KEY_DISABLED", Message: "API key is disabled（API Key 已被停用）", ingress: IngressRejectAPIKeyDisabled}
+	}
+	if len(key.IPWhitelist) > 0 || len(key.IPBlacklist) > 0 {
+		allowed, _ := ip.CheckIPRestrictionWithCompiledRules(clientIP, key.CompiledIPWhitelist, key.CompiledIPBlacklist)
+		if !allowed {
+			if clientIP == "" {
+				clientIP = "unknown"
+			}
+			return &WSGenerationAuthRejection{Status: 403, Code: "ACCESS_DENIED", Message: fmt.Sprintf("Access denied. Your IP is %s", clientIP), ingress: IngressRejectIPRestricted, opsReason: service.OpsClientBusinessLimitedReasonIPRestriction}
+		}
+	}
+	if key.User == nil {
+		return &WSGenerationAuthRejection{Status: 401, Code: "USER_NOT_FOUND", Message: "User associated with API key not found"}
+	}
+	if !key.User.IsActive() {
+		return &WSGenerationAuthRejection{Status: 401, Code: "USER_INACTIVE", Message: "User account is not active（账户已停用，请联系管理员）", ingress: IngressRejectUserInactive}
+	}
+	if code, message, ok := validateAPIKeyGroupAvailable(key); !ok {
+		reason := IngressRejectGroupDisabled
+		if code == "GROUP_DELETED" {
+			reason = IngressRejectGroupDeleted
+		}
+		return &WSGenerationAuthRejection{Status: 403, Code: code, Message: message, ingress: reason, opsReason: service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable}
+	}
+	if !validateAPIKeyGroupAllowed(key) {
+		return &WSGenerationAuthRejection{Status: 403, Code: "GROUP_NOT_ALLOWED", Message: "API Key 所属专属分组不再允许当前用户使用", ingress: IngressRejectGroupNotAllowed, opsReason: service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable}
+	}
+	return nil
+}
+
+func validateAPIKeyGenerationBilling(ctx context.Context, key *service.APIKey, sub *service.UserSubscription, subSvc *service.SubscriptionService, cfg *config.Config) (*service.UserSubscription, *WSGenerationAuthRejection) {
+	if key.Status == service.StatusAPIKeyQuotaExhausted {
+		return nil, &WSGenerationAuthRejection{Status: 429, Code: "API_KEY_QUOTA_EXHAUSTED", Message: "API key 额度已用完"}
+	}
+	if key.Status == service.StatusAPIKeyExpired || key.IsExpired() {
+		return nil, &WSGenerationAuthRejection{Status: 403, Code: "API_KEY_EXPIRED", Message: "API key 已过期"}
+	}
+	if key.IsQuotaExhausted() {
+		return nil, &WSGenerationAuthRejection{Status: 429, Code: "API_KEY_QUOTA_EXHAUSTED", Message: "API key 额度已用完"}
+	}
+	if sub != nil {
+		needsMaintenance, validateErr := subSvc.ValidateAndCheckLimits(sub, key.Group)
+		if needsMaintenance {
+			refreshed, err := subSvc.EnsureWindowMaintenance(ctx, sub)
+			if err != nil {
+				return nil, &WSGenerationAuthRejection{Status: 500, Code: "SUBSCRIPTION_MAINTENANCE_FAILED", Message: "Failed to maintain subscription usage windows"}
+			}
+			sub = refreshed
+			_, validateErr = subSvc.ValidateAndCheckLimits(sub, key.Group)
+		}
+		if validateErr != nil {
+			code, status := "SUBSCRIPTION_INVALID", 403
+			if errors.Is(validateErr, service.ErrDailyLimitExceeded) || errors.Is(validateErr, service.ErrWeeklyLimitExceeded) || errors.Is(validateErr, service.ErrMonthlyLimitExceeded) {
+				code, status = "USAGE_LIMIT_EXCEEDED", 429
+			}
+			return nil, &WSGenerationAuthRejection{Status: status, Code: code, Message: validateErr.Error()}
+		}
+	} else if apiKeyBalanceBelowAuthThreshold(key.User.Balance, cfg) {
+		return nil, &WSGenerationAuthRejection{Status: 403, Code: "INSUFFICIENT_BALANCE", Message: "Insufficient account balance（账户余额不足，请及时充值）"}
+	}
+	return sub, nil
+}
+
+const wsGenerationAuthRefreshContextKey = "ws_generation_auth_refresh"
+const wsUngroupedPolicyContextKey = "ws_ungrouped_policy"
+
+type WSGenerationAuthRefresh func(context.Context, *service.APIKey) (*service.APIKey, *service.UserSubscription, *WSGenerationAuthRejection)
+
+func GetWSGenerationAuthRefresh(c *gin.Context) (WSGenerationAuthRefresh, bool) {
+	value, ok := c.Get(wsGenerationAuthRefreshContextKey)
+	if !ok {
+		return nil, false
+	}
+	refresh, ok := value.(WSGenerationAuthRefresh)
+	return refresh, ok && refresh != nil
+}
+
+// Compatible snapshots keep connection-scoped routes and policy immutable.
+func wsGenerationSamePolicy(initial, latest *service.APIKey) bool {
+	if initial == nil || latest == nil || initial.User == nil || latest.User == nil || initial.ID != latest.ID || initial.User.ID != latest.User.ID {
+		return false
+	}
+	if (initial.GroupID == nil) != (latest.GroupID == nil) {
+		return false
+	}
+	if initial.GroupID == nil {
+		return initial.Group == nil && latest.Group == nil
+	}
+	if *initial.GroupID != *latest.GroupID || initial.Group == nil || latest.Group == nil {
+		return false
+	}
+	a, b := initial.Group, latest.Group
+	return a.ID == b.ID && a.Platform == b.Platform && a.SubscriptionType == b.SubscriptionType &&
+		a.MaxReasoningEffort == b.MaxReasoningEffort && a.MaxReasoningEffortOverLimit == b.MaxReasoningEffortOverLimit &&
+		slices.Equal(a.ReasoningEffortMappings, b.ReasoningEffortMappings) &&
+		a.AllowImageGeneration == b.AllowImageGeneration && a.RequirePrivacySet == b.RequirePrivacySet &&
+		a.ForceOpenAIFast == b.ForceOpenAIFast && a.ForceOpenAIUltrafast == b.ForceOpenAIUltrafast
+}
+
+func bindWSGenerationAuthRefresh(c *gin.Context, keySvc *service.APIKeyService, subSvc *service.SubscriptionService, cfg *config.Config, credential string) {
+	clientIP := ip.GetSecurityClientIP(c, cfg.TrustForwardedIPForAPIKeyACL())
+	c.Set(wsGenerationAuthRefreshContextKey, WSGenerationAuthRefresh(func(ctx context.Context, initial *service.APIKey) (*service.APIKey, *service.UserSubscription, *WSGenerationAuthRejection) {
+		if keySvc == nil || credential == "" {
+			return nil, nil, &WSGenerationAuthRejection{Status: 503, Code: "API_KEY_AUTH_OVERLOADED", Message: "API key authentication is temporarily unavailable"}
+		}
+		latest, err := keySvc.GetByKey(ctx, credential)
+		if err != nil {
+			if errors.Is(err, service.ErrAPIKeyNotFound) {
+				return nil, nil, &WSGenerationAuthRejection{Status: 401, Code: "INVALID_API_KEY", Message: "Invalid API key（API Key 无效，请检查是否填写正确）"}
+			}
+			return nil, nil, &WSGenerationAuthRejection{Status: 503, Code: "API_KEY_AUTH_OVERLOADED", Message: "API key authentication is temporarily unavailable"}
+		}
+		if rejected := validateAPIKeyIdentity(latest, clientIP); rejected != nil {
+			if rejected.Code == "ACCESS_DENIED" {
+				rejected.Message = "Access denied"
+			}
+			return nil, nil, rejected
+		}
+		if !wsGenerationSamePolicy(initial, latest) {
+			return nil, nil, &WSGenerationAuthRejection{Status: 403, Code: "RECONNECT_REQUIRED", Message: "Connection authorization changed; please reconnect"}
+		}
+		if latest.GroupID == nil {
+			v, _ := c.Get(wsUngroupedPolicyContextKey)
+			allow, ok := v.(func(context.Context) bool)
+			if !ok || allow == nil || !allow(ctx) {
+				return nil, nil, &WSGenerationAuthRejection{Status: 403, Code: "GROUP_NOT_ALLOWED", Message: "API Key is not assigned to an available group"}
+			}
+		}
+		var sub *service.UserSubscription
+		if latest.Group != nil && latest.Group.IsSubscriptionType() {
+			if subSvc != nil {
+				sub, err = subSvc.GetActiveSubscription(ctx, latest.User.ID, latest.Group.ID)
+			}
+			if err != nil || sub == nil {
+				return nil, nil, &WSGenerationAuthRejection{Status: 403, Code: "SUBSCRIPTION_NOT_FOUND", Message: "No active subscription found for this group（当前分组没有有效订阅）"}
+			}
+		}
+		sub, rejected := validateAPIKeyGenerationBilling(ctx, latest, sub, subSvc, cfg)
+		if rejected != nil {
+			return nil, nil, rejected
+		}
+		return latest, sub, nil
+	}))
 }
 
 func apiKeyHeadersTooLarge(c *gin.Context) bool {
@@ -412,31 +510,6 @@ func setGroupContext(c *gin.Context, group *service.Group) {
 // 否则已配置该值的存量部署升级后，0 < balance < reserve 的用户会在所有端点被静默 403。
 func apiKeyBalanceBelowAuthThreshold(balance float64, _ *config.Config) bool {
 	return balance <= 0
-}
-
-func abortIfAPIKeyGroupUnavailable(c *gin.Context, apiKey *service.APIKey) bool {
-	code, message, ok := validateAPIKeyGroupAvailable(apiKey)
-	if ok {
-		return false
-	}
-	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
-	if code == "GROUP_DELETED" {
-		MarkIngressRejected(c, IngressRejectGroupDeleted)
-	} else {
-		MarkIngressRejected(c, IngressRejectGroupDisabled)
-	}
-	AbortWithError(c, 403, code, message)
-	return true
-}
-
-func abortIfAPIKeyGroupNotAllowed(c *gin.Context, apiKey *service.APIKey) bool {
-	if validateAPIKeyGroupAllowed(apiKey) {
-		return false
-	}
-	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
-	MarkIngressRejected(c, IngressRejectGroupNotAllowed)
-	AbortWithError(c, 403, "GROUP_NOT_ALLOWED", "API Key 所属专属分组不再允许当前用户使用")
-	return true
 }
 
 func validateAPIKeyGroupAllowed(apiKey *service.APIKey) bool {
