@@ -1950,3 +1950,129 @@ func TestAPIKeyAuthSetsUserAccountBlockUserID(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, res.Code)
 	require.Equal(t, user.ID, got)
 }
+
+// Direct policy tests cover denial decisions without executing a historical
+// unauthorized request. The middleware and WS refresh use these same decisions.
+func TestWSGenerationAuthorizationPolicy(t *testing.T) {
+	valid := func() *service.APIKey {
+		groupID := int64(42)
+		return &service.APIKey{ID: 1, UserID: 2, Status: service.StatusActive, GroupID: &groupID,
+			User:  &service.User{ID: 2, Status: service.StatusActive, Balance: 10, Concurrency: 1},
+			Group: &service.Group{ID: groupID, Status: service.StatusActive, Platform: service.PlatformOpenAI}}
+	}
+	t.Run("identity and group", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			mutate func(*service.APIKey)
+			code   string
+		}{
+			{"valid", func(*service.APIKey) {}, ""},
+			{"inactive key", func(k *service.APIKey) { k.Status = service.StatusDisabled }, "API_KEY_DISABLED"},
+			{"missing user", func(k *service.APIKey) { k.User = nil }, "USER_NOT_FOUND"},
+			{"inactive user", func(k *service.APIKey) { k.User.Status = service.StatusDisabled }, "USER_INACTIVE"},
+			{"unavailable group", func(k *service.APIKey) { k.Group = nil }, "GROUP_DELETED"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				k := valid()
+				tc.mutate(k)
+				rejected := validateAPIKeyIdentity(k, "")
+				if tc.code == "" {
+					require.Nil(t, rejected)
+				} else {
+					require.NotNil(t, rejected)
+					require.Equal(t, tc.code, rejected.Code)
+				}
+			})
+		}
+	})
+	t.Run("generation billing", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			mutate func(*service.APIKey)
+			code   string
+		}{
+			{"valid", func(*service.APIKey) {}, ""},
+			{"nonpositive balance", func(k *service.APIKey) { k.User.Balance = 0 }, "INSUFFICIENT_BALANCE"},
+			{"expired key", func(k *service.APIKey) { k.Status = service.StatusAPIKeyExpired }, "API_KEY_EXPIRED"},
+			{"quota exhausted", func(k *service.APIKey) { k.Status = service.StatusAPIKeyQuotaExhausted }, "API_KEY_QUOTA_EXHAUSTED"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				k := valid()
+				tc.mutate(k)
+				_, rejected := validateAPIKeyGenerationBilling(context.Background(), k, nil, nil, &config.Config{})
+				if tc.code == "" {
+					require.Nil(t, rejected)
+				} else {
+					require.NotNil(t, rejected)
+					require.Equal(t, tc.code, rejected.Code)
+				}
+			})
+		}
+	})
+	t.Run("connection policy compatibility", func(t *testing.T) {
+		initial := valid()
+		latest := valid()
+		latest.Group.RateMultiplier = 2
+		require.True(t, wsGenerationSamePolicy(initial, latest), "normal same-group price update")
+		latest.Group.AllowImageGeneration = !initial.Group.AllowImageGeneration
+		require.False(t, wsGenerationSamePolicy(initial, latest))
+		latest = valid()
+		latest.Group.Platform = service.PlatformGrok
+		require.False(t, wsGenerationSamePolicy(initial, latest))
+		latest = valid()
+		latest.User.ID++
+		require.False(t, wsGenerationSamePolicy(initial, latest))
+	})
+}
+
+func TestWSGenerationAuthorizationRefreshDecision(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	makeKey := func() *service.APIKey {
+		groupID := int64(42)
+		return &service.APIKey{ID: 1, UserID: 2, Key: "fixture-key", Status: service.StatusActive, GroupID: &groupID,
+			User:  &service.User{ID: 2, Status: service.StatusActive, Balance: 10, Concurrency: 1},
+			Group: &service.Group{ID: groupID, Status: service.StatusActive, Platform: service.PlatformOpenAI, Hydrated: true}}
+	}
+	for _, tc := range []struct {
+		name      string
+		latest    func() *service.APIKey
+		lookupErr error
+		code      string
+	}{
+		{"current identity", func() *service.APIKey { k := makeKey(); k.User.Concurrency = 3; k.Group.RateMultiplier = 2; return k }, nil, ""},
+		{"denied identity", func() *service.APIKey { k := makeKey(); k.Status = service.StatusDisabled; return k }, nil, "API_KEY_DISABLED"},
+		{"denied generation", func() *service.APIKey { k := makeKey(); k.User.Balance = 0; return k }, nil, "INSUFFICIENT_BALANCE"},
+		{"lookup unavailable", func() *service.APIKey { return nil }, errors.New("fixture lookup unavailable"), "API_KEY_AUTH_OVERLOADED"},
+		{"incompatible group", func() *service.APIKey { k := makeKey(); k.Group.Platform = service.PlatformGrok; return k }, nil, "RECONNECT_REQUIRED"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			initial := makeKey()
+			var lookups atomic.Int32
+			repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) {
+				lookups.Add(1)
+				return tc.latest(), tc.lookupErr
+			}}
+			cfg := &config.Config{RunMode: config.RunModeStandard}
+			svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			bindWSGenerationAuthRefresh(c, svc, nil, cfg, "fixture-key")
+			refresh, ok := GetWSGenerationAuthRefresh(c)
+			require.True(t, ok)
+			key, sub, rejected := refresh(context.Background(), initial)
+			require.Equal(t, int32(1), lookups.Load())
+			require.Nil(t, sub)
+			if tc.code == "" {
+				require.Nil(t, rejected)
+				require.NotNil(t, key)
+				require.Equal(t, 3, key.User.Concurrency)
+				require.Equal(t, 2.0, key.Group.RateMultiplier)
+				require.Equal(t, 1, initial.User.Concurrency)
+			} else {
+				require.Nil(t, key)
+				require.NotNil(t, rejected)
+				require.Equal(t, tc.code, rejected.Code)
+			}
+		})
+	}
+}

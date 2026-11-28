@@ -24,15 +24,19 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 // ChatCompletionsToResponsesWithMinOutputTokens converts a Chat Completions
 // request using the supplied max_output_tokens floor.
 func ChatCompletionsToResponsesWithMinOutputTokens(req *ChatCompletionsRequest, minOutputTokens int) (*ResponsesRequest, error) {
+	return ChatCompletionsToResponsesWithMemory(req, minOutputTokens, nil)
+}
+
+func ChatCompletionsToResponsesWithMemory(req *ChatCompletionsRequest, minOutputTokens int, memory *ResponsesToolMemory) (*ResponsesRequest, error) {
 	if err := openai.ValidateGPT61ReasoningEffort(req.Model, req.ReasoningEffort); err != nil {
 		return nil, err
 	}
-	input, err := convertChatMessagesToResponsesInput(req.Messages)
+	input, err := convertChatMessagesToResponsesInput(req.Messages, memory)
 	if err != nil {
 		return nil, err
 	}
 
-	inputJSON, err := json.Marshal(input)
+	inputJSON, err := memory.marshal(input)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +86,7 @@ func ChatCompletionsToResponsesWithMinOutputTokens(req *ChatCompletionsRequest, 
 		}
 	}
 
-	if format := chatResponseFormatToResponsesTextFormat(req.ResponseFormat); len(format) > 0 {
+	if format := chatResponseFormatToResponsesTextFormat(req.ResponseFormat, memory); len(format) > 0 {
 		if out.Text == nil {
 			out.Text = &ResponsesText{}
 		}
@@ -98,21 +102,25 @@ func ChatCompletionsToResponsesWithMinOutputTokens(req *ChatCompletionsRequest, 
 	// Chat choice nests the name under "function" and must be flattened.
 	// Legacy function_call needs mapping.
 	if len(req.ToolChoice) > 0 {
-		out.ToolChoice = convertChatToolChoiceToResponses(req.ToolChoice)
+		out.ToolChoice = convertChatToolChoiceToResponses(req.ToolChoice, memory)
 	} else if len(req.FunctionCall) > 0 {
-		tc, err := convertChatFunctionCallToToolChoice(req.FunctionCall)
+		tc, err := convertChatFunctionCallToToolChoice(req.FunctionCall, memory)
 		if err != nil {
 			return nil, fmt.Errorf("convert function_call: %w", err)
 		}
 		out.ToolChoice = tc
 	}
 
+	if memory != nil && memory.Err() != nil {
+		return nil, memory.Err()
+	}
 	return out, nil
 }
 
 // convertChatMessagesToResponsesInput converts the Chat Completions messages
 // array into a Responses API input items array.
-func convertChatMessagesToResponsesInput(msgs []ChatMessage) ([]ResponsesInputItem, error) {
+func convertChatMessagesToResponsesInput(msgs []ChatMessage, memories ...*ResponsesToolMemory) ([]ResponsesInputItem, error) {
+	memory := firstResponsesToolMemory(memories)
 	var out []ResponsesInputItem
 	legacyIDs := legacyFunctionCallIDs{msgs: msgs}
 	for _, m := range msgs {
@@ -126,7 +134,7 @@ func convertChatMessagesToResponsesInput(msgs []ChatMessage) ([]ResponsesInputIt
 		case m.Role == "function" && m.ToolCallID == "":
 			m.ToolCallID = legacyIDs.claim(m.Name)
 		}
-		items, err := chatMessageToResponsesItems(m)
+		items, err := chatMessageToResponsesItems(m, memory)
 		if err != nil {
 			return nil, err
 		}
@@ -189,32 +197,34 @@ func (ids *legacyFunctionCallIDs) claim(name string) string {
 
 // chatMessageToResponsesItems converts a single ChatMessage into one or more
 // ResponsesInputItem values.
-func chatMessageToResponsesItems(m ChatMessage) ([]ResponsesInputItem, error) {
+func chatMessageToResponsesItems(m ChatMessage, memories ...*ResponsesToolMemory) ([]ResponsesInputItem, error) {
+	memory := firstResponsesToolMemory(memories)
 	switch m.Role {
 	case "system", "developer":
-		return chatSystemToResponses(m)
+		return chatSystemToResponses(m, memory)
 	case "user":
-		return chatUserToResponses(m)
+		return chatUserToResponses(m, memory)
 	case "assistant":
-		return chatAssistantToResponses(m)
+		return chatAssistantToResponses(m, memory)
 	case "tool":
-		return chatToolToResponses(m)
+		return chatToolToResponses(m, memory)
 	case "function":
-		return chatFunctionToResponses(m)
+		return chatFunctionToResponses(m, memory)
 	default:
-		return chatUserToResponses(m)
+		return chatUserToResponses(m, memory)
 	}
 }
 
 // chatSystemToResponses converts a system or developer message, keeping its
 // role: the Responses API accepts both, and developer must not be demoted to
 // a user turn.
-func chatSystemToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
-	parsed, err := parseChatMessageContent(m.Content)
+func chatSystemToResponses(m ChatMessage, memories ...*ResponsesToolMemory) ([]ResponsesInputItem, error) {
+	memory := firstResponsesToolMemory(memories)
+	parsed, err := parseChatMessageContent(m.Content, memory)
 	if err != nil {
 		return nil, err
 	}
-	content, err := marshalChatInputContent(parsed)
+	content, err := marshalChatInputContent(parsed, memory)
 	if err != nil {
 		return nil, err
 	}
@@ -223,12 +233,13 @@ func chatSystemToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 
 // chatUserToResponses converts a user message, handling both plain strings and
 // multi-modal content arrays.
-func chatUserToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
-	parsed, err := parseChatMessageContent(m.Content)
+func chatUserToResponses(m ChatMessage, memories ...*ResponsesToolMemory) ([]ResponsesInputItem, error) {
+	memory := firstResponsesToolMemory(memories)
+	parsed, err := parseChatMessageContent(m.Content, memory)
 	if err != nil {
 		return nil, fmt.Errorf("parse user content: %w", err)
 	}
-	content, err := marshalChatInputContent(parsed)
+	content, err := marshalChatInputContent(parsed, memory)
 	if err != nil {
 		return nil, err
 	}
@@ -239,31 +250,33 @@ func chatUserToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 // text content and tool_calls, the text is emitted as an assistant message
 // first, then each tool_call becomes a function_call item. If the content is
 // empty/nil and there are tool_calls, only function_call items are emitted.
-func chatAssistantToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
+func chatAssistantToResponses(m ChatMessage, memories ...*ResponsesToolMemory) ([]ResponsesInputItem, error) {
+	memory := firstResponsesToolMemory(memories)
 	var items []ResponsesInputItem
 	content := ""
 
 	if m.ReasoningContent != "" {
-		content = "<thinking>" + m.ReasoningContent + "</thinking>"
+		content = memory.join("<thinking>", m.ReasoningContent, "</thinking>")
 	}
 
 	// Emit assistant message with output_text if content is non-empty.
 	if len(m.Content) > 0 {
-		s, err := parseAssistantContent(m.Content)
+		s, err := parseAssistantContent(m.Content, memory)
 		if err != nil {
 			return nil, err
 		}
 		if s != "" {
 			if content != "" {
-				content += "\n"
+				content = memory.join(content, "\n", s)
+			} else {
+				content = s
 			}
-			content += s
 		}
 	}
 
 	if content != "" {
 		parts := []ResponsesContentPart{{Type: "output_text", Text: content}}
-		partsJSON, err := json.Marshal(parts)
+		partsJSON, err := memory.marshal(parts)
 		if err != nil {
 			return nil, err
 		}
@@ -295,25 +308,31 @@ func chatAssistantToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 //
 // For structured thinking/reasoning parts, it preserves semantics by wrapping
 // the text in explicit tags so downstream can still distinguish it from normal text.
-func parseAssistantContent(raw json.RawMessage) (string, error) {
+func parseAssistantContent(raw json.RawMessage, memories ...*ResponsesToolMemory) (string, error) {
+	memory := firstResponsesToolMemory(memories)
 	if len(raw) == 0 {
 		return "", nil
 	}
 
 	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
+	if err := memory.unmarshal(raw, &s); err == nil {
 		return s, nil
 	}
 
 	var parts []map[string]any
-	if err := json.Unmarshal(raw, &parts); err != nil {
+	if err := memory.unmarshal(raw, &parts); err != nil {
 		// Keep compatibility with prior behavior: unsupported assistant content
 		// formats are ignored instead of failing the whole request conversion.
 		return "", nil
 	}
 
 	var b strings.Builder
+	var pieces []string
 	write := func(v string) error {
+		if memory != nil {
+			pieces = append(pieces, v)
+			return nil
+		}
 		_, err := b.WriteString(v)
 		return err
 	}
@@ -354,13 +373,17 @@ func parseAssistantContent(raw json.RawMessage) (string, error) {
 		}
 	}
 
+	if memory != nil {
+		return memory.join(pieces...), memory.Err()
+	}
 	return b.String(), nil
 }
 
 // chatToolToResponses converts a tool result message (role=tool) into a
 // function_call_output item.
-func chatToolToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
-	output, err := parseChatContent(m.Content)
+func chatToolToResponses(m ChatMessage, memories ...*ResponsesToolMemory) ([]ResponsesInputItem, error) {
+	memory := firstResponsesToolMemory(memories)
+	output, err := parseChatContent(m.Content, memory)
 	if err != nil {
 		return nil, err
 	}
@@ -378,8 +401,9 @@ func chatToolToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 // (role=function) into a function_call_output item. ToolCallID holds the ID
 // assigned to the matching legacy call (see legacyFunctionCallIDs); without a
 // matching call the Name field is used as call_id.
-func chatFunctionToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
-	output, err := parseChatContent(m.Content)
+func chatFunctionToResponses(m ChatMessage, memories ...*ResponsesToolMemory) ([]ResponsesInputItem, error) {
+	memory := firstResponsesToolMemory(memories)
+	output, err := parseChatContent(m.Content, memory)
 	if err != nil {
 		return nil, err
 	}
@@ -400,47 +424,50 @@ func chatFunctionToResponses(m ChatMessage) ([]ResponsesInputItem, error) {
 // parseChatContent returns the string value of a ChatMessage Content field.
 // Content can be a JSON string or an array of typed parts. Array content is
 // flattened to text by concatenating text parts and ignoring non-text parts.
-func parseChatContent(raw json.RawMessage) (string, error) {
-	parsed, err := parseChatMessageContent(raw)
+func parseChatContent(raw json.RawMessage, memories ...*ResponsesToolMemory) (string, error) {
+	memory := firstResponsesToolMemory(memories)
+	parsed, err := parseChatMessageContent(raw, memory)
 	if err != nil {
 		return "", err
 	}
 	if parsed.Text != nil {
 		return *parsed.Text, nil
 	}
-	return flattenChatContentParts(parsed.Parts), nil
+	return flattenChatContentParts(parsed.Parts, memory), nil
 }
 
-func parseChatMessageContent(raw json.RawMessage) (chatMessageContent, error) {
+func parseChatMessageContent(raw json.RawMessage, memories ...*ResponsesToolMemory) (chatMessageContent, error) {
+	memory := firstResponsesToolMemory(memories)
 	if len(raw) == 0 {
 		return chatMessageContent{Text: stringPtr("")}, nil
 	}
 
 	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
+	if err := memory.unmarshal(raw, &s); err == nil {
 		return chatMessageContent{Text: &s}, nil
 	}
 
 	var parts []ChatContentPart
-	if err := json.Unmarshal(raw, &parts); err == nil {
+	if err := memory.unmarshal(raw, &parts); err == nil {
 		return chatMessageContent{Parts: parts}, nil
 	}
 
 	return chatMessageContent{}, fmt.Errorf("parse content as string or parts array")
 }
 
-func marshalChatInputContent(content chatMessageContent) (json.RawMessage, error) {
+func marshalChatInputContent(content chatMessageContent, memories ...*ResponsesToolMemory) (json.RawMessage, error) {
+	memory := firstResponsesToolMemory(memories)
 	if content.Text != nil {
-		return json.Marshal(*content.Text)
+		return memory.marshal(*content.Text)
 	}
 	parts := convertChatContentPartsToResponses(content.Parts)
 	if len(parts) == 0 {
 		// A nil slice marshals to JSON null, which the upstream Responses API
 		// rejects ("expected an array of objects or string, but got null").
 		// Fall back to an empty string when no usable parts remain.
-		return json.Marshal("")
+		return memory.marshal("")
 	}
-	return json.Marshal(parts)
+	return memory.marshal(parts)
 }
 
 func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesContentPart {
@@ -494,14 +521,15 @@ func isEmptyBase64DataURI(raw string) bool {
 	return strings.TrimSpace(strings.TrimPrefix(rest, "base64,")) == ""
 }
 
-func flattenChatContentParts(parts []ChatContentPart) string {
+func flattenChatContentParts(parts []ChatContentPart, memories ...*ResponsesToolMemory) string {
+	memory := firstResponsesToolMemory(memories)
 	var textParts []string
 	for _, p := range parts {
 		if p.Type == "text" && p.Text != "" {
 			textParts = append(textParts, p.Text)
 		}
 	}
-	return strings.Join(textParts, "")
+	return memory.join(textParts...)
 }
 
 func stringPtr(s string) *string {
@@ -574,21 +602,22 @@ func defaultStrictFalse(src *bool) *bool {
 //
 // Strings ("auto", "none", "required") and objects that already use the
 // Responses shape are returned unchanged.
-func convertChatToolChoiceToResponses(raw json.RawMessage) json.RawMessage {
+func convertChatToolChoiceToResponses(raw json.RawMessage, memories ...*ResponsesToolMemory) json.RawMessage {
+	memory := firstResponsesToolMemory(memories)
 	var choice struct {
 		Type     string `json:"type"`
 		Function *struct {
 			Name string `json:"name"`
 		} `json:"function"`
 	}
-	if err := json.Unmarshal(raw, &choice); err != nil || choice.Type != "function" || choice.Function == nil {
+	if err := memory.unmarshal(raw, &choice); err != nil || choice.Type != "function" || choice.Function == nil {
 		return raw
 	}
 	name := strings.TrimSpace(choice.Function.Name)
 	if name == "" {
 		return raw
 	}
-	flat, err := json.Marshal(map[string]string{"type": "function", "name": name})
+	flat, err := memory.marshal(map[string]string{"type": "function", "name": name})
 	if err != nil {
 		return raw
 	}
@@ -601,21 +630,22 @@ func convertChatToolChoiceToResponses(raw json.RawMessage) json.RawMessage {
 //	"auto" → "auto"
 //	"none" → "none"
 //	{"name":"X"} → {"type":"function","name":"X"}
-func convertChatFunctionCallToToolChoice(raw json.RawMessage) (json.RawMessage, error) {
+func convertChatFunctionCallToToolChoice(raw json.RawMessage, memories ...*ResponsesToolMemory) (json.RawMessage, error) {
+	memory := firstResponsesToolMemory(memories)
 	// Try string first ("auto", "none", etc.) — pass through as-is.
 	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return json.Marshal(s)
+	if err := memory.unmarshal(raw, &s); err == nil {
+		return memory.marshal(s)
 	}
 
 	// Object form: {"name":"X"}
 	var obj struct {
 		Name string `json:"name"`
 	}
-	if err := json.Unmarshal(raw, &obj); err != nil {
+	if err := memory.unmarshal(raw, &obj); err != nil {
 		return nil, err
 	}
-	return json.Marshal(map[string]any{
+	return memory.marshal(map[string]any{
 		"type": "function",
 		"name": obj.Name,
 	})

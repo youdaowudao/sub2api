@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 // The ChatGPT internal Codex endpoint rejects a request whose input replays a
@@ -147,30 +147,32 @@ func ensureOpenAIOAuthWebSearchToolForHistory(reqBody map[string]any, responsesL
 
 // ensureOpenAIOAuthWebSearchToolForHistoryBody is the raw-body variant used by
 // the passthrough and WebSocket paths; it avoids decoding the whole body.
-func ensureOpenAIOAuthWebSearchToolForHistoryBody(body []byte, responsesLite bool) ([]byte, bool, error) {
+func ensureOpenAIOAuthWebSearchToolForHistoryBody(body []byte, responsesLite bool, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(body) == 0 || !bytes.Contains(body, []byte(openAIWebSearchCallItemType)) {
 		return body, false, nil
 	}
-	input := gjson.GetBytes(body, "input")
+	input := wsMem.get(body, "input")
 	if !input.IsArray() {
 		return body, false, nil
 	}
-	items := input.Array()
+	items := wsMem.array(input)
 	hasWebSearchCall := false
 	callerDeclaredTools := false
 	additionalToolsIndex := -1
 	itemTypes := make([]string, len(items))
 	for i, item := range items {
-		itemTypes[i] = strings.TrimSpace(item.Get("type").String())
+		itemTypes[i] = strings.TrimSpace(wsMem.resultGet(item, "type").String())
 		switch itemTypes[i] {
 		case openAIWebSearchCallItemType:
 			hasWebSearchCall = true
 		case openAIAdditionalToolsItemType:
-			itemTools := item.Get("tools")
-			if gjsonToolsContainWebSearch(itemTools) {
+			itemTools := wsMem.resultGet(item, "tools")
+			if gjsonToolsContainWebSearch(itemTools, wsMem) {
 				return body, false, nil
 			}
-			if itemTools.IsArray() && len(itemTools.Array()) > 0 {
+			if itemTools.IsArray() && len(wsMem.array(itemTools)) > 0 {
 				callerDeclaredTools = true
 			}
 			if additionalToolsIndex < 0 {
@@ -181,11 +183,11 @@ func ensureOpenAIOAuthWebSearchToolForHistoryBody(body []byte, responsesLite boo
 	if !hasWebSearchCall {
 		return body, false, nil
 	}
-	tools := gjson.GetBytes(body, "tools")
-	if gjsonToolsContainWebSearch(tools) {
+	tools := wsMem.get(body, "tools")
+	if gjsonToolsContainWebSearch(tools, wsMem) {
 		return body, false, nil
 	}
-	topLevelTools := tools.IsArray() && len(tools.Array()) > 0
+	topLevelTools := tools.IsArray() && len(wsMem.array(tools)) > 0
 	callerDeclaredTools = callerDeclaredTools || topLevelTools
 
 	var (
@@ -194,23 +196,23 @@ func ensureOpenAIOAuthWebSearchToolForHistoryBody(body []byte, responsesLite boo
 	)
 	switch {
 	case !responsesLite && topLevelTools:
-		next, err = sjson.SetBytes(body, "tools.-1", cloneOpenAIWebSearchHistoryTool())
+		next, err = wsMem.set(body, "tools.-1", cloneOpenAIWebSearchHistoryTool())
 	case !responsesLite:
-		next, err = sjson.SetBytes(body, "tools", []any{cloneOpenAIWebSearchHistoryTool()})
+		next, err = wsMem.set(body, "tools", []any{cloneOpenAIWebSearchHistoryTool()})
 	case additionalToolsIndex >= 0 && items[additionalToolsIndex].Get("tools").IsArray():
-		next, err = sjson.SetBytes(body, fmt.Sprintf("input.%d.tools.-1", additionalToolsIndex), cloneOpenAIWebSearchHistoryTool())
+		next, err = wsMem.set(body, fmt.Sprintf("input.%d.tools.-1", additionalToolsIndex), cloneOpenAIWebSearchHistoryTool())
 	case additionalToolsIndex >= 0:
-		next, err = sjson.SetBytes(body, fmt.Sprintf("input.%d.tools", additionalToolsIndex), []any{cloneOpenAIWebSearchHistoryTool()})
+		next, err = wsMem.set(body, fmt.Sprintf("input.%d.tools", additionalToolsIndex), []any{cloneOpenAIWebSearchHistoryTool()})
 	default:
-		next, err = insertOpenAIAdditionalToolsItemRaw(body, items, openAIAdditionalToolsInsertIndex(itemTypes))
+		next, err = insertOpenAIAdditionalToolsItemRaw(body, items, openAIAdditionalToolsInsertIndex(itemTypes), wsMem)
 	}
 	if err != nil {
 		return body, false, fmt.Errorf("declare web_search tool for web_search_call history: %w", err)
 	}
 	if !callerDeclaredTools {
-		choice := gjson.GetBytes(next, "tool_choice")
+		choice := wsMem.get(next, "tool_choice")
 		if !choice.Exists() || choice.Type == gjson.Null || (choice.Type == gjson.String && shouldPinOpenAIWebSearchHistoryToolChoice(choice.String())) {
-			next, err = sjson.SetBytes(next, "tool_choice", "none")
+			next, err = wsMem.set(next, "tool_choice", "none")
 			if err != nil {
 				return body, false, fmt.Errorf("pin tool_choice for web_search_call history: %w", err)
 			}
@@ -219,8 +221,10 @@ func ensureOpenAIOAuthWebSearchToolForHistoryBody(body []byte, responsesLite boo
 	return next, true, nil
 }
 
-func insertOpenAIAdditionalToolsItemRaw(body []byte, items []gjson.Result, at int) ([]byte, error) {
-	additional, err := marshalOpenAIUpstreamJSON(map[string]any{
+func insertOpenAIAdditionalToolsItemRaw(body []byte, items []gjson.Result, at int, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	additional, err := wsMem.encode(map[string]any{
 		"type":  openAIAdditionalToolsItemType,
 		"role":  openAIAdditionalToolsDefaultRole,
 		"tools": []any{cloneOpenAIWebSearchHistoryTool()},
@@ -233,22 +237,48 @@ func insertOpenAIAdditionalToolsItemRaw(body []byte, items []gjson.Result, at in
 		if i == at {
 			rawItems = append(rawItems, additional)
 		}
-		rawItems = append(rawItems, []byte(item.Raw))
+		rawItems = append(rawItems, wsMem.rawView(item.Raw))
 	}
 	if at >= len(items) {
 		rawItems = append(rawItems, additional)
 	}
-	raw := append([]byte{'['}, bytes.Join(rawItems, []byte{','})...)
-	raw = append(raw, ']')
-	return sjson.SetRawBytes(body, "input", raw)
+	var raw []byte
+	if wsMem == nil {
+		raw = append([]byte{'['}, bytes.Join(rawItems, []byte{','})...)
+		raw = append(raw, ']')
+	} else {
+		n := int64(2 + max(0, len(rawItems)-1))
+		for _, item := range rawItems {
+			n, err = wsMemoryAdd(n, int64(len(item)))
+			if err != nil {
+				return nil, err
+			}
+		}
+		owner, reserveErr := pkghttputil.ReserveWSBodyMemoryOwner(wsMem.ctx, n)
+		if reserveErr != nil {
+			return nil, reserveErr
+		}
+		defer owner.Drop()
+		raw = make([]byte, 0, int(n))
+		raw = append(raw, '[')
+		for i, item := range rawItems {
+			if i != 0 {
+				raw = append(raw, ',')
+			}
+			raw = append(raw, item...)
+		}
+		raw = append(raw, ']')
+	}
+	return wsMem.setRaw(body, "input", raw)
 }
 
-func gjsonToolsContainWebSearch(tools gjson.Result) bool {
+func gjsonToolsContainWebSearch(tools gjson.Result, memories ...*wsMaterializer) bool {
+	mem := firstWSMaterializer(memories)
 	if !tools.IsArray() {
 		return false
 	}
-	for _, tool := range tools.Array() {
-		if isOpenAIWebSearchToolType(tool.Get("type").String()) {
+	for _, tool := range mem.array(tools) {
+		if isOpenAIWebSearchToolType(mem.resultGet(tool, "type").String()) {
 			return true
 		}
 	}

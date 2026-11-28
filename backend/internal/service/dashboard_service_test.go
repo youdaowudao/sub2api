@@ -461,3 +461,96 @@ func TestDashboardService_AggDisabled_UsesUsageLogsFallback(t *testing.T) {
 	require.False(t, repo.rangeEnd.IsZero())
 	require.Equal(t, truncateToDayUTC(repo.rangeEnd.AddDate(0, 0, -7)), repo.rangeStart)
 }
+
+func TestDashboardService_ConnectionUsageCacheCompatibility(t *testing.T) {
+	// RED for later WS changes copies every modified service test into the
+	// old source tree. Keep this new-feature test compilable there by
+	// observing the optional field at the existing stats JSON boundary.
+	type connectionUsageView struct {
+		WSUsers   int64  `json:"ws_users"`
+		HTTPUsers int64  `json:"http_users"`
+		WindowEnd string `json:"window_end"`
+	}
+	type statsView struct {
+		Usage *connectionUsageView `json:"connection_usage,omitempty"`
+	}
+	statsWithUsage := func(t *testing.T, usage *connectionUsageView) *usagestats.DashboardStats {
+		t.Helper()
+		payload, err := json.Marshal(statsView{Usage: usage})
+		require.NoError(t, err)
+		stats := &usagestats.DashboardStats{}
+		require.NoError(t, json.Unmarshal(payload, stats))
+		return stats
+	}
+	readUsage := func(t *testing.T, stats *usagestats.DashboardStats) *connectionUsageView {
+		t.Helper()
+		payload, err := json.Marshal(stats)
+		require.NoError(t, err)
+		var view statsView
+		require.NoError(t, json.Unmarshal(payload, &view))
+		return view.Usage
+	}
+	old := &connectionUsageView{WSUsers: 5, HTTPUsers: 6, WindowEnd: "2026-11-28T01:05:30Z"}
+	latest := &connectionUsageView{WSUsers: 0, HTTPUsers: 2, WindowEnd: "2026-11-28T01:06:30Z"}
+	for _, tc := range []struct {
+		name                 string
+		mode                 string
+		cacheUsage           *connectionUsageView
+		expected             *connectionUsageView
+		get, set, del, fetch int32
+	}{
+		{"fresh", "fresh", old, old, 1, 0, 0, 0},
+		{"legacy cache", "fresh", nil, nil, 1, 0, 0, 0},
+		{"stale", "stale", old, old, 1, 1, 0, 1},
+		{"legacy stale", "stale", nil, nil, 1, 1, 0, 1},
+		{"miss", "miss", nil, latest, 1, 1, 0, 1},
+		{"corrupt", "corrupt", nil, latest, 1, 1, 1, 1},
+		{"disabled", "disabled", nil, latest, 0, 0, 0, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			updated := time.Now()
+			if tc.mode == "stale" {
+				updated = updated.Add(-time.Minute)
+			}
+			payload, err := json.Marshal(dashboardStatsCacheEntry{Stats: statsWithUsage(t, tc.cacheUsage), UpdatedAt: updated.Unix()})
+			require.NoError(t, err)
+			cache := &dashboardCacheStub{get: func(context.Context) (string, error) {
+				if tc.mode == "miss" {
+					return "", ErrDashboardStatsCacheMiss
+				}
+				if tc.mode == "corrupt" {
+					return "not-json", nil
+				}
+				return string(payload), nil
+			}}
+			repo := &usageRepoStub{rangeStats: statsWithUsage(t, latest)}
+			svc := NewDashboardService(repo, nil, cache, &config.Config{Dashboard: config.DashboardCacheConfig{Enabled: tc.mode != "disabled"}})
+			got, err := svc.GetDashboardStats(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, readUsage(t, got))
+			if tc.set > 0 {
+				require.Eventually(t, func() bool {
+					cache.lastSetMu.Lock()
+					defer cache.lastSetMu.Unlock()
+					return cache.lastSet != ""
+				}, time.Second, 10*time.Millisecond)
+				require.Equal(t, latest, readUsage(t, cache.readLastEntry(t).Stats))
+			}
+			require.Equal(t, tc.get, atomic.LoadInt32(&cache.getCalls))
+			require.Equal(t, tc.set, atomic.LoadInt32(&cache.setCalls))
+			require.Equal(t, tc.del, atomic.LoadInt32(&cache.delCalls))
+			require.Equal(t, tc.fetch, atomic.LoadInt32(&repo.rangeCalls))
+			require.Zero(t, atomic.LoadInt32(&repo.calls))
+		})
+	}
+	t.Run("fetch failed", func(t *testing.T) {
+		cache := &dashboardCacheStub{}
+		failure := errors.New("stats failed")
+		repo := &usageRepoStub{rangeErr: failure}
+		got, err := NewDashboardService(repo, nil, cache, nil).GetDashboardStats(context.Background())
+		require.ErrorIs(t, err, failure)
+		require.Nil(t, got)
+		require.Equal(t, int32(1), atomic.LoadInt32(&repo.rangeCalls))
+		require.Zero(t, atomic.LoadInt32(&cache.setCalls))
+	})
+}

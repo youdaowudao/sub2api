@@ -147,19 +147,26 @@ func collectOpenAIResponsesToolNameFields(reqBody map[string]any) []codexToolNam
 	return fields
 }
 
-func aliasOpenAIOAuthReservedToolNamesBody(body []byte) ([]byte, map[string]string, bool, error) {
+func aliasOpenAIOAuthReservedToolNamesBody(body []byte, memories ...*wsMaterializer) ([]byte, map[string]string, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(body) == 0 || !containsASCIIFold(body, []byte(codexReservedPythonToolName)) {
 		return body, nil, false, nil
 	}
 	var reqBody map[string]any
-	if err := decodeOpenAIJSONUseNumber(body, &reqBody); err != nil {
+	if err := wsMem.decode(body, &reqBody); err != nil {
 		return body, nil, false, fmt.Errorf("decode OAuth reserved tool names: %w", err)
 	}
 	reverse, changed, err := aliasOpenAIOAuthReservedToolNames(reqBody)
+	if wsMem != nil {
+		for key, name := range reverse {
+			reverse[key] = strings.Clone(name)
+		}
+	}
 	if err != nil || !changed {
 		return body, reverse, false, err
 	}
-	normalized, err := json.Marshal(reqBody)
+	normalized, err := wsMem.marshal(reqBody)
 	if err != nil {
 		return body, nil, false, fmt.Errorf("encode OAuth reserved tool names: %w", err)
 	}
@@ -267,19 +274,20 @@ func codexToolNameReverseForKey(c *gin.Context, key string) map[string]string {
 
 // updateCodexToolNameReverseForWSFrame keeps the active turn isolated from
 // session updates that may arrive while that turn is still streaming.
-func updateCodexToolNameReverseForWSFrame(c *gin.Context, frame []byte, reverse map[string]string) {
+func updateCodexToolNameReverseForWSFrame(c *gin.Context, frame []byte, reverse map[string]string, memories ...*wsMaterializer) {
+	mem := firstWSMaterializer(memories)
 	if c == nil {
 		return
 	}
-	eventType := strings.TrimSpace(gjson.GetBytes(frame, "type").String())
+	eventType := strings.TrimSpace(mem.get(frame, "type").String())
 	switch eventType {
 	case "session.update":
-		if gjson.GetBytes(frame, "session.tools").Exists() {
+		if mem.get(frame, "session.tools").Exists() {
 			storeCodexToolNameReverse(c, codexToolNameSessionKey, reverse)
 		}
 	case "response.create", "":
 		active := reverse
-		if !openAIWSFrameHasExplicitToolDeclarations(frame) {
+		if !openAIWSFrameHasExplicitToolDeclarations(frame, mem) {
 			active = mergeCodexToolNameReverseMaps(
 				codexToolNameReverseForKey(c, codexToolNameSessionKey),
 				reverse,
@@ -289,16 +297,32 @@ func updateCodexToolNameReverseForWSFrame(c *gin.Context, frame []byte, reverse 
 	}
 }
 
-func openAIWSFrameHasExplicitToolDeclarations(frame []byte) bool {
-	if gjson.GetBytes(frame, "tools").Exists() {
+func openAIWSFrameHasExplicitToolDeclarations(frame []byte, memories ...*wsMaterializer) bool {
+	mem := firstWSMaterializer(memories)
+	if mem.get(frame, "tools").Exists() {
 		return true
 	}
-	for _, item := range gjson.GetBytes(frame, "input").Array() {
-		if strings.EqualFold(strings.TrimSpace(item.Get("type").String()), "additional_tools") && item.Get("tools").Exists() {
-			return true
-		}
+	input := mem.get(frame, "input")
+	found := false
+	check := func(item gjson.Result) bool {
+		return strings.EqualFold(strings.TrimSpace(mem.resultGet(item, "type").String()), "additional_tools") && mem.resultGet(item, "tools").Exists()
 	}
-	return false
+	if mem == nil {
+		for _, item := range input.Array() {
+			if check(item) {
+				return true
+			}
+		}
+		return false
+	}
+	if !input.IsArray() {
+		return check(input)
+	}
+	mem.forEachArray(input, func(_, item gjson.Result) bool {
+		found = check(item)
+		return !found
+	})
+	return found
 }
 
 func mergeCodexToolNameReverseMaps(base, overlay map[string]string) map[string]string {

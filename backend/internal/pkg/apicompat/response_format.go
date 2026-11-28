@@ -1,25 +1,45 @@
 package apicompat
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
-func chatResponseFormatToResponsesTextFormat(raw json.RawMessage) json.RawMessage {
-	raw = normalizedRawJSON(raw)
+func chatResponseFormatToResponsesTextFormat(raw json.RawMessage, memories ...*ResponsesToolMemory) json.RawMessage {
+	memory := firstResponsesToolMemory(memories)
+	if memory == nil {
+		raw = normalizedRawJSON(raw)
+	} else {
+		raw = bytes.TrimSpace(raw)
+		if bytes.Equal(raw, []byte("null")) {
+			raw = nil
+		}
+	}
 	if len(raw) == 0 {
 		return nil
 	}
 
-	obj, ok := rawJSONObject(raw)
+	var obj map[string]json.RawMessage
+	ok := memory.unmarshal(raw, &obj) == nil
 	if !ok || rawString(obj["type"]) != "json_schema" {
 		return raw
 	}
 
-	schemaRaw := normalizedRawJSON(obj["json_schema"])
+	schemaRaw := obj["json_schema"]
+	if memory == nil {
+		schemaRaw = normalizedRawJSON(schemaRaw)
+	} else {
+		schemaRaw = bytes.TrimSpace(schemaRaw)
+		if bytes.Equal(schemaRaw, []byte("null")) {
+			schemaRaw = nil
+		}
+	}
 	if len(schemaRaw) == 0 {
 		return raw
 	}
 
 	var schema map[string]json.RawMessage
-	if err := json.Unmarshal(schemaRaw, &schema); err != nil {
+	if err := memory.unmarshal(schemaRaw, &schema); err != nil {
 		return raw
 	}
 	schema["type"] = rawJSONString("json_schema")
@@ -29,7 +49,7 @@ func chatResponseFormatToResponsesTextFormat(raw json.RawMessage) json.RawMessag
 		schema["strict"] = json.RawMessage("false")
 	}
 
-	out, err := json.Marshal(schema)
+	out, err := memory.marshal(schema)
 	if err != nil {
 		return raw
 	}

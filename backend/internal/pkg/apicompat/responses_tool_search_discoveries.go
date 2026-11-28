@@ -18,7 +18,9 @@ type responsesDiscoveredToolIdentity struct {
 // tools callable for function-only upstreams. The original tool_search_output
 // remains request history and is normalized separately; declarations are
 // appended after static tools so the client's declaration order stays stable.
-func promoteResponsesToolSearchDiscoveries(req map[string]any) (bool, error) {
+func promoteResponsesToolSearchDiscoveries(req map[string]any, memories ...*ResponsesToolMemory) (bool, error) {
+	mem := firstResponsesToolMemory(memories)
+
 	tools, ok := req["tools"].([]any)
 	if !ok || len(tools) == 0 || !hasResponsesToolSearchDeclaration(tools) {
 		return false, nil
@@ -27,7 +29,7 @@ func promoteResponsesToolSearchDiscoveries(req map[string]any) (bool, error) {
 	if !ok || len(input) == 0 {
 		return false, nil
 	}
-	promoted, err := promotedResponsesToolSearchDiscoveries(tools, input)
+	promoted, err := promotedResponsesToolSearchDiscoveries(tools, input, mem)
 	if err != nil {
 		return false, err
 	}
@@ -38,14 +40,16 @@ func promoteResponsesToolSearchDiscoveries(req map[string]any) (bool, error) {
 	return true, nil
 }
 
-func promotedResponsesToolSearchDiscoveries(tools, input []any) ([]any, error) {
+func promotedResponsesToolSearchDiscoveries(tools, input []any, memories ...*ResponsesToolMemory) ([]any, error) {
+	mem := firstResponsesToolMemory(memories)
+
 	if len(tools) == 0 || !hasResponsesToolSearchDeclaration(tools) || len(input) == 0 {
 		return nil, nil
 	}
 
 	known := make(map[string]responsesDiscoveredToolIdentity)
 	for _, raw := range tools {
-		registerExistingResponsesToolIdentity(known, raw)
+		registerExistingResponsesToolIdentity(known, raw, mem)
 	}
 
 	promoted := make([]any, 0)
@@ -58,7 +62,10 @@ func promotedResponsesToolSearchDiscoveries(tools, input []any) ([]any, error) {
 		if !ok || len(discoveries) == 0 {
 			continue
 		}
-		if _, err := json.Marshal(discoveries); err != nil {
+		if err := mem.validate(discoveries); err != nil {
+			if mem != nil {
+				return nil, err
+			}
 			continue
 		}
 		for _, rawDiscovery := range discoveries {
@@ -69,7 +76,7 @@ func promotedResponsesToolSearchDiscoveries(tools, input []any) ([]any, error) {
 			typ := strings.TrimSpace(stringValue(discovery["type"]))
 			switch typ {
 			case "function", "custom":
-				copy, identity, ok := responsesDirectToolDiscovery(discovery, typ)
+				copy, identity, ok := responsesDirectToolDiscovery(discovery, typ, mem)
 				if !ok {
 					continue
 				}
@@ -81,7 +88,7 @@ func promotedResponsesToolSearchDiscoveries(tools, input []any) ([]any, error) {
 					promoted = append(promoted, copy)
 				}
 			case "namespace":
-				copy, identities, ok := responsesNamespaceToolDiscovery(discovery)
+				copy, identities, ok := responsesNamespaceToolDiscovery(discovery, mem)
 				if !ok {
 					continue
 				}
@@ -102,6 +109,9 @@ func promotedResponsesToolSearchDiscoveries(tools, input []any) ([]any, error) {
 				}
 			}
 		}
+	}
+	if mem.Err() != nil {
+		return nil, mem.Err()
 	}
 	return promoted, nil
 }
@@ -125,7 +135,9 @@ func usableResponsesToolSearchOutput(item map[string]any) bool {
 	return ok && strings.TrimSpace(text) == "completed"
 }
 
-func registerExistingResponsesToolIdentity(known map[string]responsesDiscoveredToolIdentity, raw any) {
+func registerExistingResponsesToolIdentity(known map[string]responsesDiscoveredToolIdentity, raw any, memories ...*ResponsesToolMemory) {
+	mem := firstResponsesToolMemory(memories)
+
 	tool, ok := raw.(map[string]any)
 	if !ok {
 		return
@@ -133,12 +145,12 @@ func registerExistingResponsesToolIdentity(known map[string]responsesDiscoveredT
 	typ := strings.TrimSpace(stringValue(tool["type"]))
 	switch typ {
 	case "function", "custom":
-		_, identity, ok := responsesDirectToolDiscovery(tool, typ)
+		_, identity, ok := responsesDirectToolDiscovery(tool, typ, mem)
 		if ok {
 			registerExistingResponsesIdentity(known, identity.name, identity)
 		}
 	case "namespace":
-		_, identities, ok := responsesNamespaceToolDiscovery(tool)
+		_, identities, ok := responsesNamespaceToolDiscovery(tool, mem)
 		if !ok {
 			return
 		}
@@ -176,7 +188,9 @@ func sameResponsesDiscoveredTool(left, right responsesDiscoveredToolIdentity) bo
 	return left.typ == right.typ && left.name == right.name && left.namespace == right.namespace && left.encoded == right.encoded
 }
 
-func responsesDirectToolDiscovery(tool map[string]any, typ string) (map[string]any, responsesDiscoveredToolIdentity, bool) {
+func responsesDirectToolDiscovery(tool map[string]any, typ string, memories ...*ResponsesToolMemory) (map[string]any, responsesDiscoveredToolIdentity, bool) {
+	mem := firstResponsesToolMemory(memories)
+
 	name := strings.TrimSpace(stringValue(tool["name"]))
 	if name == "" {
 		return nil, responsesDiscoveredToolIdentity{}, false
@@ -191,11 +205,11 @@ func responsesDirectToolDiscovery(tool map[string]any, typ string) (map[string]a
 		identityCopy["parameters"] = json.RawMessage(customToolInputSchema)
 		delete(identityCopy, "format")
 	}
-	encoded, err := json.Marshal(identityCopy)
+	encoded, err := mem.encodeText(identityCopy)
 	if err != nil {
 		return nil, responsesDiscoveredToolIdentity{}, false
 	}
-	return copy, responsesDiscoveredToolIdentity{typ: typ, name: name, encoded: string(encoded)}, true
+	return copy, responsesDiscoveredToolIdentity{typ: typ, name: name, encoded: encoded}, true
 }
 
 // restoreInheritedResponsesClientToolDeclarations reverses only the declaration
@@ -239,7 +253,9 @@ type responsesNamespaceToolCandidate struct {
 	identity responsesDiscoveredToolIdentity
 }
 
-func responsesNamespaceToolDiscovery(tool map[string]any) (map[string]any, []responsesNamespaceToolCandidate, bool) {
+func responsesNamespaceToolDiscovery(tool map[string]any, memories ...*ResponsesToolMemory) (map[string]any, []responsesNamespaceToolCandidate, bool) {
+	mem := firstResponsesToolMemory(memories)
+
 	namespace := strings.TrimSpace(stringValue(tool["name"]))
 	children := namespaceChildren(tool)
 	if namespace == "" || len(children) == 0 {
@@ -254,11 +270,11 @@ func responsesNamespaceToolDiscovery(tool map[string]any) (map[string]any, []res
 		if !ok || strings.TrimSpace(stringValue(child["type"])) != "function" {
 			continue
 		}
-		childCopy, direct, ok := responsesDirectToolDiscovery(child, "function")
+		childCopy, direct, ok := responsesDirectToolDiscovery(child, "function", mem)
 		if !ok {
 			continue
 		}
-		flat := flattenNamespaceToolName(namespace, direct.name)
+		flat := mem.flatten(namespace, direct.name)
 		identities = append(identities, responsesNamespaceToolCandidate{
 			flat:  flat,
 			child: childCopy,

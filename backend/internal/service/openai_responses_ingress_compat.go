@@ -17,7 +17,9 @@ func normalizeOpenAIResponsesLegacyIngress(body []byte) ([]byte, bool, error) {
 	return normalizeOpenAIResponsesLegacyIngressWithConfig(nil, body)
 }
 
-func normalizeOpenAIResponsesLegacyIngressWithConfig(cfg *config.Config, body []byte) ([]byte, bool, error) {
+func normalizeOpenAIResponsesLegacyIngressWithConfig(cfg *config.Config, body []byte, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(body) == 0 {
 		return body, false, nil
 	}
@@ -26,20 +28,29 @@ func normalizeOpenAIResponsesLegacyIngressWithConfig(cfg *config.Config, body []
 	view := parseRawJSONView(body)
 	if view.IsObject() && gjson.ValidBytes(body) {
 		hasLegacyField := false
-		view.ForEach(func(key, _ gjson.Result) bool {
-			switch key.Str {
-			case "messages", "prompt", "commands":
-				hasLegacyField = true
+		if wsMem != nil {
+			for _, name := range []string{"messages", "prompt", "commands"} {
+				if len(rawWSPath(body, name)) > 0 {
+					hasLegacyField = true
+					break
+				}
 			}
-			return !hasLegacyField
-		})
+		} else {
+			view.ForEach(func(key, _ gjson.Result) bool {
+				switch key.Str {
+				case "messages", "prompt", "commands":
+					hasLegacyField = true
+				}
+				return !hasLegacyField
+			})
+		}
 		if !hasLegacyField {
 			return body, false, nil
 		}
 	}
 
 	var request map[string]any
-	if err := decodeOpenAIJSONUseNumber(body, &request); err != nil {
+	if err := wsMem.decode(body, &request); err != nil {
 		return body, false, fmt.Errorf("normalize legacy Responses ingress: %w", err)
 	}
 
@@ -48,7 +59,7 @@ func normalizeOpenAIResponsesLegacyIngressWithConfig(cfg *config.Config, body []
 	if hasMessages {
 		messages, messagesAreArray := messagesValue.([]any)
 		if messagesAreArray && len(messages) > 0 {
-			legacy, err := convertLegacyResponsesMessages(cfg, body)
+			legacy, err := convertLegacyResponsesMessages(cfg, body, wsMem)
 			if err != nil {
 				return body, false, err
 			}
@@ -88,7 +99,7 @@ func normalizeOpenAIResponsesLegacyIngressWithConfig(cfg *config.Config, body []
 	if !changed {
 		return body, false, nil
 	}
-	normalized, err := marshalOpenAIUpstreamJSON(request)
+	normalized, err := wsMem.encode(request)
 	if err != nil {
 		return body, false, fmt.Errorf("serialize legacy Responses ingress: %w", err)
 	}
@@ -110,20 +121,35 @@ type convertedLegacyResponsesMessages struct {
 	hasReasoningEffort bool
 }
 
-func convertLegacyResponsesMessages(cfg *config.Config, body []byte) (convertedLegacyResponsesMessages, error) {
+func convertLegacyResponsesMessages(cfg *config.Config, body []byte, memories ...*wsMaterializer) (convertedLegacyResponsesMessages, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	var converted convertedLegacyResponsesMessages
 	var chatRequest apicompat.ChatCompletionsRequest
-	if err := json.Unmarshal(body, &chatRequest); err != nil {
+	if err := wsMem.unmarshal(body, &chatRequest); err != nil {
 		return converted, fmt.Errorf("normalize legacy Responses messages: %w", err)
 	}
-	responsesRequest, err := chatCompletionsToResponses(cfg, &chatRequest)
+	var responsesRequest *apicompat.ResponsesRequest
+	var err error
+	if wsMem == nil {
+		responsesRequest, err = chatCompletionsToResponses(cfg, &chatRequest)
+	} else {
+		memory := &apicompat.ResponsesToolMemory{
+			Marshal: wsMem.marshal, Unmarshal: wsMem.unmarshal,
+			ReserveText: wsMem.reserveText,
+		}
+		responsesRequest, err = apicompat.ChatCompletionsToResponsesWithMemory(&chatRequest, configuredMinOutputTokens(cfg), memory)
+		if wsMem.err != nil {
+			return converted, wsMem.err
+		}
+	}
 	if err != nil {
 		return converted, fmt.Errorf("normalize legacy Responses messages: %w", err)
 	}
 	if len(responsesRequest.Input) == 0 {
 		return converted, fmt.Errorf("normalize legacy Responses messages: empty input")
 	}
-	if err := json.Unmarshal(responsesRequest.Input, &converted.input); err != nil {
+	if err := wsMem.unmarshal(responsesRequest.Input, &converted.input); err != nil {
 		return converted, fmt.Errorf("decode normalized legacy Responses input: %w", err)
 	}
 
@@ -138,7 +164,7 @@ func convertLegacyResponsesMessages(cfg *config.Config, body []byte) (convertedL
 	}
 
 	var rawRequest map[string]any
-	if err := decodeOpenAIJSONUseNumber(body, &rawRequest); err != nil {
+	if err := wsMem.decode(body, &rawRequest); err != nil {
 		return converted, fmt.Errorf("inspect legacy Responses fields: %w", err)
 	}
 	converted.hasChatTools = hasChatStyleTools(rawRequest) || rawRequest["functions"] != nil
@@ -147,7 +173,7 @@ func convertLegacyResponsesMessages(cfg *config.Config, body []byte) (convertedL
 	}
 	converted.hasChatToolChoice = hasChatStyleToolChoice(rawRequest) || rawRequest["function_call"] != nil
 	if converted.hasChatToolChoice && len(responsesRequest.ToolChoice) > 0 {
-		choice, err := normalizeLegacyResponsesToolChoice(responsesRequest.ToolChoice)
+		choice, err := normalizeLegacyResponsesToolChoice(responsesRequest.ToolChoice, wsMem)
 		if err != nil {
 			return converted, err
 		}
@@ -176,9 +202,11 @@ func hasChatStyleToolChoice(request map[string]any) bool {
 	return ok
 }
 
-func normalizeLegacyResponsesToolChoice(raw json.RawMessage) (any, error) {
+func normalizeLegacyResponsesToolChoice(raw json.RawMessage, memories ...*wsMaterializer) (any, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	var choice any
-	if err := json.Unmarshal(raw, &choice); err != nil {
+	if err := wsMem.unmarshal(raw, &choice); err != nil {
 		return nil, fmt.Errorf("normalize legacy Responses tool_choice: %w", err)
 	}
 	object, ok := choice.(map[string]any)

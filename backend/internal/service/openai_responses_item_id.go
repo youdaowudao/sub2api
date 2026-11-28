@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 func openAIResponsesInputItemIDPrefix(itemType string) (string, bool) {
@@ -63,7 +62,13 @@ func shouldStripOpenAIResponsesNonPairCallID(itemType string) bool {
 }
 
 func sanitizeOpenAIResponsesInputItemIDs(body []byte) ([]byte, bool, error) {
-	input := parseRawJSONView(body).Get("input")
+	return sanitizeOpenAIResponsesInputItemIDsWithMemory(body)
+}
+
+func sanitizeOpenAIResponsesInputItemIDsWithMemory(body []byte, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	input := wsMem.get(body, "input")
 	if !input.IsArray() {
 		return body, false, nil
 	}
@@ -75,13 +80,13 @@ func sanitizeOpenAIResponsesInputItemIDs(body []byte) ([]byte, bool, error) {
 	}
 
 	items := make([]inputItem, 0)
-	input.ForEach(func(_, item gjson.Result) bool {
+	wsMem.forEachArray(input, func(_, item gjson.Result) bool {
 		parsed := inputItem{raw: item.Raw}
 		if item.IsObject() {
-			itemType := item.Get("type")
-			id := item.Get("id")
+			itemType := wsMem.resultGet(item, "type")
+			id := wsMem.resultGet(item, "id")
 			trimmedItemType := strings.TrimSpace(itemType.String())
-			parsed.stripCallID = item.Get("call_id").Exists() && shouldStripOpenAIResponsesNonPairCallID(trimmedItemType)
+			parsed.stripCallID = wsMem.resultGet(item, "call_id").Exists() && shouldStripOpenAIResponsesNonPairCallID(trimmedItemType)
 			if id.Type == gjson.String {
 				parsed.stripID = shouldStripOpenAIResponsesInputItemID(trimmedItemType, id.String())
 			}
@@ -106,22 +111,22 @@ func sanitizeOpenAIResponsesInputItemIDs(body []byte) ([]byte, bool, error) {
 			rebuiltItems = append(rebuiltItems, item.raw)
 			continue
 		}
-		itemBody := []byte(item.raw)
+		itemBody := wsMem.rawView(item.raw)
 		if item.stripID {
 			var err error
-			itemBody, err = sjson.DeleteBytes(itemBody, "id")
+			itemBody, err = wsMem.delete(itemBody, "id")
 			if err != nil {
 				return nil, false, fmt.Errorf("delete input.%d.id: %w", index, err)
 			}
 		}
 		if item.stripCallID {
 			var err error
-			itemBody, err = sjson.DeleteBytes(itemBody, "call_id")
+			itemBody, err = wsMem.delete(itemBody, "call_id")
 			if err != nil {
 				return nil, false, fmt.Errorf("delete input.%d.call_id: %w", index, err)
 			}
 		}
-		rebuiltItems = append(rebuiltItems, string(itemBody))
+		rebuiltItems = append(rebuiltItems, wsMem.string(itemBody))
 	}
-	return replaceOpenAIRawInput(body, input, rebuiltItems), true, nil
+	return replaceOpenAIRawInput(body, input, rebuiltItems, wsMem), true, nil
 }

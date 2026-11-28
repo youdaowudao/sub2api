@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	coderws "github.com/coder/websocket"
 	"go.uber.org/zap"
@@ -99,6 +100,7 @@ type openAIWSIngressTurnError struct {
 type openAIWSCurrentTurnFailoverError struct {
 	cause        error
 	retryPayload []byte
+	retryOwner   *pkghttputil.WSBodyMemoryOwner
 }
 
 func (e *openAIWSCurrentTurnFailoverError) Error() string {
@@ -120,6 +122,19 @@ func newOpenAIWSCurrentTurnFailoverError(cause error, retryPayload []byte) error
 		cause:        cause,
 		retryPayload: append([]byte(nil), retryPayload...),
 	}
+}
+
+// TakeOpenAIWSCurrentTurnRetryBody transfers the error's stored immutable
+// payload to its only ingress consumer rather than cloning it again.
+func TakeOpenAIWSCurrentTurnRetryBody(err error) ([]byte, *pkghttputil.WSBodyMemoryOwner, bool) {
+	var retryErr *openAIWSCurrentTurnFailoverError
+	if !errors.As(err, &retryErr) || retryErr == nil {
+		return nil, nil, false
+	}
+	payload, owner := retryErr.retryPayload, retryErr.retryOwner
+	retryErr.retryPayload = nil
+	retryErr.retryOwner = nil
+	return payload, owner, true
 }
 
 // OpenAIWSCurrentTurnRetryPayload returns an isolated copy of the payload that
@@ -251,6 +266,8 @@ type OpenAIWSIngressHooks struct {
 	// before channel or account mapping. Ingress modes preserve it for usage
 	// attribution while MapRequestModel determines the upstream model.
 	InitialRequestModel string
+	// InitialPreviousResponseID preserves the ingress reference before routing normalization.
+	InitialPreviousResponseID string
 	// InitialTurnStartedAt freezes when the first response.create was accepted.
 	InitialTurnStartedAt time.Time
 	// MaxReasoningEffort limits explicit reasoning effort values for this WS session.
@@ -263,6 +280,8 @@ type OpenAIWSIngressHooks struct {
 	TurnStarted             func(turn int, startedAt time.Time)
 	BeforeTurn              func(turn int) error
 	BeforeRequest           func(turn int, payload []byte, originalModel string) error
+	// BeforeForward reserves the already-authorized logical turn from the actual outgoing input.
+	BeforeForward func(turn int, payload []byte, originalModel string) error
 	// MapRequestModel resolves the current turn's client model to the model
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)

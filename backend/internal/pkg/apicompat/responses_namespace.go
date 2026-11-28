@@ -14,13 +14,14 @@ type ResponsesNamespaceName = NamespacedToolName
 
 // FlattenResponsesNamespaces converts Codex private namespace declarations into
 // public Responses function tools and rewrites namespace-qualified request calls.
-func FlattenResponsesNamespaces(req map[string]any) (map[string]ResponsesNamespaceName, bool, error) {
-	return FlattenResponsesNamespacesExcept(req, nil)
+func FlattenResponsesNamespaces(req map[string]any, memories ...*ResponsesToolMemory) (map[string]ResponsesNamespaceName, bool, error) {
+	return FlattenResponsesNamespacesExcept(req, nil, memories...)
 }
 
 // FlattenResponsesNamespacesExcept is FlattenResponsesNamespaces with a set of
 // service-owned namespace names that must remain native in the request.
-func FlattenResponsesNamespacesExcept(req map[string]any, preserved map[string]bool) (map[string]ResponsesNamespaceName, bool, error) {
+func FlattenResponsesNamespacesExcept(req map[string]any, preserved map[string]bool, memories ...*ResponsesToolMemory) (map[string]ResponsesNamespaceName, bool, error) {
+	mem := firstResponsesToolMemory(memories)
 	if req == nil {
 		return nil, false, nil
 	}
@@ -61,7 +62,10 @@ func FlattenResponsesNamespacesExcept(req map[string]any, preserved map[string]b
 			if name == "" {
 				continue
 			}
-			flat := flattenNamespaceToolName(namespace, name)
+			flat := mem.flatten(namespace, name)
+			if mem.Err() != nil {
+				return nil, false, mem.Err()
+			}
 			entry := ResponsesNamespaceName{Namespace: namespace, Name: name}
 			if topLevel[flat] {
 				return nil, false, fmt.Errorf("namespace tool %q/%q flattens to %q which conflicts with a top-level tool of the same name; this upstream cannot disambiguate them, rename one of the tools", namespace, name, flat)
@@ -95,7 +99,10 @@ func FlattenResponsesNamespacesExcept(req map[string]any, preserved map[string]b
 				continue
 			}
 			name := strings.TrimSpace(stringValue(child["name"]))
-			flat := flattenNamespaceToolName(namespace, name)
+			flat := mem.flatten(namespace, name)
+			if mem.Err() != nil {
+				return nil, false, mem.Err()
+			}
 			if name == "" || seen[flat] {
 				continue
 			}
@@ -109,14 +116,17 @@ func FlattenResponsesNamespacesExcept(req map[string]any, preserved map[string]b
 		}
 	}
 	req["tools"] = flattened
-	rewriteNamespaceQualifiedCalls(req["input"], names)
+	rewriteNamespaceQualifiedCalls(req["input"], names, mem)
 	if choice, ok := req["tool_choice"].(map[string]any); ok {
 		choiceNamespace := strings.TrimSpace(stringValue(choice["name"]))
 		if strings.TrimSpace(stringValue(choice["type"])) == "namespace" && !preserved[choiceNamespace] {
 			req["tool_choice"] = "auto"
 		} else {
-			rewriteNamespaceQualifiedCall(choice, names)
+			rewriteNamespaceQualifiedCall(choice, names, mem)
 		}
+	}
+	if mem.Err() != nil {
+		return nil, false, mem.Err()
 	}
 	return names, true, nil
 }
@@ -152,29 +162,37 @@ func namespaceChildren(tool map[string]any) []any {
 	return children
 }
 
-func rewriteNamespaceQualifiedCalls(value any, names map[string]ResponsesNamespaceName) {
+func rewriteNamespaceQualifiedCalls(value any, names map[string]ResponsesNamespaceName, memories ...*ResponsesToolMemory) {
+	mem := firstResponsesToolMemory(memories)
+	if mem.Err() != nil {
+		return
+	}
 	switch typed := value.(type) {
 	case []any:
 		for _, item := range typed {
-			rewriteNamespaceQualifiedCalls(item, names)
+			rewriteNamespaceQualifiedCalls(item, names, mem)
 		}
 	case map[string]any:
 		if strings.TrimSpace(stringValue(typed["type"])) == "function_call" {
-			rewriteNamespaceQualifiedCall(typed, names)
+			rewriteNamespaceQualifiedCall(typed, names, mem)
 		}
 		for _, child := range typed {
-			rewriteNamespaceQualifiedCalls(child, names)
+			rewriteNamespaceQualifiedCalls(child, names, mem)
 		}
 	}
 }
 
-func rewriteNamespaceQualifiedCall(item map[string]any, names map[string]ResponsesNamespaceName) bool {
+func rewriteNamespaceQualifiedCall(item map[string]any, names map[string]ResponsesNamespaceName, memories ...*ResponsesToolMemory) bool {
+	mem := firstResponsesToolMemory(memories)
+	if mem.Err() != nil {
+		return false
+	}
 	namespace := strings.TrimSpace(stringValue(item["namespace"]))
 	name := strings.TrimSpace(stringValue(item["name"]))
 	if namespace == "" || name == "" {
 		return false
 	}
-	flat := flattenNamespaceToolName(namespace, name)
+	flat := mem.flatten(namespace, name)
 	entry, ok := names[flat]
 	if !ok || entry.Namespace != namespace || entry.Name != name {
 		return false

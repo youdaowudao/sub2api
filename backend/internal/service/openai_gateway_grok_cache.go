@@ -27,20 +27,22 @@ var claudeCodeSessionSuffixPattern = regexp.MustCompile(`_session_([a-f0-9-]+)$`
 
 // extractClaudeCodeSessionID resolves the Claude Code conversation id from
 // headers or Anthropic/OpenAI-compatible payload metadata.
-func extractClaudeCodeSessionID(c *gin.Context, body []byte) string {
+func extractClaudeCodeSessionID(c *gin.Context, body []byte, memories ...*wsMaterializer) string {
+	mem := firstWSMaterializer(memories)
 	if c != nil {
 		if seed := strings.TrimSpace(c.GetHeader(claudeCodeSessionHeader)); seed != "" {
 			return seed
 		}
 	}
-	return extractClaudeCodeSessionIDFromPayload(body)
+	return extractClaudeCodeSessionIDFromPayload(body, mem)
 }
 
-func extractClaudeCodeSessionIDFromPayload(body []byte) string {
+func extractClaudeCodeSessionIDFromPayload(body []byte, memories ...*wsMaterializer) string {
+	mem := firstWSMaterializer(memories)
 	if len(body) == 0 {
 		return ""
 	}
-	userID := strings.TrimSpace(gjson.GetBytes(body, "metadata.user_id").String())
+	userID := strings.TrimSpace(mem.get(body, "metadata.user_id").String())
 	if userID == "" {
 		return ""
 	}
@@ -49,7 +51,7 @@ func extractClaudeCodeSessionIDFromPayload(body []byte) string {
 	}
 	// Claude Code may embed JSON: {"session_id":"..."}
 	if len(userID) > 0 && userID[0] == '{' {
-		if sid := strings.TrimSpace(gjson.Get(userID, "session_id").String()); sid != "" {
+		if sid := strings.TrimSpace(mem.get(mem.rawView(userID), "session_id").String()); sid != "" {
 			return sid
 		}
 	}
@@ -63,7 +65,8 @@ func extractClaudeCodeSessionIDFromPayload(body []byte) string {
 // A valid downstream API key is required. This intentionally fails closed on
 // internal probes and incomplete request contexts instead of creating a cache
 // identity that could be shared by unrelated tenants.
-func resolveGrokCacheIdentity(c *gin.Context, body []byte, explicitKey, upstreamModel string) string {
+func resolveGrokCacheIdentity(c *gin.Context, body []byte, explicitKey, upstreamModel string, memories ...*wsMaterializer) string {
+	mem := firstWSMaterializer(memories)
 	apiKeyID := getAPIKeyIDFromContext(c)
 	if apiKeyID <= 0 {
 		return ""
@@ -80,14 +83,14 @@ func resolveGrokCacheIdentity(c *gin.Context, body []byte, explicitKey, upstream
 		return ""
 	}
 
-	seed := explicitGrokCacheSeed(c, body, explicitKey)
+	seed := explicitGrokCacheSeed(c, body, explicitKey, mem)
 	if seed == "" {
-		seed = deriveOpenAIStablePrefixSessionSeed(body)
+		seed = deriveOpenAIStablePrefixSessionSeed(body, mem)
 		if seed == "" {
 			// A model alone is too broad for cache routing. Preserve the
 			// existing first-user-derived identity when no reusable prefix is
 			// available so unrelated prompts do not share one tenant-wide key.
-			seed = deriveOpenAIAnchoredContentSessionSeed(body)
+			seed = deriveOpenAIAnchoredContentSessionSeed(body, mem)
 		}
 	}
 	if seed == "" {
@@ -97,15 +100,21 @@ func resolveGrokCacheIdentity(c *gin.Context, body []byte, explicitKey, upstream
 	// generateSessionUUID hashes the whole seed before formatting it as a UUID.
 	// Include a versioned namespace so this identity cannot collide with other
 	// upstream session identifiers derived by sub2api.
-	isolatedSeed := fmt.Sprintf("grok-prompt-cache:v1:%d:%s:%s", apiKeyID, model, seed)
+	var isolatedSeed string
+	if mem == nil {
+		isolatedSeed = fmt.Sprintf("grok-prompt-cache:v1:%d:%s:%s", apiKeyID, model, seed)
+	} else {
+		isolatedSeed = mem.join([]string{fmt.Sprintf("grok-prompt-cache:v1:%d:", apiKeyID), model, ":", seed}, "")
+	}
 	return generateSessionUUID(isolatedSeed)
 }
 
-func explicitGrokCacheSeed(c *gin.Context, body []byte, explicitKey string) string {
+func explicitGrokCacheSeed(c *gin.Context, body []byte, explicitKey string, memories ...*wsMaterializer) string {
+	mem := firstWSMaterializer(memories)
 	// Claude Code session is the most stable multi-turn identity for
 	// /v1/messages → Grok bridges. Prefer it over generic session headers so
 	// prompt cache routing follows the gateway's existing cache affinity rules.
-	seed := extractClaudeCodeSessionID(c, body)
+	seed := extractClaudeCodeSessionID(c, body, mem)
 	if seed == "" {
 		seed = explicitOpenAIHeaderSessionID(c)
 	}
@@ -119,7 +128,7 @@ func explicitGrokCacheSeed(c *gin.Context, body []byte, explicitKey string) stri
 	// entire conversation (~300K+ tokens each time). The body field is the
 	// official xAI cache-routing signal — respect it when present.
 	if seed == "" && len(body) > 0 {
-		seed = strings.TrimSpace(gjson.GetBytes(body, "prompt_cache_key").String())
+		seed = strings.TrimSpace(mem.get(body, "prompt_cache_key").String())
 	}
 	if seed == "" && c != nil {
 		seed = strings.TrimSpace(c.GetHeader(grokConversationIDHeader))
@@ -131,7 +140,7 @@ func explicitGrokCacheSeed(c *gin.Context, body []byte, explicitKey string) stri
 	// explicit session still share one cache identity (model is already in the
 	// isolated seed). Message ids are rejected by the seed helper.
 	if seed == "" && len(body) > 0 {
-		seed = grokPreviousResponseSessionSeed(body)
+		seed = grokPreviousResponseSessionSeed(body, mem)
 	}
 	return seed
 }
@@ -162,15 +171,17 @@ func isGrokRequestContext(c *gin.Context) bool {
 // native tools with tool_choice=none: this selects the cache-capable tier
 // without allowing an actual search. Explicit client function tools are handled by
 // applyGrokFreeMessagesFunctionToolCacheRoute (Messages bridge and native Responses).
-func applyGrokResponsesCacheIdentity(body, intentSourceBody []byte, identity string, injectFreeTierTools bool) ([]byte, error) {
+func applyGrokResponsesCacheIdentity(body, intentSourceBody []byte, identity string, injectFreeTierTools bool, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	identity = strings.TrimSpace(identity)
 	if identity == "" {
-		if gjson.GetBytes(body, "prompt_cache_key").Exists() {
-			return sjson.DeleteBytes(body, "prompt_cache_key")
+		if wsMem.get(body, "prompt_cache_key").Exists() {
+			return wsMem.delete(body, "prompt_cache_key")
 		}
 		return body, nil
 	}
-	out, err := sjson.SetBytes(body, "prompt_cache_key", identity)
+	out, err := wsMem.set(body, "prompt_cache_key", identity)
 	if err != nil {
 		return nil, err
 	}
@@ -180,30 +191,31 @@ func applyGrokResponsesCacheIdentity(body, intentSourceBody []byte, identity str
 	// Inspect the pre-sanitization source. patchGrokResponsesBody may remove an
 	// unsupported client tool and its tool_choice; that must not turn an
 	// explicit client tool intent into an eligible native-tool request.
-	if hasGrokResponsesToolIntent(intentSourceBody) {
+	if hasGrokResponsesToolIntent(intentSourceBody, wsMem) {
 		return out, nil
 	}
-	out, err = sjson.SetRawBytes(out, "tools", []byte(grokFreeCacheNativeToolsJSON))
+	out, err = wsMem.setRaw(out, "tools", []byte(grokFreeCacheNativeToolsJSON))
 	if err != nil {
 		return nil, err
 	}
-	return sjson.SetBytes(out, "tool_choice", grokFreeCacheDisabledToolChoice)
+	return wsMem.set(out, "tool_choice", grokFreeCacheDisabledToolChoice)
 }
 
-func hasGrokResponsesToolIntent(body []byte) bool {
-	if gjson.GetBytes(body, "tools").Exists() || gjson.GetBytes(body, "tool_choice").Exists() {
+func hasGrokResponsesToolIntent(body []byte, memories ...*wsMaterializer) bool {
+	wsMem := firstWSMaterializer(memories)
+	if wsMem.get(body, "tools").Exists() || wsMem.get(body, "tool_choice").Exists() {
 		return true
 	}
-	input := gjson.GetBytes(body, "input")
+	input := wsMem.get(body, "input")
 	if !input.IsArray() {
 		return false
 	}
-	for _, item := range input.Array() {
-		if strings.TrimSpace(item.Get("type").String()) != "additional_tools" {
+	for _, item := range wsMem.array(input) {
+		if strings.TrimSpace(wsMem.resultGet(item, "type").String()) != "additional_tools" {
 			continue
 		}
-		tools := item.Get("tools")
-		if !tools.Exists() || !tools.IsArray() || len(tools.Array()) > 0 {
+		tools := wsMem.resultGet(item, "tools")
+		if !tools.Exists() || !tools.IsArray() || len(wsMem.array(tools)) > 0 {
 			return true
 		}
 	}
@@ -223,7 +235,9 @@ func applyGrokFreeMessagesFunctionToolCacheRoute(body, intentSourceBody []byte, 
 // applyGrokFreeRequestToolCacheRoute also accepts a request-scoped opt-in. The
 // sub2api header is consumed locally because buildGrokResponsesRequest only
 // forwards the explicitly supported OpenAI-Beta header from downstream.
-func applyGrokFreeRequestToolCacheRoute(c *gin.Context, body, intentSourceBody []byte, account *Account, cacheIdentity string) ([]byte, error) {
+func applyGrokFreeRequestToolCacheRoute(c *gin.Context, body, intentSourceBody []byte, account *Account, cacheIdentity string, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	allowPureClientTools, accountPolicyExplicit := grokClientToolCacheAccountPolicy(account)
 	requestOptOut := false
 	if c != nil {
@@ -243,7 +257,7 @@ func applyGrokFreeRequestToolCacheRoute(c *gin.Context, body, intentSourceBody [
 	// opt-in may override an account opt-out, while an explicit request opt-out
 	// always wins. The legacy Claude fingerprint remains only as a compatibility
 	// fallback when no account policy has been recorded (#4486).
-	return applyGrokFreeToolCacheRoute(body, intentSourceBody, account, cacheIdentity, allowPureClientTools, allowPureClientTools)
+	return applyGrokFreeToolCacheRoute(body, intentSourceBody, account, cacheIdentity, allowPureClientTools, allowPureClientTools, wsMem)
 }
 
 // grokClientToolCacheAccountPolicy is intentionally strict for configured
@@ -296,21 +310,23 @@ func isGrokClaudeDesktopResponsesCacheRequest(c *gin.Context) bool {
 	return strings.TrimSpace(c.GetHeader("X-Claude-Code-Session-Id")) != ""
 }
 
-func applyGrokFreeToolCacheRoute(body, intentSourceBody []byte, account *Account, cacheIdentity string, allowPureClientTools, allowFunctionSearch bool) ([]byte, error) {
+func applyGrokFreeToolCacheRoute(body, intentSourceBody []byte, account *Account, cacheIdentity string, allowPureClientTools, allowFunctionSearch bool, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if strings.TrimSpace(cacheIdentity) == "" || !isKnownGrokFreeAccount(account) {
 		return body, nil
 	}
-	intentTools := gjson.GetBytes(intentSourceBody, "tools")
-	intentToolChoice := gjson.GetBytes(intentSourceBody, "tool_choice")
+	intentTools := wsMem.get(intentSourceBody, "tools")
+	intentToolChoice := wsMem.get(intentSourceBody, "tool_choice")
 	if !isGrokFreeCacheFunctionToolIntent(intentTools, intentToolChoice) {
 		return body, nil
 	}
 	if intentToolChoice.Type == gjson.String && strings.TrimSpace(intentToolChoice.String()) == grokFreeCacheDisabledToolChoice {
 		// Adding native cache-routing tools cannot change behavior when the
 		// client has explicitly disabled all tool execution.
-		return appendGrokFreeCacheNativeToolsWithPolicy(body, true, false)
+		return appendGrokFreeCacheNativeToolsWithPolicy(body, true, false, wsMem)
 	}
-	return appendGrokFreeCacheNativeToolsWithPolicy(body, allowPureClientTools, allowFunctionSearch)
+	return appendGrokFreeCacheNativeToolsWithPolicy(body, allowPureClientTools, allowFunctionSearch, wsMem)
 }
 
 // isKnownGrokFreeAccount recognizes free-tier Grok accounts, used for
@@ -437,19 +453,21 @@ func appendGrokFreeCacheNativeTools(body []byte, allowPureClientTools bool) ([]b
 	return appendGrokFreeCacheNativeToolsWithPolicy(body, allowPureClientTools, true)
 }
 
-func appendGrokFreeCacheNativeToolsWithPolicy(body []byte, allowPureClientTools, allowFunctionSearch bool) ([]byte, error) {
-	tools := gjson.GetBytes(body, "tools")
+func appendGrokFreeCacheNativeToolsWithPolicy(body []byte, allowPureClientTools, allowFunctionSearch bool, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	tools := wsMem.get(body, "tools")
 	if !tools.Exists() || !tools.IsArray() {
 		return body, nil
 	}
 
-	items := tools.Array()
+	items := wsMem.array(tools)
 	if len(items) == 0 {
 		return body, nil
 	}
 	hasNativeSearch := false
 	for _, tool := range items {
-		switch strings.TrimSpace(tool.Get("type").String()) {
+		switch strings.TrimSpace(wsMem.resultGet(tool, "type").String()) {
 		case "web_search", "x_search":
 			hasNativeSearch = true
 		}
@@ -461,11 +479,11 @@ func appendGrokFreeCacheNativeToolsWithPolicy(body []byte, allowPureClientTools,
 	present := make(map[string]bool, 2)
 	hasCompanionTool := false
 	for _, tool := range items {
-		toolType := strings.TrimSpace(tool.Get("type").String())
+		toolType := strings.TrimSpace(wsMem.resultGet(tool, "type").String())
 		switch toolType {
 		case "function":
-			name := strings.TrimSpace(tool.Get("name").String())
-			if !tool.IsObject() || name == "" || tool.Get("function").Exists() {
+			name := strings.TrimSpace(wsMem.resultGet(tool, "name").String())
+			if !tool.IsObject() || name == "" || wsMem.resultGet(tool, "function").Exists() {
 				return body, nil
 			}
 			// Grok Build may declare search as function tools. Convert to native
@@ -474,7 +492,7 @@ func appendGrokFreeCacheNativeToolsWithPolicy(body []byte, allowPureClientTools,
 				if present[name] {
 					continue
 				}
-				raw, err := json.Marshal(map[string]string{"type": name})
+				raw, err := wsMem.marshal(map[string]string{"type": name})
 				if err != nil {
 					return nil, err
 				}
@@ -491,19 +509,19 @@ func appendGrokFreeCacheNativeToolsWithPolicy(body []byte, allowPureClientTools,
 				present[name] = true
 			}
 			hasCompanionTool = true
-			merged = append(merged, json.RawMessage(tool.Raw))
+			merged = append(merged, json.RawMessage(wsMem.rawView(tool.Raw)))
 		case "web_search", "x_search":
 			if present[toolType] {
 				continue
 			}
-			merged = append(merged, json.RawMessage(tool.Raw))
+			merged = append(merged, json.RawMessage(wsMem.rawView(tool.Raw)))
 			present[toolType] = true
 		default:
 			if _, ok := grokResponsesSupportedToolTypes[toolType]; !ok {
 				return body, nil
 			}
 			hasCompanionTool = true
-			merged = append(merged, json.RawMessage(tool.Raw))
+			merged = append(merged, json.RawMessage(wsMem.rawView(tool.Raw)))
 		}
 	}
 	if !hasCompanionTool {
@@ -520,17 +538,17 @@ func appendGrokFreeCacheNativeToolsWithPolicy(body []byte, allowPureClientTools,
 		if present[toolType] {
 			continue
 		}
-		raw, err := json.Marshal(map[string]string{"type": toolType})
+		raw, err := wsMem.marshal(map[string]string{"type": toolType})
 		if err != nil {
 			return nil, err
 		}
 		merged = append(merged, raw)
 	}
-	encoded, err := json.Marshal(merged)
+	encoded, err := wsMem.marshal(merged)
 	if err != nil {
 		return nil, err
 	}
-	return sjson.SetRawBytes(body, "tools", encoded)
+	return wsMem.setRaw(body, "tools", encoded)
 }
 
 // applyGrokCacheHeaders applies the documented Chat Completions conversation

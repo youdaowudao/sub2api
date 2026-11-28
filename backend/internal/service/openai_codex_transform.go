@@ -9,7 +9,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 var codexModelMap = map[string]string{
@@ -849,22 +848,24 @@ func stripOpenAIImageGenerationToolsFromInput(reqBody map[string]any) bool {
 
 // stripOpenAIImageGenerationToolsFromRawPayload is the shared adapter for paths
 // that forward raw HTTP or WebSocket payloads without the normal request map.
-func stripOpenAIImageGenerationToolsFromRawPayload(payload []byte) ([]byte, bool, error) {
-	if !openAIRequestBodyHasImageGenerationDeclaration(payload) {
+func stripOpenAIImageGenerationToolsFromRawPayload(payload []byte, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	if !openAIRequestBodyHasImageGenerationDeclaration(payload, wsMem) {
 		if json.Valid(payload) {
 			return payload, false, nil
 		}
 		var invalidPayload map[string]any
-		return payload, false, json.Unmarshal(payload, &invalidPayload)
+		return payload, false, wsMem.unmarshal(payload, &invalidPayload)
 	}
 	payloadMap := make(map[string]any)
-	if err := json.Unmarshal(payload, &payloadMap); err != nil {
+	if err := wsMem.unmarshal(payload, &payloadMap); err != nil {
 		return payload, false, err
 	}
 	if !stripOpenAIImageGenerationTools(payloadMap) {
 		return payload, false, nil
 	}
-	rebuilt, err := json.Marshal(payloadMap)
+	rebuilt, err := wsMem.marshal(payloadMap)
 	if err != nil {
 		return payload, false, err
 	}
@@ -1118,7 +1119,8 @@ func ensureOpenAIResponsesImageGenerationToolChoiceAuto(reqBody map[string]any) 
 	return true
 }
 
-func applyCodexImageGenerationBridgeInstructions(reqBody map[string]any) bool {
+func applyCodexImageGenerationBridgeInstructions(reqBody map[string]any, memories ...*wsMaterializer) bool {
+	mem := firstWSMaterializer(memories)
 	if len(reqBody) == 0 || hasCodexImageGenerationFunctionTool(reqBody) || !hasOpenAIImageGenerationTool(reqBody) {
 		return false
 	}
@@ -1137,7 +1139,7 @@ func applyCodexImageGenerationBridgeInstructions(reqBody map[string]any) bool {
 		return true
 	}
 
-	reqBody["instructions"] = existing + "\n\n" + codexImageGenerationBridgeText
+	reqBody["instructions"] = mem.join([]string{existing, codexImageGenerationBridgeText}, "\n\n")
 	return true
 }
 
@@ -1647,14 +1649,16 @@ func codexAdditionalToolsIDMappings(input []any) map[string]string {
 
 // The passthrough/WebSocket compatibility path must not decode and re-encode
 // whole requests. Patch only declaration IDs and references to those declarations.
-func normalizeCodexAdditionalToolsIDsBody(body []byte) ([]byte, bool, error) {
-	input := parseRawJSONView(body).Get("input")
+func normalizeCodexAdditionalToolsIDsBody(body []byte, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	input := wsMem.get(body, "input")
 	if !input.IsArray() {
 		return body, false, nil
 	}
 	mappings := make(map[string]string)
-	input.ForEach(func(_, item gjson.Result) bool {
-		if id := item.Get("id"); item.Get("type").String() == "additional_tools" && id.Type == gjson.String {
+	wsMem.forEachArray(input, func(_, item gjson.Result) bool {
+		if id := wsMem.resultGet(item, "id"); wsMem.resultGet(item, "type").String() == "additional_tools" && id.Type == gjson.String {
 			if normalizedID := normalizeCodexAdditionalToolsID(id.Str); normalizedID != id.Str {
 				mappings[id.Str] = normalizedID
 			}
@@ -1666,12 +1670,12 @@ func normalizeCodexAdditionalToolsIDsBody(body []byte) ([]byte, bool, error) {
 	}
 	items := make([]string, 0)
 	var patchErr error
-	input.ForEach(func(_, item gjson.Result) bool {
+	wsMem.forEachArray(input, func(_, item gjson.Result) bool {
 		raw := item.Raw
-		if typ := item.Get("type").String(); typ == "additional_tools" || typ == "item_reference" {
-			if id := item.Get("id"); id.Type == gjson.String {
+		if typ := wsMem.resultGet(item, "type").String(); typ == "additional_tools" || typ == "item_reference" {
+			if id := wsMem.resultGet(item, "id"); id.Type == gjson.String {
 				if normalizedID, mapped := mappings[id.Str]; mapped {
-					raw, patchErr = sjson.Set(raw, "id", normalizedID)
+					raw, patchErr = wsMem.setString(raw, "id", normalizedID)
 					if patchErr != nil {
 						return false
 					}
@@ -1684,7 +1688,7 @@ func normalizeCodexAdditionalToolsIDsBody(body []byte) ([]byte, bool, error) {
 	if patchErr != nil {
 		return body, false, fmt.Errorf("normalize additional_tools ID: %w", patchErr)
 	}
-	return replaceOpenAIRawInput(body, input, items), true, nil
+	return replaceOpenAIRawInput(body, input, items, wsMem), true, nil
 }
 
 func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []any {

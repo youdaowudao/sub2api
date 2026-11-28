@@ -10,7 +10,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 const codexAccountIdentityNamespaceVersion = "v1"
@@ -151,23 +150,25 @@ func applyCodexAccountIdentityFields(values map[string]any, account *Account, ap
 	return changed
 }
 
-func applyCodexAccountIdentityEmbeddedMetadata(values map[string]any, account *Account, apiKeyID int64) bool {
+func applyCodexAccountIdentityEmbeddedMetadata(values map[string]any, account *Account, apiKeyID int64, memories ...*wsMaterializer) bool {
+	wsMem := firstWSMaterializer(memories)
+
 	raw, ok := values[openAIWSTurnMetadataHeader].(string)
 	if !ok || strings.TrimSpace(raw) == "" {
 		return false
 	}
 	metadata := map[string]any{}
-	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || metadata == nil {
+	if err := wsMem.unmarshal(wsMem.rawView(raw), &metadata); err != nil || metadata == nil {
 		return false
 	}
 	if !applyCodexAccountIdentityFields(metadata, account, apiKeyID) {
 		return false
 	}
-	rebuilt, err := marshalCodexTurnMetadata(metadata)
+	rebuilt, err := marshalCodexTurnMetadata(metadata, wsMem)
 	if err != nil {
 		return false
 	}
-	values[openAIWSTurnMetadataHeader] = string(rebuilt)
+	values[openAIWSTurnMetadataHeader] = wsMem.string(rebuilt)
 	return true
 }
 
@@ -215,7 +216,9 @@ func applyCodexAccountIdentityClientMetadataMap(requestBody map[string]any, acco
 // applyCodexAccountIdentityClientMetadataRaw scopes only the small identity
 // subobjects with gjson/sjson. The passthrough hot path never unmarshals the
 // potentially multi-megabyte request body.
-func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, apiKeyID int64, clientSessionID string) ([]byte, bool, error) {
+func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, apiKeyID int64, clientSessionID string, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(body) == 0 || codexAccountIdentityNamespace(account) == "" {
 		return body, false, nil
 	}
@@ -227,35 +230,35 @@ func applyCodexAccountIdentityClientMetadataRaw(body []byte, account *Account, a
 	next := body
 	changed := false
 	originalBodySessionID := ""
-	if cm := gjson.GetBytes(body, "client_metadata"); cm.IsObject() {
+	if cm := wsMem.get(body, "client_metadata"); cm.IsObject() {
 		clientMetadata := map[string]any{}
-		if err := json.Unmarshal([]byte(cm.Raw), &clientMetadata); err != nil {
+		if err := wsMem.unmarshal(wsMem.rawView(cm.Raw), &clientMetadata); err != nil {
 			return body, false, fmt.Errorf("decode client_metadata for account identity: %w", err)
 		}
 		originalBodySessionID, _ = clientMetadata["session_id"].(string)
 		metadataChanged := applyCodexAccountIdentityFields(clientMetadata, account, apiKeyID)
-		if applyCodexAccountIdentityEmbeddedMetadata(clientMetadata, account, apiKeyID) {
+		if applyCodexAccountIdentityEmbeddedMetadata(clientMetadata, account, apiKeyID, wsMem) {
 			metadataChanged = true
 		}
 		if metadataChanged {
-			raw, err := json.Marshal(clientMetadata)
+			raw, err := wsMem.marshal(clientMetadata)
 			if err != nil {
 				return body, false, fmt.Errorf("encode account-scoped client_metadata: %w", err)
 			}
 			var setErr error
-			next, setErr = sjson.SetRawBytes(next, "client_metadata", raw)
+			next, setErr = wsMem.setRaw(next, "client_metadata", raw)
 			if setErr != nil {
 				return body, false, fmt.Errorf("splice account-scoped client_metadata: %w", setErr)
 			}
 			changed = true
 		}
 	}
-	if promptCacheKey := gjson.GetBytes(body, "prompt_cache_key"); promptCacheKey.Type == gjson.String && strings.TrimSpace(promptCacheKey.String()) != "" {
+	if promptCacheKey := wsMem.get(body, "prompt_cache_key"); promptCacheKey.Type == gjson.String && strings.TrimSpace(promptCacheKey.String()) != "" {
 		raw := promptCacheKey.String()
 		kind := codexPromptCacheKeyKind(raw, originalBodySessionID, clientSessionID)
 		scoped := scopeCodexAccountIdentityValue(account, apiKeyID, kind, raw)
 		if scoped != raw {
-			rewritten, err := sjson.SetBytes(next, "prompt_cache_key", scoped)
+			rewritten, err := wsMem.set(next, "prompt_cache_key", scoped)
 			if err != nil {
 				return body, false, fmt.Errorf("splice account-scoped prompt_cache_key: %w", err)
 			}

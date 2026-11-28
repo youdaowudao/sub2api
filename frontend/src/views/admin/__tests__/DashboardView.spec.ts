@@ -49,7 +49,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key
+      t: (key: string, params?: Record<string, string>) => key === 'admin.dashboard.connectionUsageUsers' ? params?.count : key === 'admin.dashboard.connectionUsageAsOf' ? params?.time : key
     })
   }
 })
@@ -275,7 +275,7 @@ describe('admin DashboardView', () => {
     } finally { wrapper.unmount() }
   })
 
-  it('V6 renders five fixed overview cards and distinguishes today average from historical average', async () => {
+  it('V6 renders six fixed overview cards and distinguishes today average from historical average', async () => {
     const stats: DashboardStats = {
       ...createDashboardStats(), today_requests: 12, total_requests: 123,
       today_tokens: 1500, total_tokens: 23000, today_actual_cost: 3,
@@ -288,7 +288,7 @@ describe('admin DashboardView', () => {
     try {
       await flushPromises()
       const cards = wrapper.get('[data-testid="dashboard-overview"]').findAll('.card')
-      expect(cards).toHaveLength(5)
+      expect(cards).toHaveLength(6)
       const paragraphs = (card: number) => cards[card].findAll('p').map(p => p.text())
       expect(paragraphs(0)).toEqual(['admin.dashboard.todayRequestsCard', '12', 'common.total: 123'])
       expect(paragraphs(1)).toEqual(['admin.dashboard.todayTokens', '1.50K', 'common.total: 23.00K'])
@@ -311,6 +311,75 @@ describe('admin DashboardView', () => {
       getSnapshotV2.mockResolvedValue({ trend: [], models: [], groups: [], stats: createDashboardStats() })
       await applyRange(wrapper, '2026-11-21', '2026-11-27')
       expect(wrapper.get('[data-testid="today-average-response"]').text()).toBe('1.25s')
+    } finally { wrapper.unmount() }
+  })
+
+  it('connection usage keeps its sampling time on range changes and failures; refresh replaces it', async () => {
+    const old = { ws_users: 12, http_users: 45, window_end: '2026-11-27T01:35:30Z' }
+    const latest = { ws_users: 0, http_users: 2, window_end: '2026-11-27T01:36:45Z' }
+    getSnapshotV2.mockResolvedValue({ stats: { ...createDashboardStats(), connection_usage: old }, generated_at: windowEnd })
+    const wrapper = mountDashboard()
+    const ws = () => wrapper.get('[data-testid="connection-ws-users"]').text()
+    const http = () => wrapper.get('[data-testid="connection-http-users"]').text()
+    const time = () => wrapper.get('[data-testid="connection-usage-time"]').text()
+    try {
+      await flushPromises()
+      expect(ws()).toBe('12')
+      expect(http()).toBe('45')
+      expect(time()).toContain('35:30')
+      const originalTime = time()
+      expect(wrapper.get('[data-testid="connection-usage"]').text()).toContain('admin.dashboard.connectionUsageScope')
+      getSnapshotV2.mockResolvedValue({ stats: { ...createDashboardStats(), connection_usage: latest } })
+      await button(wrapper, 'admin.usage.recentRange.30').trigger('click')
+      await flushPromises()
+      expect(getSnapshotV2.mock.calls.at(-1)?.[0].include_stats).toBe(false)
+      expect(ws()).toBe('12')
+      expect(time()).toBe(originalTime)
+      await button(wrapper, 'dates.today').trigger('click')
+      await flushPromises()
+      expect(ws()).toBe('12')
+      await applyRange(wrapper,'2026-11-21','2026-11-27')
+      expect(ws()).toBe('12')
+      getSnapshotV2.mockRejectedValueOnce(new Error('snapshot failure'))
+      await button(wrapper,'common.refresh').trigger('click')
+      await flushPromises()
+      expect(showError).toHaveBeenCalled()
+      expect(ws()).toBe('12')
+      expect(time()).toBe(originalTime)
+      await button(wrapper,'common.refresh').trigger('click')
+      await flushPromises()
+      expect(getSnapshotV2.mock.calls.at(-1)?.[0].include_stats).toBe(true)
+      expect(ws()).toBe('0')
+      expect(http()).toBe('2')
+      expect(time()).toContain('36:45')
+      const obsolete = deferred()
+      getSnapshotV2.mockReturnValueOnce(obsolete.promise)
+      await button(wrapper,'common.refresh').trigger('click')
+      await button(wrapper,'admin.usage.recentRange.180').trigger('click')
+      await flushPromises()
+      obsolete.resolve({ stats: { ...createDashboardStats(), connection_usage: old } })
+      await flushPromises()
+      expect(ws()).toBe('0')
+      expect(time()).toContain('36:45')
+    } finally { wrapper.unmount() }
+  })
+
+  it('connection usage displays unavailable rather than zero for old or invalid responses', async () => {
+    const valid = { ws_users: 0, http_users: 0, window_end: '2026-11-27T01:35:30Z' }
+    const wrapper = mountDashboard()
+    try {
+      await flushPromises()
+      expect(wrapper.get('[data-testid="connection-ws-users"]').text()).toBe('—')
+      expect(wrapper.get('[data-testid="connection-usage-time"]').text()).toBe('admin.dashboard.connectionUsageMissing')
+      for (const usage of [valid, null, undefined, { ...valid, ws_users: -1 }, { ...valid, http_users: 0.5 }, { ...valid, window_end: 'invalid' }]) {
+        getSnapshotV2.mockResolvedValue({ stats: { ...createDashboardStats(), connection_usage: usage } })
+        await button(wrapper,'common.refresh').trigger('click')
+        await flushPromises()
+        const expected = usage === valid ? '0' : '—'
+        expect(wrapper.get('[data-testid="connection-ws-users"]').text()).toBe(expected)
+        expect(wrapper.get('[data-testid="connection-http-users"]').text()).toBe(expected)
+        if (usage !== valid) expect(wrapper.get('[data-testid="connection-usage-time"]').text()).toBe('admin.dashboard.connectionUsageMissing')
+      }
     } finally { wrapper.unmount() }
   })
 

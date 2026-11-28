@@ -328,8 +328,12 @@ func shouldForceNewConnOnStoreDisabled(mode, lastFailureReason string) bool {
 	}
 }
 
-func dropPreviousResponseIDFromRawPayload(payload []byte) ([]byte, bool, error) {
-	return dropPreviousResponseIDFromRawPayloadWithDeleteFn(payload, sjson.DeleteBytes)
+func dropPreviousResponseIDFromRawPayload(payload []byte, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+	if wsMem == nil {
+		return dropPreviousResponseIDFromRawPayloadWithDeleteFn(payload, sjson.DeleteBytes)
+	}
+	return dropPreviousResponseIDFromRawPayloadWithDeleteFn(payload, wsMem.delete)
 }
 
 func dropPreviousResponseIDFromRawPayloadWithDeleteFn(
@@ -358,22 +362,26 @@ func dropPreviousResponseIDFromRawPayloadWithDeleteFn(
 	return updated, !gjson.GetBytes(updated, "previous_response_id").Exists(), nil
 }
 
-func setPreviousResponseIDToRawPayload(payload []byte, previousResponseID string) ([]byte, error) {
+func setPreviousResponseIDToRawPayload(payload []byte, previousResponseID string, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
 	normalizedPrevID := strings.TrimSpace(previousResponseID)
 	if len(payload) == 0 || normalizedPrevID == "" {
 		return payload, nil
 	}
-	updated, err := sjson.SetBytes(payload, "previous_response_id", normalizedPrevID)
+	updated, err := wsMem.set(payload, "previous_response_id", normalizedPrevID)
 	if err == nil {
 		return updated, nil
 	}
 
+	if wsMem != nil && wsMem.err != nil {
+		return nil, wsMem.err
+	}
 	var reqBody map[string]any
-	if unmarshalErr := decodeOpenAIJSONUseNumber(payload, &reqBody); unmarshalErr != nil {
+	if unmarshalErr := wsMem.decode(payload, &reqBody); unmarshalErr != nil {
 		return nil, err
 	}
 	reqBody["previous_response_id"] = normalizedPrevID
-	rebuilt, marshalErr := json.Marshal(reqBody)
+	rebuilt, marshalErr := wsMem.marshal(reqBody)
 	if marshalErr != nil {
 		return nil, marshalErr
 	}
@@ -406,15 +414,16 @@ func openAIWSPayloadCodexWindowID(payload []byte) string {
 // while HTTP starts the new window without that continuation anchor.
 func normalizeOpenAIWSContextWindowBoundary(
 	payload []byte,
-	previousWindowID string,
+	previousWindowID string, memories ...*wsMaterializer,
 ) ([]byte, openAIWSContextWindowBoundary, error) {
+	wsMem := firstWSMaterializer(memories)
 	currentWindowID := openAIWSPayloadCodexWindowID(payload)
 	boundary := openAIWSContextWindowBoundary{WindowID: currentWindowID}
 	if previousWindowID == "" || currentWindowID == "" || currentWindowID == previousWindowID {
 		return payload, boundary, nil
 	}
 	boundary.Changed = true
-	updated, removed, err := dropPreviousResponseIDFromRawPayload(payload)
+	updated, removed, err := dropPreviousResponseIDFromRawPayload(payload, wsMem)
 	if err != nil {
 		return payload, boundary, err
 	}
@@ -532,12 +541,13 @@ func normalizeOpenAIWSJSONForCompareOrRaw(raw []byte) []byte {
 	return normalized
 }
 
-func normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(payload []byte) ([]byte, error) {
+func normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(payload []byte, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
 	if len(payload) == 0 {
 		return nil, errors.New("payload is empty")
 	}
 	var decoded map[string]any
-	if err := decodeOpenAIJSONUseNumber(payload, &decoded); err != nil {
+	if err := wsMem.decode(payload, &decoded); err != nil {
 		return nil, err
 	}
 	delete(decoded, "input")
@@ -553,7 +563,7 @@ func normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(payload []byte) (
 	if generate, ok := decoded["generate"].(bool); ok && !generate {
 		delete(decoded, "generate")
 	}
-	return json.Marshal(decoded)
+	return wsMem.marshal(decoded)
 }
 
 // openAIWSExtractNormalizedInputSequence 拆出 input 序列。返回的正文尽可能与
@@ -643,24 +653,26 @@ func openAIWSRawItemsHasPrefix(items []json.RawMessage, prefix []json.RawMessage
 	return true
 }
 
-func openAIWSRawItemsHasFunctionCallOutput(items []json.RawMessage) bool {
+func openAIWSRawItemsHasFunctionCallOutput(items []json.RawMessage, memories ...*wsMaterializer) bool {
+	mem := firstWSMaterializer(memories)
 	for _, item := range items {
-		if isCodexToolCallOutputItemType(gjson.GetBytes(item, "type").String()) {
+		if isCodexToolCallOutputItemType(mem.get(item, "type").String()) {
 			return true
 		}
 	}
 	return false
 }
 
-func openAIWSRawItemsHaveToolCallContextForOutputs(items []json.RawMessage) bool {
+func openAIWSRawItemsHaveToolCallContextForOutputs(items []json.RawMessage, memories ...*wsMaterializer) bool {
+	mem := firstWSMaterializer(memories)
 	if len(items) == 0 {
 		return false
 	}
 	contextCallIDs := make(map[string]struct{})
 	outputCallIDs := make(map[string]struct{})
 	for _, item := range items {
-		itemType := gjson.GetBytes(item, "type").String()
-		callID := strings.TrimSpace(gjson.GetBytes(item, "call_id").String())
+		itemType := mem.get(item, "type").String()
+		callID := strings.TrimSpace(mem.get(item, "call_id").String())
 		switch {
 		case isCodexToolCallContextItemType(itemType):
 			if callID != "" {
@@ -719,24 +731,30 @@ func sanitizeOpenAIWSHistoricalReplayToolCalls(
 	return sanitized
 }
 
-func openAIWSRawPayloadHasToolCallOutput(payload []byte) bool {
+func openAIWSRawPayloadHasToolCallOutput(payload []byte, memories ...*wsMaterializer) bool {
+	mem := firstWSMaterializer(memories)
 	if len(payload) == 0 {
 		return false
 	}
-	input := gjson.Get(openAIWSPayloadStringView(payload), "input")
+	var input gjson.Result
+	if mem == nil {
+		input = gjson.Get(openAIWSPayloadStringView(payload), "input")
+	} else {
+		input = mem.get(payload, "input")
+	}
 	if !input.Exists() {
 		return false
 	}
 	if input.IsArray() {
-		for _, item := range input.Array() {
-			if isCodexToolCallOutputItemType(item.Get("type").String()) {
-				return true
-			}
-		}
-		return false
+		found := false
+		mem.forEachArray(input, func(_, item gjson.Result) bool {
+			found = isCodexToolCallOutputItemType(mem.resultGet(item, "type").String())
+			return !found
+		})
+		return found
 	}
 	if input.Type == gjson.JSON {
-		return isCodexToolCallOutputItemType(input.Get("type").String())
+		return isCodexToolCallOutputItemType(mem.resultGet(input, "type").String())
 	}
 	return false
 }
@@ -766,6 +784,71 @@ func buildOpenAIWSReplayInputSequenceFromItems(
 	merged = append(merged, previousFullInput...)
 	merged = append(merged, currentItems...)
 	return merged, true
+}
+
+// normalizeOpenAIWSBridgeReplayItems reapplies only stable per-item input
+// compatibility to newly restored history. It is also used for exact prefix
+// comparison; whole-input transforms must stay out of this comparison.
+func normalizeOpenAIWSBridgeReplayItems(body []byte, account *Account, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	if account == nil || !account.IsOpenAI() {
+		return body, nil
+	}
+	var err error
+	body, _, err = normalizeOpenAIResponsesReasoningContentReplayWithMemory(body, wsMem)
+	if err != nil {
+		return nil, err
+	}
+	if account.IsOpenAIApiKey() {
+		body, _, err = normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body, false, wsMem)
+		if err != nil {
+			return nil, err
+		}
+	}
+	body, _, err = sanitizeOpenAIResponsesInputItemIDsWithMemory(body, wsMem)
+	if err != nil {
+		return nil, err
+	}
+	if account.IsOpenAIOAuthLike() {
+		body, _, err = normalizeOpenAIOAuthResponsesCompatibilityBody(body, wsMem)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return body, nil
+}
+
+// normalizeOpenAIWSBridgeReplayBody applies the existing input compatibility
+// passes in their original order to an actual combined HTTP bridge request.
+func normalizeOpenAIWSBridgeReplayBody(body []byte, account *Account, responsesLite bool, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	if account == nil || !account.IsOpenAI() {
+		return body, nil
+	}
+	var err error
+	if account.IsOpenAIOAuthLike() {
+		body, _, err = normalizeCodexAdditionalToolsIDsBody(body, wsMem)
+		if err != nil {
+			return nil, err
+		}
+	}
+	body, err = normalizeOpenAIWSBridgeReplayItems(body, account, wsMem)
+	if err != nil {
+		return nil, err
+	}
+	if account.IsOpenAIOAuthLike() {
+		body, _, err = ensureOpenAIOAuthWebSearchToolForHistoryBody(body, responsesLite, wsMem)
+		if err != nil {
+			return nil, err
+		}
+	}
+	body, _, err = NormalizeCompactionTriggerInputOrder(body, wsMem)
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 func buildOpenAIWSReplayInputSequence(
@@ -839,8 +922,9 @@ func shouldKeepIngressPreviousResponseID(
 	previousPayload []byte,
 	currentPayload []byte,
 	lastTurnResponseID string,
-	hasFunctionCallOutput bool,
+	hasFunctionCallOutput bool, memories ...*wsMaterializer,
 ) (bool, string, error) {
+	wsMem := firstWSMaterializer(memories)
 	if hasFunctionCallOutput {
 		return true, "has_function_call_output", nil
 	}
@@ -859,11 +943,11 @@ func shouldKeepIngressPreviousResponseID(
 		return false, "missing_previous_turn_payload", nil
 	}
 
-	previousComparable, previousComparableErr := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(previousPayload)
+	previousComparable, previousComparableErr := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(previousPayload, wsMem)
 	if previousComparableErr != nil {
 		return false, "non_input_compare_error", previousComparableErr
 	}
-	currentComparable, currentComparableErr := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(currentPayload)
+	currentComparable, currentComparableErr := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(currentPayload, wsMem)
 	if currentComparableErr != nil {
 		return false, "non_input_compare_error", currentComparableErr
 	}
@@ -877,11 +961,12 @@ type openAIWSIngressPreviousTurnStrictState struct {
 	nonInputComparable []byte
 }
 
-func buildOpenAIWSIngressPreviousTurnStrictState(payload []byte) (*openAIWSIngressPreviousTurnStrictState, error) {
+func buildOpenAIWSIngressPreviousTurnStrictState(payload []byte, memories ...*wsMaterializer) (*openAIWSIngressPreviousTurnStrictState, error) {
+	wsMem := firstWSMaterializer(memories)
 	if len(payload) == 0 {
 		return nil, nil
 	}
-	nonInputComparable, nonInputErr := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(payload)
+	nonInputComparable, nonInputErr := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(payload, wsMem)
 	if nonInputErr != nil {
 		return nil, nonInputErr
 	}
@@ -894,8 +979,9 @@ func shouldKeepIngressPreviousResponseIDWithStrictState(
 	previousState *openAIWSIngressPreviousTurnStrictState,
 	currentPayload []byte,
 	lastTurnResponseID string,
-	hasFunctionCallOutput bool,
+	hasFunctionCallOutput bool, memories ...*wsMaterializer,
 ) (bool, string, error) {
+	wsMem := firstWSMaterializer(memories)
 	if hasFunctionCallOutput {
 		return true, "has_function_call_output", nil
 	}
@@ -914,7 +1000,7 @@ func shouldKeepIngressPreviousResponseIDWithStrictState(
 		return false, "missing_previous_turn_payload", nil
 	}
 
-	currentComparable, currentComparableErr := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(currentPayload)
+	currentComparable, currentComparableErr := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(currentPayload, wsMem)
 	if currentComparableErr != nil {
 		return false, "non_input_compare_error", currentComparableErr
 	}

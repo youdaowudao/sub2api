@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 const maxOpenAIResponsesRejectedFieldRetries = 6
@@ -111,18 +110,19 @@ func (s *openAIResponsesRejectedFieldRetryState) rememberLocked(body []byte) {
 	s.seenBodyHashes[sha256.Sum256(body)] = struct{}{}
 }
 
-func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, responseBody []byte) ([]byte, string, bool, error) {
+func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, responseBody []byte, memories ...*wsMaterializer) ([]byte, string, bool, error) {
+	wsMem := firstWSMaterializer(memories)
 	if statusCode != http.StatusBadRequest || len(body) == 0 || len(responseBody) == 0 {
 		return nil, "", false, nil
 	}
 
 	code := strings.ToLower(strings.TrimSpace(extractUpstreamErrorCode(responseBody)))
 	message := strings.ToLower(strings.TrimSpace(extractUpstreamErrorMessage(responseBody)))
-	param := strings.ToLower(strings.TrimSpace(gjson.GetBytes(responseBody, "error.param").String()))
+	param := strings.ToLower(strings.TrimSpace(wsMem.get(responseBody, "error.param").String()))
 	if code == "invalid_function_parameters" &&
 		openAIResponsesToolParametersParamPattern.MatchString(param) &&
 		openAIResponsesMissingSchemaTypePattern.MatchString(message) {
-		retryBody, changed, err := sanitizeOpenAIResponsesToolParameterTypes(body)
+		retryBody, changed, err := sanitizeOpenAIResponsesToolParameterTypesWithMemory(body, wsMem)
 		if err != nil {
 			return nil, "", false, fmt.Errorf("repair rejected tool parameter root type: %w", err)
 		}
@@ -138,15 +138,15 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 	cacheParamMatchesMessage := cacheMessageParam == "" || cacheParam == cacheMessageParam
 	cacheModelRejection := code == "invalid_parameter" || cacheMessageParam != ""
 	if cacheParam != "" && cacheParamMatchesMessage && cacheModelRejection {
-		if cacheParam == "prompt_cache_breakpoint" && gjson.GetBytes(body, cacheParam).Exists() {
-			retryBody, err := sjson.DeleteBytes(body, cacheParam)
+		if cacheParam == "prompt_cache_breakpoint" && wsMem.get(body, cacheParam).Exists() {
+			retryBody, err := wsMem.delete(body, cacheParam)
 			if err != nil {
 				return nil, "", false, fmt.Errorf("delete rejected prompt_cache_breakpoint: %w", err)
 			}
 			return retryBody, "prompt_cache_breakpoint parameter rejection", true, nil
 		}
 		if index, ok := openAIResponsesRejectedCacheIndex(cacheParam); ok {
-			return removeOpenAIResponsesRejectedCacheAtIndex(body, index)
+			return removeOpenAIResponsesRejectedCacheAtIndex(body, index, wsMem)
 		}
 	}
 	if isExplicitOpenAIResponsesFieldRejection(code, message) {
@@ -158,20 +158,20 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 			param = messageParam
 		}
 		if index, ok := openAIResponsesRejectedNamespaceIndex(param); ok {
-			return removeOpenAIResponsesRejectedNamespaceAtIndex(body, index)
+			return removeOpenAIResponsesRejectedNamespaceAtIndex(body, index, wsMem)
 		}
 		if index, ok := openAIResponsesRejectedStatusIndex(param); ok {
-			return removeOpenAIResponsesRejectedStatusAtIndex(body, index)
+			return removeOpenAIResponsesRejectedStatusAtIndex(body, index, wsMem)
 		}
-		if param == "max_output_tokens" && gjson.GetBytes(body, "max_output_tokens").Exists() {
-			retryBody, err := sjson.DeleteBytes(body, "max_output_tokens")
+		if param == "max_output_tokens" && wsMem.get(body, "max_output_tokens").Exists() {
+			retryBody, err := wsMem.delete(body, "max_output_tokens")
 			if err != nil {
 				return nil, "", false, fmt.Errorf("delete rejected max_output_tokens: %w", err)
 			}
 			return retryBody, "max_output_tokens parameter rejection", true, nil
 		}
-		if param == "truncation" && gjson.GetBytes(body, "truncation").Exists() {
-			retryBody, err := sjson.DeleteBytes(body, "truncation")
+		if param == "truncation" && wsMem.get(body, "truncation").Exists() {
+			retryBody, err := wsMem.delete(body, "truncation")
 			if err != nil {
 				return nil, "", false, fmt.Errorf("delete rejected truncation: %w", err)
 			}
@@ -186,12 +186,12 @@ func normalizeOpenAIResponsesRejectedFieldRetryBody(statusCode int, body, respon
 	}
 	if index, ok := openAIResponsesRejectedContentIndex(contentParam); ok &&
 		contentParam == messageContentParam && isExplicitOpenAIResponsesNullContentRejection(code, message) {
-		return normalizeOpenAIResponsesRejectedNullContentAtIndex(body, index)
+		return normalizeOpenAIResponsesRejectedNullContentAtIndex(body, index, wsMem)
 	}
 	maxZeroContentParam := openAIResponsesMaxZeroContentParamFromMessage(message)
 	if index, ok := openAIResponsesRejectedContentIndex(param); ok &&
 		param == maxZeroContentParam && code == "array_above_max_length" {
-		return removeOpenAIResponsesRejectedReasoningContentAtIndex(body, index)
+		return removeOpenAIResponsesRejectedReasoningContentAtIndex(body, index, wsMem)
 	}
 	return nil, "", false, nil
 }
@@ -281,31 +281,32 @@ func openAIResponsesRejectedInputIndex(pattern *regexp.Regexp, param string) (in
 // need one retry per item and exhaust the bounded retry budget long before the
 // request could succeed. Items of other types keep their status: the rejection
 // only proves that this type has no status field.
-func removeOpenAIResponsesRejectedStatusAtIndex(body []byte, index int) ([]byte, string, bool, error) {
+func removeOpenAIResponsesRejectedStatusAtIndex(body []byte, index int, memories ...*wsMaterializer) ([]byte, string, bool, error) {
+	wsMem := firstWSMaterializer(memories)
 	itemPath := fmt.Sprintf("input.%d", index)
-	rejected := gjson.GetBytes(body, itemPath)
+	rejected := wsMem.get(body, itemPath)
 	if !rejected.IsObject() {
 		return nil, "", false, nil
 	}
-	if !gjson.GetBytes(body, itemPath+".status").Exists() {
+	if !wsMem.get(body, itemPath+".status").Exists() {
 		return nil, "", false, nil
 	}
 
 	retryBody := body
 	cleared := 0
-	rejectedType := strings.TrimSpace(rejected.Get("type").String())
-	if input := gjson.GetBytes(body, "input"); rejectedType != "" && input.IsArray() {
+	rejectedType := strings.TrimSpace(wsMem.resultGet(rejected, "type").String())
+	if input := wsMem.get(body, "input"); rejectedType != "" && input.IsArray() {
 		// Deleting a field never shifts array indexes, so positions read from
 		// the original body stay valid against the rewritten one.
-		for itemIndex, item := range input.Array() {
-			if !item.IsObject() || strings.TrimSpace(item.Get("type").String()) != rejectedType {
+		for itemIndex, item := range wsMem.array(input) {
+			if !item.IsObject() || strings.TrimSpace(wsMem.resultGet(item, "type").String()) != rejectedType {
 				continue
 			}
 			statusPath := fmt.Sprintf("input.%d.status", itemIndex)
-			if !gjson.GetBytes(retryBody, statusPath).Exists() {
+			if !wsMem.get(retryBody, statusPath).Exists() {
 				continue
 			}
-			next, err := sjson.DeleteBytes(retryBody, statusPath)
+			next, err := wsMem.delete(retryBody, statusPath)
 			if err != nil {
 				return nil, "", false, fmt.Errorf("delete rejected status at input[%d]: %w", itemIndex, err)
 			}
@@ -316,7 +317,7 @@ func removeOpenAIResponsesRejectedStatusAtIndex(body []byte, index int) ([]byte,
 	if cleared == 0 {
 		// The rejected item carries no type to match on; fall back to clearing
 		// just the index the upstream named.
-		next, err := sjson.DeleteBytes(retryBody, itemPath+".status")
+		next, err := wsMem.delete(retryBody, itemPath+".status")
 		if err != nil {
 			return nil, "", false, fmt.Errorf("delete rejected status at input[%d]: %w", index, err)
 		}
@@ -325,42 +326,44 @@ func removeOpenAIResponsesRejectedStatusAtIndex(body []byte, index int) ([]byte,
 	return retryBody, "indexed status parameter rejection", true, nil
 }
 
-func removeOpenAIResponsesRejectedCacheAtIndex(body []byte, index int) ([]byte, string, bool, error) {
+func removeOpenAIResponsesRejectedCacheAtIndex(body []byte, index int, memories ...*wsMaterializer) ([]byte, string, bool, error) {
+	wsMem := firstWSMaterializer(memories)
 	itemPath := fmt.Sprintf("input.%d", index)
-	if !gjson.GetBytes(body, itemPath).IsObject() {
+	if !wsMem.get(body, itemPath).IsObject() {
 		return nil, "", false, nil
 	}
 	cachePath := itemPath + ".prompt_cache_breakpoint"
-	if !gjson.GetBytes(body, cachePath).Exists() {
+	if !wsMem.get(body, cachePath).Exists() {
 		return nil, "", false, nil
 	}
-	retryBody, err := sjson.DeleteBytes(body, cachePath)
+	retryBody, err := wsMem.delete(body, cachePath)
 	if err != nil {
 		return nil, "", false, fmt.Errorf("delete rejected prompt_cache_breakpoint at input[%d]: %w", index, err)
 	}
 	return retryBody, "indexed prompt_cache_breakpoint parameter rejection", true, nil
 }
 
-func normalizeOpenAIResponsesRejectedNullContentAtIndex(body []byte, index int) ([]byte, string, bool, error) {
+func normalizeOpenAIResponsesRejectedNullContentAtIndex(body []byte, index int, memories ...*wsMaterializer) ([]byte, string, bool, error) {
+	wsMem := firstWSMaterializer(memories)
 	itemPath := fmt.Sprintf("input.%d", index)
-	item := gjson.GetBytes(body, itemPath)
-	content := gjson.GetBytes(body, itemPath+".content")
+	item := wsMem.get(body, itemPath)
+	content := wsMem.get(body, itemPath+".content")
 	if !item.IsObject() || !content.Exists() || content.Type != gjson.Null {
 		return nil, "", false, nil
 	}
 
-	itemType := strings.ToLower(strings.TrimSpace(item.Get("type").String()))
-	role := strings.TrimSpace(item.Get("role").String())
+	itemType := strings.ToLower(strings.TrimSpace(wsMem.resultGet(item, "type").String()))
+	role := strings.TrimSpace(wsMem.resultGet(item, "role").String())
 	contentPath := itemPath + ".content"
 	switch {
 	case itemType == "reasoning":
-		retryBody, err := sjson.DeleteBytes(body, contentPath)
+		retryBody, err := wsMem.delete(body, contentPath)
 		if err != nil {
 			return nil, "", false, fmt.Errorf("delete rejected null content at input[%d]: %w", index, err)
 		}
 		return retryBody, "indexed reasoning null content rejection", true, nil
 	case itemType == "message" || role != "":
-		retryBody, err := sjson.SetBytes(body, contentPath, "")
+		retryBody, err := wsMem.set(body, contentPath, "")
 		if err != nil {
 			return nil, "", false, fmt.Errorf("normalize rejected null content at input[%d]: %w", index, err)
 		}
@@ -370,23 +373,25 @@ func normalizeOpenAIResponsesRejectedNullContentAtIndex(body []byte, index int) 
 	}
 }
 
-func removeOpenAIResponsesRejectedReasoningContentAtIndex(body []byte, index int) ([]byte, string, bool, error) {
+func removeOpenAIResponsesRejectedReasoningContentAtIndex(body []byte, index int, memories ...*wsMaterializer) ([]byte, string, bool, error) {
+	wsMem := firstWSMaterializer(memories)
 	itemPath := fmt.Sprintf("input.%d", index)
-	item := gjson.GetBytes(body, itemPath)
-	content := item.Get("content")
-	if !item.IsObject() || strings.TrimSpace(item.Get("type").String()) != "reasoning" || !content.IsArray() || len(content.Array()) == 0 {
+	item := wsMem.get(body, itemPath)
+	content := wsMem.resultGet(item, "content")
+	if !item.IsObject() || strings.TrimSpace(wsMem.resultGet(item, "type").String()) != "reasoning" || !content.IsArray() || len(wsMem.array(content)) == 0 {
 		return nil, "", false, nil
 	}
-	retryBody, err := sjson.DeleteBytes(body, itemPath+".content")
+	retryBody, err := wsMem.delete(body, itemPath+".content")
 	if err != nil {
 		return nil, "", false, fmt.Errorf("delete rejected reasoning content at input[%d]: %w", index, err)
 	}
 	return retryBody, "indexed reasoning content maximum-length rejection", true, nil
 }
 
-func removeOpenAIResponsesRejectedNamespaceAtIndex(body []byte, index int) ([]byte, string, bool, error) {
+func removeOpenAIResponsesRejectedNamespaceAtIndex(body []byte, index int, memories ...*wsMaterializer) ([]byte, string, bool, error) {
+	wsMem := firstWSMaterializer(memories)
 	itemPath := fmt.Sprintf("input.%d", index)
-	itemType := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, itemPath+".type").String()))
+	itemType := strings.ToLower(strings.TrimSpace(wsMem.get(body, itemPath+".type").String()))
 	switch itemType {
 	case "function_call", "tool_call", "custom_tool_call", "mcp_tool_call":
 	default:
@@ -394,10 +399,10 @@ func removeOpenAIResponsesRejectedNamespaceAtIndex(body []byte, index int) ([]by
 	}
 
 	namespacePath := itemPath + ".namespace"
-	if !gjson.GetBytes(body, namespacePath).Exists() {
+	if !wsMem.get(body, namespacePath).Exists() {
 		return nil, "", false, nil
 	}
-	retryBody, err := sjson.DeleteBytes(body, namespacePath)
+	retryBody, err := wsMem.delete(body, namespacePath)
 	if err != nil {
 		return nil, "", false, fmt.Errorf("delete rejected namespace at input[%d]: %w", index, err)
 	}

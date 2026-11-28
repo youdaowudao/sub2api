@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"sort"
 	"strconv"
 	"strings"
@@ -40,11 +41,13 @@ func shouldSanitizeOpenAIResponsesToolSchemaPatterns(platform string) bool {
 	return platform == PlatformOpenAI
 }
 
-func sanitizeOpenAIResponsesToolSchemasForPlatform(body []byte, platform string) ([]byte, bool, error) {
+func sanitizeOpenAIResponsesToolSchemasForPlatform(body []byte, platform string, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	normalized := body
 	changed := false
 	if shouldRepairOpenAIResponsesNullToolSchemaType(platform) {
-		next, repaired, err := sanitizeOpenAIResponsesToolParameterTypes(normalized)
+		next, repaired, err := sanitizeOpenAIResponsesToolParameterTypesWithMemory(normalized, wsMem)
 		if err != nil {
 			return body, false, fmt.Errorf("sanitize OpenAI Responses tool parameters: %w", err)
 		}
@@ -54,7 +57,7 @@ func sanitizeOpenAIResponsesToolSchemasForPlatform(body []byte, platform string)
 		}
 	}
 	if shouldSanitizeOpenAIResponsesToolSchemaPatterns(platform) {
-		next, sanitized, err := sanitizeOpenAIResponsesToolSchemaPatterns(normalized)
+		next, sanitized, err := sanitizeOpenAIResponsesToolSchemaPatternsWithMemory(normalized, wsMem)
 		if err != nil {
 			return body, false, fmt.Errorf("sanitize OpenAI Responses tool schema patterns: %w", err)
 		}
@@ -75,10 +78,16 @@ func sanitizeOpenAIResponsesToolSchemasForPlatform(body []byte, platform string)
 // representable. It deliberately does not descend into instance-valued
 // keywords such as default, examples, const, or enum.
 func sanitizeOpenAIResponsesToolSchemaPatterns(body []byte) ([]byte, bool, error) {
+	return sanitizeOpenAIResponsesToolSchemaPatternsWithMemory(body)
+}
+
+func sanitizeOpenAIResponsesToolSchemaPatternsWithMemory(body []byte, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(body) == 0 || !openAIResponsesBodyMayContainUnsupportedRegex(body) {
 		return body, false, nil
 	}
-	return sanitizeOpenAIResponsesToolSchemas(body, openAIResponsesToolSchemaOptions{removeUnsupportedRegexPatterns: true})
+	return sanitizeOpenAIResponsesToolSchemas(body, openAIResponsesToolSchemaOptions{removeUnsupportedRegexPatterns: true}, wsMem)
 }
 
 // sanitizeOpenAIResponsesToolParameterTypes replaces an explicitly null type
@@ -87,6 +96,12 @@ func sanitizeOpenAIResponsesToolSchemaPatterns(body []byte) ([]byte, bool, error
 // oneOf/anyOf. Other missing types and nested property schemas are left
 // unchanged.
 func sanitizeOpenAIResponsesToolParameterTypes(body []byte) ([]byte, bool, error) {
+	return sanitizeOpenAIResponsesToolParameterTypesWithMemory(body)
+}
+
+func sanitizeOpenAIResponsesToolParameterTypesWithMemory(body []byte, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(body) == 0 || !openAIResponsesBodyMayNeedToolParameterRepair(body) {
 		return body, false, nil
 	}
@@ -94,7 +109,7 @@ func sanitizeOpenAIResponsesToolParameterTypes(body []byte) ([]byte, bool, error
 		replaceNullParameterTypes:       true,
 		injectObjectUnionRootObjectType: true,
 		dropNullRequired:                true,
-	})
+	}, wsMem)
 }
 
 var (
@@ -255,6 +270,7 @@ type openAIResponsesToolSchemaEdit struct {
 }
 
 type openAIResponsesToolSchemaParser struct {
+	memory    *wsMaterializer
 	body      []byte
 	pos       int
 	options   openAIResponsesToolSchemaOptions
@@ -268,14 +284,16 @@ type openAIResponsesToolSchemaParser struct {
 
 func sanitizeOpenAIResponsesToolSchemas(
 	body []byte, options openAIResponsesToolSchemaOptions,
-) ([]byte, bool, error) {
+	memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(body) > openAIResponsesToolSchemaMaxBodySize {
 		return body, false, nil
 	}
 	if !utf8.Valid(body) {
 		return nil, false, fmt.Errorf("sanitize OpenAI Responses tool schemas: invalid UTF-8")
 	}
-	p := openAIResponsesToolSchemaParser{body: body, options: options}
+	p := openAIResponsesToolSchemaParser{body: body, options: options, memory: wsMem}
 	if err := p.parseValue(openAIResponsesToolSchemaDocument, false, 0); err != nil {
 		if errors.Is(err, errOpenAIResponsesToolSchemaLimit) {
 			return body, false, nil
@@ -292,7 +310,7 @@ func sanitizeOpenAIResponsesToolSchemas(
 		// the result is validated after patching.
 		return body, false, nil
 	}
-	return applyOpenAIResponsesToolSchemaEdits(body, p.edits)
+	return applyOpenAIResponsesToolSchemaEdits(body, p.edits, wsMem)
 }
 
 func (p *openAIResponsesToolSchemaParser) parseValue(
@@ -314,7 +332,7 @@ func (p *openAIResponsesToolSchemaParser) parseValue(
 		}
 	}
 	if context == openAIResponsesToolSchemaInputItem && p.body[p.pos] == '{' {
-		probe := openAIResponsesToolSchemaParser{body: p.body, pos: p.pos}
+		probe := openAIResponsesToolSchemaParser{body: p.body, pos: p.pos, memory: p.memory}
 		if err := probe.parseValue(openAIResponsesToolSchemaTypeProbe, false, depth); err != nil {
 			return err
 		}
@@ -499,7 +517,7 @@ func (p *openAIResponsesToolSchemaParser) parseObject(
 			(context == openAIResponsesToolSchemaTool || context == openAIResponsesToolSchemaFunction) &&
 			parameterCount == 1 && parameterValueStart >= 0 {
 			if edit, ok := openAIMissingRootObjectUnionTypeEdit(
-				p.body[parameterValueStart:parameterValueEnd], parameterValueStart,
+				p.body[parameterValueStart:parameterValueEnd], parameterValueStart, p.memory,
 			); ok {
 				if err := p.addEdit(edit.start, edit.end, edit.replacement); err != nil {
 					return err
@@ -535,7 +553,9 @@ var (
 	openAIResponsesJSONEscapeNeedle = []byte{'\\'}
 )
 
-func openAIMissingRootObjectUnionTypeEdit(raw []byte, absoluteStart int) (openAIResponsesToolSchemaEdit, bool) {
+func openAIMissingRootObjectUnionTypeEdit(raw []byte, absoluteStart int, memories ...*wsMaterializer) (openAIResponsesToolSchemaEdit, bool) {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(raw) > openAIResponsesObjectUnionMaxSize {
 		return openAIResponsesToolSchemaEdit{}, false
 	}
@@ -544,10 +564,10 @@ func openAIMissingRootObjectUnionTypeEdit(raw []byte, absoluteStart int) (openAI
 		return openAIResponsesToolSchemaEdit{}, false
 	}
 	var schema map[string]json.RawMessage
-	if len(raw) < 2 || raw[0] != '{' || json.Unmarshal(raw, &schema) != nil {
+	if len(raw) < 2 || raw[0] != '{' || wsMem.unmarshal(raw, &schema) != nil {
 		return openAIResponsesToolSchemaEdit{}, false
 	}
-	if _, hasType := schema["type"]; hasType || !openAIResponsesSchemaHasObjectOnlyUnion(schema, 0) {
+	if _, hasType := schema["type"]; hasType || !openAIResponsesSchemaHasObjectOnlyUnion(schema, 0, wsMem) {
 		return openAIResponsesToolSchemaEdit{}, false
 	}
 	return openAIResponsesToolSchemaEdit{
@@ -557,7 +577,9 @@ func openAIMissingRootObjectUnionTypeEdit(raw []byte, absoluteStart int) (openAI
 	}, true
 }
 
-func openAIResponsesSchemaHasObjectOnlyUnion(schema map[string]json.RawMessage, depth int) bool {
+func openAIResponsesSchemaHasObjectOnlyUnion(schema map[string]json.RawMessage, depth int, memories ...*wsMaterializer) bool {
+	wsMem := firstWSMaterializer(memories)
+
 	if depth > openAIResponsesObjectUnionMaxDepth {
 		return false
 	}
@@ -569,11 +591,11 @@ func openAIResponsesSchemaHasObjectOnlyUnion(schema map[string]json.RawMessage, 
 		}
 		found = true
 		var branches []json.RawMessage
-		if json.Unmarshal(raw, &branches) != nil || len(branches) == 0 {
+		if wsMem.unmarshal(raw, &branches) != nil || len(branches) == 0 {
 			return false
 		}
 		for _, branch := range branches {
-			if !openAIResponsesSchemaIsObjectOnly(branch, depth+1) {
+			if !openAIResponsesSchemaIsObjectOnly(branch, depth+1, wsMem) {
 				return false
 			}
 		}
@@ -581,19 +603,21 @@ func openAIResponsesSchemaHasObjectOnlyUnion(schema map[string]json.RawMessage, 
 	return found
 }
 
-func openAIResponsesSchemaIsObjectOnly(raw json.RawMessage, depth int) bool {
+func openAIResponsesSchemaIsObjectOnly(raw json.RawMessage, depth int, memories ...*wsMaterializer) bool {
+	wsMem := firstWSMaterializer(memories)
+
 	if depth > openAIResponsesObjectUnionMaxDepth {
 		return false
 	}
 	var schema map[string]json.RawMessage
-	if json.Unmarshal(raw, &schema) != nil {
+	if wsMem.unmarshal(raw, &schema) != nil {
 		return false
 	}
 	if rawType, ok := schema["type"]; ok {
 		var schemaType string
-		return json.Unmarshal(rawType, &schemaType) == nil && schemaType == "object"
+		return wsMem.unmarshal(rawType, &schemaType) == nil && schemaType == "object"
 	}
-	return openAIResponsesSchemaHasObjectOnlyUnion(schema, depth+1)
+	return openAIResponsesSchemaHasObjectOnlyUnion(schema, depth+1, wsMem)
 }
 
 func (p *openAIResponsesToolSchemaParser) parseArray(
@@ -915,8 +939,9 @@ func decodeOpenAIResponsesJSONStringValue(raw []byte) (string, bool) {
 }
 
 func applyOpenAIResponsesToolSchemaEdits(
-	body []byte, edits []openAIResponsesToolSchemaEdit,
+	body []byte, edits []openAIResponsesToolSchemaEdit, memories ...*wsMaterializer,
 ) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
 	// Order by start; at equal starts keep zero-width insertions ahead of the
 	// span they precede, then put wider spans first so an enclosing edit is
 	// seen before the edits nested inside it.
@@ -957,6 +982,18 @@ func applyOpenAIResponsesToolSchemaEdits(
 	for _, edit := range merged {
 		delta += len(edit.replacement) - (edit.end - edit.start)
 	}
+	var owner *pkghttputil.WSBodyMemoryOwner
+	if wsMem != nil {
+		if wsMem.err != nil {
+			return nil, false, wsMem.err
+		}
+		var err error
+		owner, err = pkghttputil.ReserveWSBodyMemoryOwner(wsMem.ctx, int64(len(body)+delta))
+		if err != nil {
+			wsMem.err = err
+			return nil, false, err
+		}
+	}
 	sanitized := make([]byte, 0, len(body)+delta)
 	cursor := 0
 	for _, edit := range merged {
@@ -966,7 +1003,9 @@ func applyOpenAIResponsesToolSchemaEdits(
 	}
 	sanitized = append(sanitized, body[cursor:]...)
 	if !json.Valid(sanitized) {
+		owner.Drop()
 		return nil, false, fmt.Errorf("sanitize OpenAI Responses tool schemas: patch produced invalid JSON")
 	}
+	sanitized, _ = wsMem.track(sanitized, owner, nil)
 	return sanitized, true, nil
 }

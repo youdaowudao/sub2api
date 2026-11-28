@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -45,6 +47,55 @@ func adaptResponsesClientToolsForFunctionUpstreamWithMapping(
 		return body, mapping, nil
 	}
 	rebuilt, err := marshalOpenAIUpstreamJSON(requestBody)
+	if err != nil {
+		return body, apicompat.ResponsesClientToolMapping{}, fmt.Errorf("encode %s Responses client tools: %w", upstream, err)
+	}
+	return rebuilt, mapping, nil
+}
+
+// The original HTTP adapter remains unchanged. WS supplies an explicit
+// materializer to each existing tool conversion allocation.
+func adaptResponsesClientToolsForFunctionUpstreamWithMemory(body []byte, upstream string, inherited apicompat.ResponsesClientToolMapping, mem *wsMaterializer, inheritedLoweredTools ...[]any) ([]byte, apicompat.ResponsesClientToolMapping, error) {
+	if mem == nil {
+		return adaptResponsesClientToolsForFunctionUpstreamWithMapping(body, upstream, inherited, inheritedLoweredTools...)
+	}
+	var requestBody map[string]any
+	if err := mem.decode(body, &requestBody); err != nil {
+		return body, apicompat.ResponsesClientToolMapping{}, fmt.Errorf("decode %s Responses client tools: %w", upstream, err)
+	}
+	toolMemory := &apicompat.ResponsesToolMemory{
+		EncodeText: func(value any) (string, error) {
+			encoded, owner, err := marshalWSJSON(mem.ctx, value, true)
+			if err != nil {
+				return "", err
+			}
+			defer owner.Drop()
+			text := mem.string(encoded)
+			return text, mem.err
+		},
+		Validate: func(value any) error { _, owner, err := marshalWSJSON(mem.ctx, value, true); owner.Drop(); return err },
+		ReserveText: func(n int64) (func(), error) {
+			owner, err := pkghttputil.ReserveWSBodyMemoryOwner(mem.ctx, n)
+			if err != nil {
+				return nil, err
+			}
+			var once sync.Once
+			done := func() { once.Do(owner.Drop) }
+			mem.decoders = append(mem.decoders, done)
+			return done, nil
+		},
+	}
+	mapping, changed, err := apicompat.AdaptResponsesClientToolsWithMemory(requestBody, inherited, toolMemory, inheritedLoweredTools...)
+	if err != nil {
+		return body, apicompat.ResponsesClientToolMapping{}, err
+	}
+	if toolMemory.Err() != nil {
+		return body, apicompat.ResponsesClientToolMapping{}, toolMemory.Err()
+	}
+	if !changed {
+		return body, mapping, nil
+	}
+	rebuilt, err := mem.encode(requestBody)
 	if err != nil {
 		return body, apicompat.ResponsesClientToolMapping{}, fmt.Errorf("encode %s Responses client tools: %w", upstream, err)
 	}

@@ -19,7 +19,8 @@ type ResponsesClientToolMapping struct {
 // AdaptResponsesClientTools lowers Codex client-only tools in req to
 // ordinary function tools. It mutates req and returns the mapping required to
 // restore the upstream response.
-func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, bool, error) {
+func AdaptResponsesClientTools(req map[string]any, memories ...*ResponsesToolMemory) (ResponsesClientToolMapping, bool, error) {
+	mem := firstResponsesToolMemory(memories)
 	if req == nil {
 		return ResponsesClientToolMapping{}, false, nil
 	}
@@ -27,7 +28,7 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 	if !ok || len(tools) == 0 {
 		return ResponsesClientToolMapping{}, false, nil
 	}
-	discovered, err := promoteResponsesToolSearchDiscoveries(req)
+	discovered, err := promoteResponsesToolSearchDiscoveries(req, mem)
 	if err != nil {
 		return ResponsesClientToolMapping{}, false, err
 	}
@@ -67,9 +68,12 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 	}
 
 	// Namespace flattening also rewrites namespace-qualified history and choice.
-	names, flattened, err := FlattenResponsesNamespaces(req)
+	names, flattened, err := FlattenResponsesNamespaces(req, mem)
 	if err != nil {
 		return ResponsesClientToolMapping{}, false, err
+	}
+	if mem.Err() != nil {
+		return ResponsesClientToolMapping{}, false, mem.Err()
 	}
 	adapter.NamespaceTools = names
 	if adapter.ToolSearch {
@@ -125,7 +129,7 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 	if changed {
 		req["tools"] = lowered
 	}
-	historyChanged, err := rewriteClientToolHistory(req["input"], &adapter)
+	historyChanged, err := rewriteClientToolHistory(req["input"], &adapter, mem)
 	if err != nil {
 		return ResponsesClientToolMapping{}, false, err
 	}
@@ -140,6 +144,9 @@ func AdaptResponsesClientTools(req map[string]any) (ResponsesClientToolMapping, 
 	}
 	if len(adapter.NamespaceTools) == 0 {
 		adapter.NamespaceTools = nil
+	}
+	if mem.Err() != nil {
+		return ResponsesClientToolMapping{}, false, mem.Err()
 	}
 	return adapter, changed, nil
 }
@@ -174,27 +181,31 @@ func AdaptResponsesClientToolsWithInheritedMapping(
 	inherited ResponsesClientToolMapping,
 	inheritedLoweredTools ...[]any,
 ) (ResponsesClientToolMapping, bool, error) {
+	return AdaptResponsesClientToolsWithMemory(req, inherited, nil, inheritedLoweredTools...)
+}
+
+func AdaptResponsesClientToolsWithMemory(req map[string]any, inherited ResponsesClientToolMapping, mem *ResponsesToolMemory, inheritedLoweredTools ...[]any) (ResponsesClientToolMapping, bool, error) {
 	if req == nil {
 		return ResponsesClientToolMapping{}, false, nil
 	}
 	if _, toolsPresent := req["tools"]; toolsPresent {
-		return AdaptResponsesClientTools(req)
+		return AdaptResponsesClientTools(req, mem)
 	}
 	if len(inherited.CustomTools) == 0 && !inherited.ToolSearch && len(inherited.NamespaceTools) == 0 {
 		return ResponsesClientToolMapping{}, false, nil
 	}
 	if len(inheritedLoweredTools) > 0 && len(inheritedLoweredTools[0]) > 0 {
 		req["tools"] = restoreInheritedResponsesClientToolDeclarations(inheritedLoweredTools[0], inherited)
-		return AdaptResponsesClientTools(req)
+		return AdaptResponsesClientTools(req, mem)
 	}
 
-	changed, err := rewriteClientToolHistory(req["input"], &inherited)
+	changed, err := rewriteClientToolHistory(req["input"], &inherited, mem)
 	if err != nil {
 		return ResponsesClientToolMapping{}, false, err
 	}
 	if len(inherited.NamespaceTools) > 0 {
 		before := changed
-		rewriteNamespaceQualifiedCalls(req["input"], inherited.NamespaceTools)
+		rewriteNamespaceQualifiedCalls(req["input"], inherited.NamespaceTools, mem)
 		// Namespace rewriting does not currently report whether it changed a
 		// value. A retained namespace mapping is only used for follow-up
 		// history, so conservatively rebuild the request when input exists.
@@ -204,6 +215,9 @@ func AdaptResponsesClientToolsWithInheritedMapping(
 	}
 	if rewriteClientToolChoice(req, &inherited) {
 		changed = true
+	}
+	if mem.Err() != nil {
+		return ResponsesClientToolMapping{}, false, mem.Err()
 	}
 	return inherited, changed, nil
 }
@@ -216,7 +230,8 @@ func copyClientTool(tool map[string]any) map[string]any {
 	return copy
 }
 
-func rewriteClientToolHistory(value any, adapter *ResponsesClientToolMapping) (bool, error) {
+func rewriteClientToolHistory(value any, adapter *ResponsesClientToolMapping, memories ...*ResponsesToolMemory) (bool, error) {
+	mem := firstResponsesToolMemory(memories)
 	changed := false
 	var visit func(any) error
 	visit = func(value any) error {
@@ -233,23 +248,46 @@ func rewriteClientToolHistory(value any, adapter *ResponsesClientToolMapping) (b
 			case "custom_tool_call":
 				if adapter.CustomTools[strings.TrimSpace(stringValue(typed["name"]))] {
 					typed["type"] = "function_call"
-					typed["arguments"] = customToolCallArguments(stringValue(typed["input"]))
+					if mem == nil {
+						typed["arguments"] = customToolCallArguments(stringValue(typed["input"]))
+					} else {
+						arguments, err := mem.encodeText(map[string]string{"input": stringValue(typed["input"])})
+						if err != nil {
+							return err
+						}
+						typed["arguments"] = arguments
+					}
 					delete(typed, "input")
-					normalizeLoweredFunctionItemID(typed)
+					normalizeLoweredFunctionItemID(typed, mem)
 					changed = true
 				}
 			case "custom_tool_call_output":
 				typed["type"] = "function_call_output"
-				normalizeLoweredFunctionItemID(typed)
-				normalizeClientToolOutput(typed)
+				normalizeLoweredFunctionItemID(typed, mem)
+				if mem == nil {
+					normalizeClientToolOutput(typed)
+				} else if err := normalizeClientToolOutputWithMemory(typed, mem); err != nil {
+					return err
+				}
 				changed = true
 			case "tool_search_call":
 				if adapter.ToolSearch {
 					typed["type"] = "function_call"
 					typed["name"] = toolSearchProxyName
-					typed["arguments"] = rawObjectString(typed["arguments"])
+					if text, ok := typed["arguments"].(string); ok {
+						typed["arguments"] = text
+					} else {
+						arguments, err := mem.encodeText(typed["arguments"])
+						if err != nil {
+							if mem != nil {
+								return err
+							}
+							arguments = "{}"
+						}
+						typed["arguments"] = arguments
+					}
 					delete(typed, "execution")
-					normalizeLoweredFunctionItemID(typed)
+					normalizeLoweredFunctionItemID(typed, mem)
 					changed = true
 				}
 			case "tool_search_output":
@@ -259,8 +297,8 @@ func rewriteClientToolHistory(value any, adapter *ResponsesClientToolMapping) (b
 						return fmt.Errorf("tool_search_output requires a non-empty string call_id before it can be lowered to function_call_output")
 					}
 					typed["type"] = "function_call_output"
-					normalizeLoweredFunctionItemID(typed)
-					if err := normalizeToolSearchOutput(typed); err != nil {
+					normalizeLoweredFunctionItemID(typed, mem)
+					if err := normalizeToolSearchOutput(typed, mem); err != nil {
 						return err
 					}
 					changed = true
@@ -277,6 +315,9 @@ func rewriteClientToolHistory(value any, adapter *ResponsesClientToolMapping) (b
 	if err := visit(value); err != nil {
 		return false, err
 	}
+	if mem.Err() != nil {
+		return false, mem.Err()
+	}
 	return changed, nil
 }
 
@@ -286,7 +327,8 @@ func rewriteClientToolHistory(value any, adapter *ResponsesClientToolMapping) (b
 // call ID maps back to the fc_ ID it was raised from; the remaining IDs have no
 // function-protocol counterpart and are dropped. call_id, which is preserved
 // separately, stays the tool call/output pairing key either way.
-func normalizeLoweredFunctionItemID(item map[string]any) {
+func normalizeLoweredFunctionItemID(item map[string]any, memories ...*ResponsesToolMemory) {
+	mem := firstResponsesToolMemory(memories)
 	id := strings.TrimSpace(stringValue(item["id"]))
 	if id == "" || strings.HasPrefix(id, "fc") {
 		return
@@ -294,7 +336,7 @@ func normalizeLoweredFunctionItemID(item map[string]any) {
 	// A ctc_/tsc_ call ID on a lowered call item is the one we minted from the
 	// upstream's own fc_ ID when the item was raised, so map it back instead of
 	// dropping it. Anything else has no known function-protocol counterpart.
-	if recovered := retypedResponsesToolCallItemID(id, "function_call"); recovered != id {
+	if recovered := retypedResponsesToolCallItemID(id, "function_call", mem); recovered != id {
 		item["id"] = recovered
 		return
 	}
@@ -328,14 +370,15 @@ func responsesToolCallItemIDPrefix(itemType string) string {
 // "Invalid 'input[N].id' ... Expected an ID that begins with 'ctc'".
 // The suffix is preserved so the ID stays stable and unique per upstream item.
 // IDs that carry no known tool-call prefix are left alone rather than guessed at.
-func retypedResponsesToolCallItemID(id, itemType string) string {
+func retypedResponsesToolCallItemID(id, itemType string, memories ...*ResponsesToolMemory) string {
+	mem := firstResponsesToolMemory(memories)
 	want := responsesToolCallItemIDPrefix(itemType)
 	if want == "" || id == "" || strings.HasPrefix(id, want) {
 		return id
 	}
 	for _, known := range responsesToolCallItemIDPrefixes {
 		if known != want && strings.HasPrefix(id, known) {
-			return want + strings.TrimPrefix(id, known)
+			return mem.join(want, strings.TrimPrefix(id, known))
 		}
 	}
 	return id
@@ -351,26 +394,33 @@ func retypeResponsesToolCallItemID(item map[string]any, itemType string) {
 }
 
 func normalizeClientToolOutput(item map[string]any) {
+	_ = normalizeClientToolOutputWithMemory(item, nil)
+}
+func normalizeClientToolOutputWithMemory(item map[string]any, mem *ResponsesToolMemory) error {
 	output, exists := item["output"]
 	if !exists {
-		return
+		return nil
 	}
 	if _, ok := output.(string); ok {
-		return
+		return nil
 	}
 	if isResponsesToolOutputContent(output) {
-		return
+		return nil
 	}
 	if output == nil {
 		item["output"] = ""
-		return
+		return nil
 	}
-	encoded, err := json.Marshal(output)
+	encoded, err := mem.encodeText(output)
 	if err != nil {
+		if mem != nil {
+			return err
+		}
 		item["output"] = ""
-		return
+		return nil
 	}
-	item["output"] = string(encoded)
+	item["output"] = encoded
+	return nil
 }
 
 func isResponsesToolOutputContent(output any) bool {
@@ -397,7 +447,8 @@ func isResponsesToolOutputContent(output any) bool {
 // output field directly; newer Codex clients return discovered definitions in
 // a top-level tools field. Codex treats that field's value as the tool output,
 // so serialize the value directly rather than wrapping it in another object.
-func normalizeToolSearchOutput(item map[string]any) error {
+func normalizeToolSearchOutput(item map[string]any, memories ...*ResponsesToolMemory) error {
+	mem := firstResponsesToolMemory(memories)
 	if output, hasOutput := item["output"]; hasOutput {
 		switch typed := output.(type) {
 		case string:
@@ -405,11 +456,11 @@ func normalizeToolSearchOutput(item map[string]any) error {
 		case nil:
 			item["output"] = ""
 		default:
-			encoded, err := json.Marshal(typed)
+			encoded, err := mem.encodeText(typed)
 			if err != nil {
 				return fmt.Errorf("tool_search_output output cannot be encoded as function_call_output output: %w", err)
 			}
-			item["output"] = string(encoded)
+			item["output"] = encoded
 		}
 		dropToolSearchOutputPrivateFields(item)
 		return nil
@@ -418,11 +469,11 @@ func normalizeToolSearchOutput(item map[string]any) error {
 	if !hasTools {
 		return fmt.Errorf("tool_search_output requires output or tools before it can be lowered to function_call_output")
 	}
-	encoded, err := json.Marshal(tools)
+	encoded, err := mem.encodeText(tools)
 	if err != nil {
 		return fmt.Errorf("tool_search_output tools cannot be encoded as function_call_output output: %w", err)
 	}
-	item["output"] = string(encoded)
+	item["output"] = encoded
 	dropToolSearchOutputPrivateFields(item)
 	return nil
 }

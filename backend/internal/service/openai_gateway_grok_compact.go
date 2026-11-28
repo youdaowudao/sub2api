@@ -89,9 +89,11 @@ func normalizeGrokCompactInput(value any) ([]any, error) {
 // convertOpenAICompactInputsForGrok reverses compact output items from prior
 // turns. The encrypted blob originated as Grok reasoning and must be replayed
 // under that type. The visible summary is added as conversation context.
-func convertOpenAICompactInputsForGrok(body []byte) ([]byte, error) {
+func convertOpenAICompactInputsForGrok(body []byte, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
+	if err := wsMem.unmarshal(body, &payload); err != nil {
 		return nil, err
 	}
 	items, ok := payload["input"].([]any)
@@ -115,7 +117,7 @@ func convertOpenAICompactInputsForGrok(body []byte) ([]byte, error) {
 				"encrypted_content": encrypted,
 			})
 		}
-		if summary := compactSummaryText(item["summary"]); summary != "" {
+		if summary := compactSummaryText(item["summary"], wsMem); summary != "" {
 			converted = append(converted, map[string]any{
 				"type": "message",
 				"role": "user",
@@ -130,7 +132,7 @@ func convertOpenAICompactInputsForGrok(body []byte) ([]byte, error) {
 		return body, nil
 	}
 	payload["input"] = converted
-	encoded, err := json.Marshal(payload)
+	encoded, err := wsMem.marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +202,9 @@ func convertGrokResponseToOpenAICompact(body []byte) ([]byte, error) {
 	return encoded, nil
 }
 
-func compactSummaryText(value any) string {
+func compactSummaryText(value any, memories ...*wsMaterializer) string {
+	wsMem := firstWSMaterializer(memories)
+
 	parts, ok := value.([]any)
 	if !ok {
 		return ""
@@ -215,7 +219,7 @@ func compactSummaryText(value any) string {
 			texts = append(texts, text)
 		}
 	}
-	return strings.Join(texts, "\n")
+	return wsMem.join(texts, "\n")
 }
 
 func isOpenAICompactionType(value string) bool {

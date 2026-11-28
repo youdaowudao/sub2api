@@ -2061,6 +2061,7 @@ export interface DashboardStats {
   // 性能指标
   rpm: number // 近5分钟平均每分钟请求数
   tpm: number // 近5分钟平均每分钟Token数
+  connection_usage?: { ws_users: number; http_users: number; window_end: string } | null
 }
 
 export interface UsageStatsResponse {
