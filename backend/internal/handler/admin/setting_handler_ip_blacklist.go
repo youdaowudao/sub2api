@@ -42,3 +42,19 @@ func (h *SettingHandler) UpdateRegistrationIPBlacklist(c *gin.Context) {
 	}
 	response.Success(c, RegistrationIPBlacklistResponse{IPs: saved})
 }
+
+func (h *SettingHandler) AppendRegistrationIPBlacklist(c *gin.Context) {
+	var req struct {
+		IP string `json:"ip" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ErrorFrom(c, infraerrors.BadRequest("REGISTRATION_IP_BLACKLIST_INVALID", "Request must contain an IP address"))
+		return
+	}
+	address, added, err := h.settingService.AppendRegistrationIPBlacklist(c.Request.Context(), req.IP)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"ip": address, "added": added})
+}

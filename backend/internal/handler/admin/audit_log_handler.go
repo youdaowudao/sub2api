@@ -37,14 +37,15 @@ func (h *AuditLogHandler) List(c *gin.Context) {
 	}
 
 	filter := &service.AuditLogFilter{
-		Page:       page,
-		PageSize:   pageSize,
-		ActorEmail: strings.TrimSpace(c.Query("actor_email")),
-		AuthMethod: strings.TrimSpace(c.Query("auth_method")),
-		Action:     strings.TrimSpace(c.Query("action")),
-		Method:     strings.TrimSpace(c.Query("method")),
-		ClientIP:   strings.TrimSpace(c.Query("client_ip")),
-		Query:      strings.TrimSpace(c.Query("q")),
+		Page:              page,
+		PageSize:          pageSize,
+		ActorEmail:        strings.TrimSpace(c.Query("actor_email")),
+		RegistrationEmail: strings.TrimSpace(c.Query("registration_email")),
+		AuthMethod:        strings.TrimSpace(c.Query("auth_method")),
+		Action:            strings.TrimSpace(c.Query("action")),
+		Method:            strings.TrimSpace(c.Query("method")),
+		ClientIP:          strings.TrimSpace(c.Query("client_ip")),
+		Query:             strings.TrimSpace(c.Query("q")),
 	}
 
 	if v := strings.TrimSpace(c.Query("actor_user_id")); v != "" {

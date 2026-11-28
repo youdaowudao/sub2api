@@ -13,7 +13,9 @@ const {
   getAllGroups,
   getBatchUsersUsage,
   listEnabledDefinitions,
-  getBatchUserAttributes
+  getBatchUserAttributes,
+  listAuditLogs,
+  appendRegistrationIPBlacklist
 } = vi.hoisted(() => ({
   listUsers: vi.fn(),
   toggleStatus: vi.fn(),
@@ -23,7 +25,9 @@ const {
   getAllGroups: vi.fn(),
   getBatchUsersUsage: vi.fn(),
   listEnabledDefinitions: vi.fn(),
-  getBatchUserAttributes: vi.fn()
+  getBatchUserAttributes: vi.fn(),
+  listAuditLogs: vi.fn(),
+  appendRegistrationIPBlacklist: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -42,7 +46,9 @@ vi.mock('@/api/admin', () => ({
     userAttributes: {
       listEnabledDefinitions,
       getBatchUserAttributes
-    }
+    },
+    audit: { list: listAuditLogs },
+    settings: { appendRegistrationIPBlacklist }
   }
 }))
 
@@ -191,6 +197,8 @@ describe('admin UsersView', () => {
     getBatchUsersUsage.mockReset()
     listEnabledDefinitions.mockReset()
     getBatchUserAttributes.mockReset()
+    listAuditLogs.mockReset()
+    appendRegistrationIPBlacklist.mockReset()
 
     listUsers.mockResolvedValue({
       items: [createAdminUser()],
@@ -207,6 +215,127 @@ describe('admin UsersView', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  const registrationLog = (ip: string, overrides: Record<string, unknown> = {}) => ({
+    id: 1,
+    action: 'auth.register',
+    method: 'POST',
+    path: '/api/v1/auth/register',
+    client_ip: ip,
+    status_code: 200,
+    created_at: '2026-04-17T00:00:01Z',
+    ...overrides
+  })
+
+  async function openRegistrationIPDialog(wrapper: ReturnType<typeof mountBulkDeleteView>) {
+    await wrapper.get('[data-test="actions-42"] .action-menu-trigger').trigger('click')
+    expect(listAuditLogs).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="add-registration-ip"]').trigger('click')
+    await flushPromises()
+  }
+
+  it('only reads registration audit on explicit menu click and only adds on confirmation', async () => {
+    listAuditLogs.mockResolvedValue({ items: [registrationLog('192.0.2.10')], pages: 1 })
+    appendRegistrationIPBlacklist.mockResolvedValue({ ip: '192.0.2.10', added: true })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    expect(listAuditLogs).not.toHaveBeenCalled()
+    expect(appendRegistrationIPBlacklist).not.toHaveBeenCalled()
+    await openRegistrationIPDialog(wrapper)
+    expect(listAuditLogs).toHaveBeenCalledTimes(1)
+    expect(listAuditLogs).toHaveBeenCalledWith(expect.objectContaining({
+      registration_email: 'scoped@example.com', start_time: '2026-04-17T00:00:00Z', success: 'true'
+    }))
+    expect(wrapper.get('[data-test="registration-ip-candidates"]').text()).toContain('192.0.2.10')
+    expect(appendRegistrationIPBlacklist).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="registration-ip-confirm"]').trigger('click')
+    await flushPromises()
+    expect(appendRegistrationIPBlacklist).toHaveBeenCalledTimes(1)
+    expect(appendRegistrationIPBlacklist).toHaveBeenCalledWith('192.0.2.10')
+    expect(showSuccess).toHaveBeenCalledWith('admin.settings.registration.ipBlacklist.addSuccess')
+    expect(wrapper.find('[data-test="registration-ip-confirm"]').exists()).toBe(false)
+    expect(listUsers).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('filters unrelated and unsuccessful audit records, and requires a choice when multiple IPs match', async () => {
+    listAuditLogs.mockResolvedValueOnce({ items: [
+      registrationLog('192.0.2.10'),
+      registrationLog('192.0.2.30', { status_code: 400 }),
+      registrationLog('192.0.2.40', { actor_user_id: 77 }),
+      registrationLog('192.0.2.50', { created_at: '2026-04-16T23:59:59Z' }),
+      registrationLog('192.0.2.60', { action: 'auth.login', path: '/api/v1/auth/login' })
+    ], pages: 2 }).mockResolvedValueOnce({ items: [
+      registrationLog('192.0.2.10', { id: 2 }), registrationLog('2001:db8::1', { id: 3 })
+    ], pages: 2 })
+    appendRegistrationIPBlacklist.mockResolvedValue({ added: false, ip: '2001:db8::1' })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    await openRegistrationIPDialog(wrapper)
+    const candidates = wrapper.get('[data-test="registration-ip-candidates"]')
+    expect(candidates.findAll('input[type="radio"]')).toHaveLength(2)
+    expect(candidates.text()).not.toContain('192.0.2.30')
+    expect(candidates.text()).not.toContain('192.0.2.40')
+    expect(candidates.text()).not.toContain('192.0.2.50')
+    expect(candidates.text()).not.toContain('192.0.2.60')
+    expect(wrapper.get('[data-test="registration-ip-confirm"]').attributes('disabled')).toBeDefined()
+    await candidates.get('input[value="2001:db8::1"]').setValue(true)
+    await wrapper.get('[data-test="registration-ip-confirm"]').trigger('click')
+    await flushPromises()
+    expect(appendRegistrationIPBlacklist).toHaveBeenCalledTimes(1)
+    expect(appendRegistrationIPBlacklist).toHaveBeenCalledWith('2001:db8::1')
+    expect(showSuccess).toHaveBeenCalledWith('admin.settings.registration.ipBlacklist.alreadyAdded')
+    wrapper.unmount()
+  })
+
+  it('never adds an IP when records are missing or the administrator cancels', async () => {
+    listAuditLogs.mockResolvedValue({ items: [], pages: 1 })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    await openRegistrationIPDialog(wrapper)
+    expect(wrapper.get('[data-test="registration-ip-empty"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="registration-ip-confirm"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="registration-ip-cancel"]').trigger('click')
+    expect(appendRegistrationIPBlacklist).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('allows retrying a failed lookup but never writes on cancel with an IP selected', async () => {
+    listAuditLogs.mockRejectedValueOnce(new Error('lookup failed'))
+      .mockResolvedValueOnce({ items: [registrationLog('192.0.2.10')], pages: 1 })
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    await openRegistrationIPDialog(wrapper)
+    expect(wrapper.get('[data-test="registration-ip-error"]').text()).toContain('lookup failed')
+    expect(wrapper.get('[data-test="registration-ip-confirm"]').attributes('disabled')).toBeDefined()
+    const retry = wrapper.findAll('button').find(button => button.text() === 'common.tryAgain')
+    expect(retry).toBeDefined()
+    await retry!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="registration-ip-candidates"]').text()).toContain('192.0.2.10')
+    expect(wrapper.get('[data-test="registration-ip-confirm"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-test="registration-ip-cancel"]').trigger('click')
+    expect(appendRegistrationIPBlacklist).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('retains the selected IP on save failure and prevents double submission', async () => {
+    listAuditLogs.mockResolvedValue({ items: [registrationLog('192.0.2.10')], pages: 1 })
+    let rejectSave!: (error: Error) => void
+    appendRegistrationIPBlacklist.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject }))
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    await openRegistrationIPDialog(wrapper)
+    await wrapper.get('[data-test="registration-ip-confirm"]').trigger('click')
+    await wrapper.get('[data-test="registration-ip-confirm"]').trigger('click')
+    expect(appendRegistrationIPBlacklist).toHaveBeenCalledTimes(1)
+    rejectSave(new Error('save failed'))
+    await flushPromises()
+    expect(wrapper.get('[data-test="registration-ip-error"]').text()).toContain('save failed')
+    expect(wrapper.get('[data-test="registration-ip-candidates"]').text()).toContain('192.0.2.10')
+    expect(wrapper.get('[data-test="registration-ip-confirm"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
   })
 
   it('cancels bulk deletion without deleting or clearing selected users', async () => {

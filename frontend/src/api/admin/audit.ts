@@ -37,6 +37,7 @@ export interface AuditLogQuery {
   end_time?: string
   actor_user_id?: number
   actor_email?: string
+  registration_email?: string
   auth_method?: string
   action?: string
   method?: string

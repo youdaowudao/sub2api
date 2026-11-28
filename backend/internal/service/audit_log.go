@@ -72,10 +72,12 @@ type AuditLogFilter struct {
 	ActorUserID *int64
 	// ActorEmail matches the actor or ordinary registration request email.
 	ActorEmail string
-	AuthMethod string
-	Action     string
-	Method     string
-	ClientIP   string
+	// RegistrationEmail matches the ordinary registration request email exactly (case-insensitive).
+	RegistrationEmail string
+	AuthMethod        string
+	Action            string
+	Method            string
+	ClientIP          string
 	// Success: nil 全部；true 仅 2xx/3xx；false 仅 >=400。
 	Success *bool
 	// Query 对 path / action / actor_email 做模糊匹配；含 @ 时也匹配注册请求邮箱。
