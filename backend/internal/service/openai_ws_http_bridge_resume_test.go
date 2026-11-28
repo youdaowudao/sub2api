@@ -139,13 +139,35 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_second\",\"output\":[{\"id\":\"msg_2\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"second-ok\"}]}],\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}}\n\n",
 			)),
 		},
+		{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(bridgeReplayCompleted("resp_third", "[]"))),
+		},
+	}}
+	store := &bridgeReplayBindingRecorder{OpenAIWSStateStore: NewOpenAIWSStateStore(nil)}
+	type observedTurn struct {
+		id            string
+		usage         OpenAIUsage
+		failed        bool
+		resultPresent bool
+	}
+	var observed []observedTurn
+	hooks := &OpenAIWSIngressHooks{AfterTurn: func(_ int, result *OpenAIForwardResult, err error) {
+		obs := observedTurn{failed: err != nil, resultPresent: result != nil}
+		if result != nil {
+			obs.id = result.RequestID
+			obs.usage = result.Usage
+		}
+		observed = append(observed, obs)
 	}}
 	svc := &OpenAIGatewayService{
-		cfg:              cfg,
-		httpUpstream:     upstream,
-		cache:            &stubGatewayCache{},
-		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
-		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSStateStore: store,
+		cfg:                cfg,
+		httpUpstream:       upstream,
+		cache:              &stubGatewayCache{},
+		openaiWSResolver:   NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:      NewCodexToolCorrector(),
 	}
 	account := &Account{
 		ID: 129, Name: "limited", Platform: PlatformOpenAI, Type: AccountTypeOAuth,
@@ -178,7 +200,7 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 			serverErrCh <- readErr
 			return
 		}
-		proxyErr := svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "access-token-a", firstMessage, nil)
+		proxyErr := svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "access-token-a", firstMessage, hooks)
 		var failoverErr *UpstreamFailoverError
 		if !errors.As(proxyErr, &failoverErr) {
 			serverErrCh <- proxyErr
@@ -191,7 +213,7 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 		}
 		failoverCh <- retryPayload
 		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(
-			r.Context(), ginCtx, conn, &nextAccount, "access-token-b", retryPayload, nil,
+			r.Context(), ginCtx, conn, &nextAccount, "access-token-b", retryPayload, hooks,
 		)
 	}))
 	defer wsServer.Close()
@@ -224,6 +246,15 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 	require.NoError(t, err)
 	require.Equal(t, "response.completed", gjson.GetBytes(retriedCompleted, "type").String())
 	require.Equal(t, "resp_second", gjson.GetBytes(retriedCompleted, "response.id").String())
+	writeCtx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
+	err = clientConn.Write(writeCtx, websocket.MessageText, []byte(`{"type":"response.create","model":"gpt-5.6-sol","previous_response_id":"resp_second","input":[{"role":"user","content":"third"}]}`))
+	cancel()
+	require.NoError(t, err)
+	readCtx, cancel = context.WithTimeout(context.Background(), 3*time.Second)
+	_, thirdCompleted, err := clientConn.Read(readCtx)
+	cancel()
+	require.NoError(t, err)
+	require.Equal(t, "resp_third", gjson.GetBytes(thirdCompleted, "response.id").String())
 	_ = clientConn.Close(websocket.StatusNormalClosure, "done")
 
 	select {
@@ -251,7 +282,7 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for replacement-account completion")
 	}
-	require.Len(t, upstream.bodies, 3)
+	require.Len(t, upstream.bodies, 4)
 	require.Contains(t, string(upstream.bodies[0]), "first")
 	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "session", "client-session"), gjson.GetBytes(upstream.bodies[1], "client_metadata.session_id").String())
 	require.Equal(t, scopeCodexAccountIdentityValue(account, 0, "thread", "client-thread"), gjson.GetBytes(upstream.bodies[1], "client_metadata.thread_id").String())
@@ -260,4 +291,36 @@ func TestOpenAIWSHTTPBridgeLaterTurn429RetriesCurrentTurnOnReplacementAccount(t 
 	require.Equal(t, scopeCodexAccountIdentityValue(&nextAccount, 0, "session", "client-session"), gjson.GetBytes(upstream.bodies[2], "client_metadata.session_id").String())
 	require.Equal(t, scopeCodexAccountIdentityValue(&nextAccount, 0, "thread", "client-thread"), gjson.GetBytes(upstream.bodies[2], "client_metadata.thread_id").String())
 	require.Empty(t, upstream.requests[2].Header.Get(openAIWSTurnStateHeader))
+	thirdInput := gjson.GetBytes(upstream.bodies[3], "input")
+	require.Len(t, thirdInput.Array(), 6)
+	require.Contains(t, thirdInput.Raw, "first-ok")
+	require.Contains(t, thirdInput.Raw, "second-ok")
+	require.Contains(t, thirdInput.Raw, "third")
+	require.False(t, gjson.GetBytes(upstream.bodies[3], "previous_response_id").Exists())
+	require.Len(t, observed, 4)
+	require.Equal(t, "resp_first", observed[0].id)
+	require.Equal(t, 1, observed[0].usage.InputTokens)
+	require.Equal(t, 1, observed[0].usage.OutputTokens)
+	require.True(t, observed[1].failed)
+	require.False(t, observed[1].resultPresent)
+	require.Equal(t, "resp_second", observed[2].id)
+	require.Equal(t, 4, observed[2].usage.InputTokens)
+	require.Equal(t, 1, observed[2].usage.OutputTokens)
+	require.Equal(t, "resp_third", observed[3].id)
+	require.Equal(t, 1, observed[3].usage.InputTokens)
+	require.Equal(t, 1, observed[3].usage.OutputTokens)
+	require.Equal(t, []string{"resp_first", "resp_second", "resp_third"}, store.ids)
+	require.Equal(t, []int64{account.ID, nextAccount.ID, nextAccount.ID}, store.accounts)
+}
+
+type bridgeReplayBindingRecorder struct {
+	OpenAIWSStateStore
+	ids      []string
+	accounts []int64
+}
+
+func (s *bridgeReplayBindingRecorder) BindResponseAccount(ctx context.Context, groupID int64, responseID string, accountID int64, ttl time.Duration) error {
+	s.ids = append(s.ids, responseID)
+	s.accounts = append(s.accounts, accountID)
+	return s.OpenAIWSStateStore.BindResponseAccount(ctx, groupID, responseID, accountID, ttl)
 }

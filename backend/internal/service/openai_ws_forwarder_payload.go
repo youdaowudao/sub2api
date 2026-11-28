@@ -768,6 +768,67 @@ func buildOpenAIWSReplayInputSequenceFromItems(
 	return merged, true
 }
 
+// normalizeOpenAIWSBridgeReplayItems reapplies only stable per-item input
+// compatibility to newly restored history. It is also used for exact prefix
+// comparison; whole-input transforms must stay out of this comparison.
+func normalizeOpenAIWSBridgeReplayItems(body []byte, account *Account) ([]byte, error) {
+	if account == nil || !account.IsOpenAI() {
+		return body, nil
+	}
+	var err error
+	body, _, err = normalizeOpenAIResponsesReasoningContentReplay(body)
+	if err != nil {
+		return nil, err
+	}
+	if account.IsOpenAIApiKey() {
+		body, _, err = normalizeOpenAIAPIKeyStoreFalseReasoningReplay(body, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	body, _, err = sanitizeOpenAIResponsesInputItemIDs(body)
+	if err != nil {
+		return nil, err
+	}
+	if account.IsOpenAIOAuthLike() {
+		body, _, err = normalizeOpenAIOAuthResponsesCompatibilityBody(body)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return body, nil
+}
+
+// normalizeOpenAIWSBridgeReplayBody applies the existing input compatibility
+// passes in their original order to an actual combined HTTP bridge request.
+func normalizeOpenAIWSBridgeReplayBody(body []byte, account *Account, responsesLite bool) ([]byte, error) {
+	if account == nil || !account.IsOpenAI() {
+		return body, nil
+	}
+	var err error
+	if account.IsOpenAIOAuthLike() {
+		body, _, err = normalizeCodexAdditionalToolsIDsBody(body)
+		if err != nil {
+			return nil, err
+		}
+	}
+	body, err = normalizeOpenAIWSBridgeReplayItems(body, account)
+	if err != nil {
+		return nil, err
+	}
+	if account.IsOpenAIOAuthLike() {
+		body, _, err = ensureOpenAIOAuthWebSearchToolForHistoryBody(body, responsesLite)
+		if err != nil {
+			return nil, err
+		}
+	}
+	body, _, err = NormalizeCompactionTriggerInputOrder(body)
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
 func buildOpenAIWSReplayInputSequence(
 	previousFullInput []json.RawMessage,
 	previousFullInputExists bool,

@@ -652,6 +652,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 
 	responseID := ""
+	completedResponseID := ""
 	usage := OpenAIUsage{}
 	imageCounter := newOpenAIImageOutputCounter()
 	var firstTokenMs *int
@@ -689,6 +690,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		imageCount := imageCounter.Count()
 		result := &OpenAIForwardResult{
 			RequestID:                     responseID,
+			ResponseID:                    completedResponseID,
 			Usage:                         usage,
 			Model:                         originalModel,
 			UpstreamModel:                 mappedModel,
@@ -704,11 +706,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			Duration:                      time.Since(turnStart),
 			FirstTokenMs:                  firstTokenMs,
 		}
-		if replayInput := replayCollector.Items(); len(replayInput) > 0 {
+		if replayInput := replayCollector.AllItems(); len(replayInput) > 0 {
 			result.wsReplayInput = replayInput
 			result.wsReplayInputExists = true
 		}
-		result.wsAccountFailoverReplayInput = replayCollector.AllItems()
 		if imageCount > 0 {
 			result.ImageCount = imageCount
 			result.ImageSize = imageSizeTier
@@ -980,6 +981,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				upstreamTerminalEvent = "response.failed"
 			} else {
 				upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, mappedModel, resp.Header, upstreamMessage)
+			}
+			if upstreamTerminalEvent == "response.completed" || upstreamTerminalEvent == "response.done" {
+				status := strings.TrimSpace(gjson.GetBytes(upstreamMessage, "response.status").String())
+				if status == "" || status == "completed" {
+					completedResponseID = strings.TrimSpace(gjson.GetBytes(upstreamMessage, "response.id").String())
+				}
 			}
 			terminalEventCount++
 			firstTokenMsValue := -1

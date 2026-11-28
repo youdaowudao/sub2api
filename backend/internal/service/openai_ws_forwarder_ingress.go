@@ -19,6 +19,10 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+// ErrOpenAIWSBridgePreviousResponseUnavailable identifies a local history
+// mismatch, not an upstream account failure.
+var ErrOpenAIWSBridgePreviousResponseUnavailable = errors.New("websocket bridge previous response unavailable")
+
 type openAIWSRejectedFieldRetryError struct {
 	body   []byte
 	reason string
@@ -200,6 +204,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		imageInputSize           string
 		payloadBytes             int
 		requestedReasoningEffort *string
+		responsesLite            bool
 	}
 	ingressSessionOriginalModel := ""
 
@@ -488,6 +493,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			imageInputSize:           imageInputSize,
 			payloadBytes:             len(normalized),
 			requestedReasoningEffort: requestedReasoningEffort,
+			responsesLite:            responsesLite,
 		}, nil
 	}
 
@@ -589,13 +595,25 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		grokCacheSeedPayload := firstPayload.payloadRaw
 		var bridgeReplayInput []json.RawMessage
 		bridgeReplayInputExists := false
-		var bridgeAccountFailoverInput []json.RawMessage
-		bridgeAccountFailoverInputExists := false
+		lastBridgeResponseID := ""
 		for turn := 1; ; turn++ {
 			if turn > 1 && hooks != nil && hooks.BeforeRequest != nil {
 				if err := hooks.BeforeRequest(turn, currentBridgePayload.rawForHash, currentBridgePayload.originalModel); err != nil {
 					return err
 				}
+			}
+			previousID := currentBridgePayload.previousResponseID
+			if turn == 1 && hooks != nil && strings.TrimSpace(hooks.InitialPreviousResponseID) != "" {
+				previousID = strings.TrimSpace(hooks.InitialPreviousResponseID)
+			}
+			if previousID != "" && (turn == 1 || previousID != lastBridgeResponseID) {
+				writeErr := writeClientMessage([]byte(`{"type":"error","sequence_number":0,"status":400,"error":{"type":"invalid_request_error","code":"previous_response_not_found","message":"Previous response is unavailable on this connection. This request was not sent upstream. Reconnect and resend the full input."}}`))
+				// Preserve local attribution even if writing the explanatory frame fails.
+				cause := error(ErrOpenAIWSBridgePreviousResponseUnavailable)
+				if writeErr != nil {
+					cause = errors.Join(cause, writeErr)
+				}
+				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "previous response unavailable; reconnect with full input", cause)
 			}
 			if hooks != nil && hooks.BeforeTurn != nil {
 				if err := hooks.BeforeTurn(turn); err != nil {
@@ -621,16 +639,13 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				if bridgeReplayInputExists {
 					bridgeReplayInput, _ = stripOpenAIInvalidEncryptedContentFromReplayItems(bridgeReplayInput, invalidDigests)
 				}
-				if bridgeAccountFailoverInputExists {
-					bridgeAccountFailoverInput, _ = stripOpenAIInvalidEncryptedContentFromReplayItems(bridgeAccountFailoverInput, invalidDigests)
-				}
 			}
 			bridgePayloadRaw := currentBridgePayload.payloadRaw
 			bridgePayloadBytes := currentBridgePayload.payloadBytes
 			toolOutputCoverage := AnalyzeToolCallOutputContextCoverageBytes(currentBridgePayload.payloadRaw)
 			needsBridgeReplay := currentBridgePayload.previousResponseID != "" ||
 				(toolOutputCoverage.HasFunctionCallOutput && !toolOutputCoverage.ContextCoversAllCallIDs)
-			// 一次解析当前 input，正常 replay 与 account-failover 两份序列共享同一批正文。
+			// 一次解析当前 input，正常 replay 和换号复用同一份完整历史。
 			bridgeCurrentItems, bridgeCurrentItemsExist, extractErr := openAIWSExtractNormalizedInputSequence(
 				currentBridgePayload.payloadRaw,
 			)
@@ -644,13 +659,33 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				bridgeCurrentItemsExist,
 				needsBridgeReplay,
 			)
-			turnAccountFailoverInput, turnAccountFailoverInputExists := buildOpenAIWSReplayInputSequenceFromItems(
-				bridgeAccountFailoverInput,
-				bridgeAccountFailoverInputExists,
-				bridgeCurrentItems,
-				bridgeCurrentItemsExist,
-				needsBridgeReplay,
-			)
+			mergedHistory := len(turnReplayInput) > len(bridgeCurrentItems)
+			if needsBridgeReplay && mergedHistory && len(bridgeCurrentItems) > 0 && account.IsOpenAI() {
+				previous := turnReplayInput[:len(turnReplayInput)-len(bridgeCurrentItems)]
+				messageCount := 0
+				for _, item := range previous {
+					if gjson.GetBytes(item, "type").String() == "message" {
+						messageCount++
+					}
+				}
+				if messageCount <= len(bridgeCurrentItems) {
+					comparable, compareErr := setOpenAIWSPayloadInputSequence(currentBridgePayload.payloadRaw, previous, true)
+					if compareErr == nil {
+						comparable, compareErr = normalizeOpenAIWSBridgeReplayItems(comparable, account)
+					}
+					if compareErr != nil {
+						return fmt.Errorf("normalize websocket http bridge replay prefix: %w", compareErr)
+					}
+					normalizedPrefix, _, compareErr := openAIWSExtractNormalizedInputSequence(comparable)
+					if compareErr != nil {
+						return fmt.Errorf("extract websocket http bridge replay prefix: %w", compareErr)
+					}
+					if openAIWSRawItemsHasPrefix(bridgeCurrentItems, normalizedPrefix) {
+						turnReplayInput, turnReplayInputExists = bridgeCurrentItems, bridgeCurrentItemsExist
+						mergedHistory = false
+					}
+				}
+			}
 			if needsBridgeReplay && turnReplayInputExists {
 				updatedPayload, setInputErr := setOpenAIWSPayloadInputSequence(
 					currentBridgePayload.payloadRaw,
@@ -659,6 +694,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				)
 				if setInputErr != nil {
 					return fmt.Errorf("set websocket http bridge replay input: %w", setInputErr)
+				}
+				if mergedHistory {
+					updatedPayload, setInputErr = normalizeOpenAIWSBridgeReplayBody(updatedPayload, account, currentBridgePayload.responsesLite)
+					if setInputErr != nil {
+						return fmt.Errorf("normalize websocket http bridge replay input: %w", setInputErr)
+					}
 				}
 				bridgePayloadRaw = updatedPayload
 				bridgePayloadBytes = len(updatedPayload)
@@ -714,8 +755,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				if turn > 1 && errors.As(bridgeErr, &failoverErr) && failoverErr != nil {
 					retryPayload, retrySafe, retryPayloadErr := buildOpenAIWSCurrentTurnRetryPayload(
 						currentBridgePayload.accountIdentitySourceRaw,
-						turnAccountFailoverInput,
-						turnAccountFailoverInputExists,
+						turnReplayInput,
+						turnReplayInputExists,
 						currentBridgePayload.originalModel,
 					)
 					if retryPayloadErr != nil {
@@ -731,23 +772,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if result == nil {
 				return errors.New("websocket http bridge turn result is nil")
 			}
-			// turnReplayInput/turnAccountFailoverInput 可能共享同一头数组（转移自
-			// bridgeCurrentItems），保存历史必须经 combine 新建头，禁止就地 append。
+			// 保存历史必须经 combine 新建头，禁止就地 append 或改写共享正文。
 			bridgeReplayInput = turnReplayInput
 			bridgeReplayInputExists = turnReplayInputExists
 			if result.wsReplayInputExists {
 				bridgeReplayInput = combineOpenAIWSReplayItems(bridgeReplayInput, result.wsReplayInput)
 				bridgeReplayInputExists = true
 			}
-			bridgeAccountFailoverInput = turnAccountFailoverInput
-			bridgeAccountFailoverInputExists = turnAccountFailoverInputExists
-			if len(result.wsAccountFailoverReplayInput) > 0 {
-				bridgeAccountFailoverInput = combineOpenAIWSReplayItems(
-					bridgeAccountFailoverInput,
-					result.wsAccountFailoverReplayInput,
-				)
-				bridgeAccountFailoverInputExists = true
-			}
+			lastBridgeResponseID = strings.TrimSpace(result.ResponseID)
 			if bridgeTurnState := strings.TrimSpace(result.ResponseHeaders.Get(openAIWSTurnStateHeader)); bridgeTurnState != "" {
 				// Follow-up turns on this bridge retain their own upstream state;
 				// publishing it by session hash would leak it to independent bridges.

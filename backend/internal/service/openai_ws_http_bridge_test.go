@@ -2405,3 +2405,200 @@ func TestProxyOpenAIWSHTTPBridgeTurn_StagesCodexFingerprint(t *testing.T) {
 	off := newTestOAuthAccount(7102, map[string]any{"codex_fingerprint_mode": "off"})
 	require.Empty(t, run(off).Header.Get("session_id"), "accounts without convergence get no session_id")
 }
+
+// Replay regression fixture uses only pre-existing ingress APIs so the RED
+// runner can compile the entire service test package against the old source.
+func runBridgeReplayConversation(t *testing.T, accountType string, payloads, streams []string) ([][]byte, [][]byte, error) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+	upstream := &httpUpstreamRecorder{}
+	for _, stream := range streams {
+		upstream.responses = append(upstream.responses, &http.Response{
+			StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader(stream)),
+		})
+	}
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream, cache: &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector()}
+	account := &Account{ID: 9010, Name: "bridge-conversation", Platform: PlatformOpenAI, Type: accountType,
+		Credentials: map[string]any{"api_key": "test-key", "access_token": "test-token"},
+		Extra: map[string]any{"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge,
+			"openai_oauth_responses_websockets_v2_mode": OpenAIWSIngressModeHTTPBridge},
+		Concurrency: 1, Status: StatusActive, Schedulable: true}
+	errCh := make(chan error, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		_, first, err := conn.Read(readCtx)
+		cancel()
+		if err != nil {
+			errCh <- err
+			return
+		}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = r.Clone(r.Context())
+		errCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), c, conn, account, "test-key", first, nil)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	require.NoError(t, err)
+	defer func() { _ = client.CloseNow() }()
+	var terminalEvents [][]byte
+	rejected := false
+	for _, frame := range payloads {
+		require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(frame)))
+		for {
+			_, event, readErr := client.Read(ctx)
+			require.NoError(t, readErr)
+			typ := gjson.GetBytes(event, "type").String()
+			if typ == "error" || isOpenAIWSTerminalEvent(typ) {
+				terminalEvents = append(terminalEvents, event)
+				rejected = typ == "error"
+				break
+			}
+		}
+		if rejected {
+			break
+		}
+	}
+	if !rejected {
+		_ = client.Close(coderws.StatusNormalClosure, "done")
+	}
+	select {
+	case proxyErr := <-errCh:
+		return upstream.bodies, terminalEvents, proxyErr
+	case <-ctx.Done():
+		t.Fatal("bridge conversation did not finish")
+		return nil, nil, ctx.Err()
+	}
+}
+
+func bridgeReplayCompleted(id, output string) string {
+	return fmt.Sprintf("data: {\"type\":\"response.completed\",\"response\":{\"id\":%q,\"output\":%s,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n", id, output)
+}
+
+func TestOpenAIWSHTTPBridgeReplaysCompleteTurnOutput(t *testing.T) {
+	message := `{"type":"message","id":"msg_first","role":"assistant","content":[{"type":"output_text","text":"first-answer"}]}`
+	reasoning := `{"type":"reasoning","id":"rs_first","encrypted_content":"fixture-cipher","summary":[],"content":[{"type":"reasoning_text","text":"not portable"}]}`
+	call := `{"type":"function_call","id":"fc_first","call_id":"call_first","name":"inspect","arguments":"{}"}`
+	first := "data: {\"type\":\"response.output_item.done\",\"item\":" + message + "}\n\n" +
+		bridgeReplayCompleted("resp_first", "["+message+","+reasoning+","+call+"]")
+	prefix := `{"type":"response.create","model":"gpt-5.1","store":false,`
+	bodies, events, err := runBridgeReplayConversation(t, AccountTypeAPIKey, []string{
+		prefix + `"input":[{"type":"message","role":"user","content":"seed"}]}`,
+		prefix + `"previous_response_id":"resp_first","input":[{"type":"function_call_output","call_id":"call_first","output":"ok"}]}`,
+		prefix + `"previous_response_id":"resp_second","input":[{"type":"message","role":"user","content":"next"}]}`,
+	}, []string{first, bridgeReplayCompleted("resp_second", `[{"type":"message","id":"msg_second","role":"assistant","content":[{"type":"output_text","text":"second-answer"}]}]`), bridgeReplayCompleted("resp_third", "[]")})
+	require.NoError(t, err)
+	require.Len(t, events, 3)
+	require.Len(t, bodies, 3)
+	for _, body := range bodies {
+		require.False(t, gjson.GetBytes(body, "previous_response_id").Exists())
+	}
+	second := gjson.GetBytes(bodies[1], "input").Array()
+	require.Len(t, second, 5)
+	require.Equal(t, "seed", second[0].Get("content").String())
+	require.Equal(t, "first-answer", second[1].Get("content.0.text").String())
+	require.Equal(t, "fixture-cipher", second[2].Get("encrypted_content").String())
+	require.False(t, second[2].Get("content").Exists())
+	require.False(t, second[2].Get("id").Exists())
+	require.Equal(t, "call_first", second[3].Get("call_id").String())
+	require.Equal(t, "call_first", second[4].Get("call_id").String())
+	third := gjson.GetBytes(bodies[2], "input").Array()
+	require.Len(t, third, 7)
+	require.Equal(t, "first-answer", third[1].Get("content.0.text").String())
+	require.Equal(t, "fixture-cipher", third[2].Get("encrypted_content").String())
+	require.Equal(t, "second-answer", third[5].Get("content.0.text").String())
+	require.Equal(t, "next", third[6].Get("content").String())
+}
+
+func TestOpenAIWSHTTPBridgeRejectsUnavailablePreviousResponse(t *testing.T) {
+	frame := func(id string) string {
+		if id == "" {
+			return `{"type":"response.create","model":"gpt-5.1","input":"new"}`
+		}
+		return fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","previous_response_id":%q,"input":"next"}`, id)
+	}
+	for _, tc := range []struct {
+		name            string
+		frames, streams []string
+		accepted        int
+	}{
+		{"first_reference", []string{frame("resp_missing")}, []string{bridgeReplayCompleted("resp_first", "[]")}, 0},
+		{"unknown_reference", []string{frame(""), frame("resp_missing")}, []string{bridgeReplayCompleted("resp_first", "[]"), bridgeReplayCompleted("resp_second", "[]")}, 1},
+		{"replaced_reference", []string{frame(""), frame("resp_first"), frame("resp_first")}, []string{bridgeReplayCompleted("resp_first", "[]"), bridgeReplayCompleted("resp_second", "[]"), bridgeReplayCompleted("resp_third", "[]")}, 2},
+		{"terminal_without_id", []string{frame(""), frame("resp_first"), frame("resp_first")}, []string{bridgeReplayCompleted("resp_first", "[]"), bridgeReplayCompleted("", "[]"), bridgeReplayCompleted("resp_third", "[]")}, 2},
+		{"incomplete_terminal", []string{frame(""), frame("resp_incomplete")}, []string{"data: {\"type\":\"response.incomplete\",\"response\":{\"id\":\"resp_incomplete\",\"status\":\"incomplete\",\"output\":[]}}\n\n", bridgeReplayCompleted("resp_next", "[]")}, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bodies, events, err := runBridgeReplayConversation(t, AccountTypeAPIKey, tc.frames, tc.streams)
+			require.Len(t, bodies, tc.accepted, "unavailable history must not be forwarded")
+			require.Len(t, events, tc.accepted+1)
+			last := events[len(events)-1]
+			require.Equal(t, "error", gjson.GetBytes(last, "type").String())
+			require.Equal(t, "previous_response_not_found", gjson.GetBytes(last, "error.code").String())
+			var closeErr *OpenAIWSClientCloseError
+			require.ErrorAs(t, err, &closeErr)
+			require.Equal(t, coderws.StatusPolicyViolation, closeErr.StatusCode())
+			require.Contains(t, closeErr.Reason(), "reconnect with full input")
+			bodies, events, err = runBridgeReplayConversation(t, AccountTypeAPIKey, []string{frame("")}, []string{bridgeReplayCompleted("resp_restored", "[]")})
+			require.NoError(t, err)
+			require.Len(t, bodies, 1)
+			require.Equal(t, "response.completed", gjson.GetBytes(events[0], "type").String())
+		})
+	}
+	t.Run("known empty history", func(t *testing.T) {
+		bodies, events, err := runBridgeReplayConversation(t, AccountTypeAPIKey, []string{
+			`{"type":"response.create","model":"gpt-5.1","input":[]}`, frame("resp_empty"),
+		}, []string{bridgeReplayCompleted("resp_empty", "[]"), bridgeReplayCompleted("resp_next", "[]")})
+		require.NoError(t, err)
+		require.Len(t, bodies, 2)
+		require.Len(t, events, 2)
+	})
+}
+
+func TestOpenAIWSHTTPBridgeReplayCompatibilityAndFullReset(t *testing.T) {
+	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth} {
+		t.Run(accountType, func(t *testing.T) {
+			// Output metadata that the incoming compatibility pass removes must
+			// not defeat exact comparison of the normalized full prefix.
+			message := `{"type":"message","id":"invalid-message-id","role":"assistant","content":[{"type":"output_text","text":"answer"}]}`
+			seed := `{"type":"message","role":"user","content":[{"type":"input_text","text":"seed"}]}`
+			normalizedMessage := `{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}`
+			prefix := `{"type":"response.create","model":"gpt-5.1","store":false,`
+			bodies, events, err := runBridgeReplayConversation(t, accountType, []string{
+				prefix + `"input":[` + seed + `]}`,
+				prefix + `"previous_response_id":"resp_first","input":[` + seed + `,` + normalizedMessage + `,` + seed + `]}`,
+				prefix + `"input":[{"type":"message","role":"user","content":"reset"}]}`,
+				prefix + `"previous_response_id":"resp_reset","input":[{"type":"message","role":"user","content":"new"}]}`,
+			}, []string{bridgeReplayCompleted("resp_first", "["+message+"]"), bridgeReplayCompleted("resp_second", "[]"), bridgeReplayCompleted("resp_reset", "[]"), bridgeReplayCompleted("resp_last", "[]")})
+			require.NoError(t, err)
+			require.Len(t, events, 4)
+			require.Len(t, bodies, 4)
+			require.Len(t, gjson.GetBytes(bodies[1], "input").Array(), 3)
+			require.Equal(t, "answer", gjson.GetBytes(bodies[1], "input.1.content.0.text").String())
+			require.False(t, gjson.GetBytes(bodies[1], "input.1.id").Exists())
+			require.Equal(t, "seed", gjson.GetBytes(bodies[1], "input.2.content.0.text").String())
+			require.Len(t, gjson.GetBytes(bodies[2], "input").Array(), 1)
+			require.Len(t, gjson.GetBytes(bodies[3], "input").Array(), 2)
+			require.NotContains(t, string(bodies[3]), "answer")
+		})
+	}
+}

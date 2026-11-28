@@ -251,6 +251,8 @@ type OpenAIWSIngressHooks struct {
 	// before channel or account mapping. Ingress modes preserve it for usage
 	// attribution while MapRequestModel determines the upstream model.
 	InitialRequestModel string
+	// InitialPreviousResponseID preserves the ingress reference before routing normalization.
+	InitialPreviousResponseID string
 	// InitialTurnStartedAt freezes when the first response.create was accepted.
 	InitialTurnStartedAt time.Time
 	// MaxReasoningEffort limits explicit reasoning effort values for this WS session.

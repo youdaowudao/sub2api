@@ -305,9 +305,8 @@ type OpenAIForwardResult struct {
 	// AudioUsage carries Voice billing units when present.
 	AudioUsage *AudioUsage
 
-	wsReplayInput                []json.RawMessage
-	wsReplayInputExists          bool
-	wsAccountFailoverReplayInput []json.RawMessage
+	wsReplayInput       []json.RawMessage
+	wsReplayInputExists bool
 }
 
 // SucceededForScheduling reports whether this result is an upstream success
