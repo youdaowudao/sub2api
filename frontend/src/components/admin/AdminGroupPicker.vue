@@ -1,5 +1,6 @@
 <template>
-  <div class="group/dropdown relative">
+  <div class="relative">
+    <!-- 收起态与筛选栏其他字段同尺寸（同 .input / Select 触发器：42px、边框、圆角）；展开弹层与用户端一致 -->
     <button
       ref="triggerRef"
       :id="id"
@@ -7,15 +8,21 @@
       :disabled="disabled"
       :aria-label="ariaLabel"
       :aria-describedby="$attrs['aria-describedby'] as string | undefined"
-      :aria-invalid="$attrs['aria-invalid'] as boolean | undefined"
+      :aria-invalid="error || ($attrs['aria-invalid'] as boolean | undefined)"
       :aria-expanded="isOpen"
       @click="openGroupSelector"
-      class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 max-md:max-w-full max-md:flex-wrap max-md:justify-end dark:hover:bg-dark-700"
+      :class="[
+        'input flex h-[42px] cursor-pointer items-center justify-between gap-2 py-0 text-left hover:border-gray-300 dark:hover:border-dark-500',
+        isOpen && 'border-primary-500 ring-2 ring-primary-500/30',
+        error && 'input-error',
+        disabled && 'opacity-60',
+      ]"
       :title="t('keys.clickToChangeGroup')"
     >
+      <span class="flex min-w-0 flex-1 items-center overflow-hidden">
       <GroupBadge
         v-if="selectedOption?.platform && !selectedSpecialOption"
-        class="max-md:max-w-full max-md:flex-wrap"
+        class="min-w-0 max-w-full"
         :name="selectedOption.label"
         :platform="selectedOption.platform"
         :subscription-type="selectedOption.subscriptionType"
@@ -26,21 +33,24 @@
         :peak-end="selectedOption.peakEnd"
         :peak-rate-multiplier="selectedOption.peakRateMultiplier"
       />
-      <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
-        selectedSpecialOption?.label ?? selectedOption?.label ?? t('keys.noGroup')
+      <span
+        v-else
+        class="truncate"
+        :class="selectedSpecialOption || selectedOption ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-dark-400'"
+      >{{
+        selectedSpecialOption?.label ?? selectedOption?.label ?? placeholder ?? t('keys.noGroup')
       }}</span>
+      </span>
       <svg
-        class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
+        class="h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-200 dark:text-dark-400"
+        :class="isOpen && 'rotate-180'"
         fill="none"
         stroke="currentColor"
         viewBox="0 0 24 24"
         stroke-width="2"
+        aria-hidden="true"
       >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          d="M8.25 15L12 18.75 15.75 15m-7.5-6L12 5.25 15.75 9"
-        />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
       </svg>
     </button>
     <!-- Group Selector Dropdown (Teleported to body to avoid overflow clipping) -->
@@ -191,6 +201,10 @@ const props = defineProps<{
   disabled?: boolean
   id?: string
   ariaLabel?: string
+  /** 未选中任何项时的提示文字 */
+  placeholder?: string
+  /** 校验失败时显示红色边框 */
+  error?: boolean
 }>()
 const emit = defineEmits<{
   'update:modelValue': [value: PickerValue]

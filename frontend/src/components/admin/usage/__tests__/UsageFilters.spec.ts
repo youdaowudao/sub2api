@@ -543,6 +543,30 @@ describe('UsageView — account default group on initial entry', () => {
     })
   }
 
+  it.each([
+    [{ user_id: '7' }],
+    [{ user_id: '7', start_date: '2026-05-01', end_date: '2026-05-28' }],
+    [{ model: 'gpt-5' }],
+    [{ account_id: '3' }],
+  ])('does not apply the default group when entering with route filters %o', async query => {
+    localStorage.setItem(storageKey, JSON.stringify({ default_group: '42' }))
+    const wrapper = await mountUsage(query)
+    try {
+      await flushPromises()
+      expect(wrapper.findComponent(UsageFilters).props('modelValue').group_id).toBeUndefined()
+      expect(mockUsageList).toHaveBeenCalledWith(expect.not.objectContaining({ group_id: 42 }), expect.anything())
+    } finally { wrapper.unmount() }
+  })
+
+  it('still applies the default group when only a date range is in the URL', async () => {
+    localStorage.setItem(storageKey, JSON.stringify({ default_group: '42' }))
+    const wrapper = await mountUsage({ start_date: '2026-05-01', end_date: '2026-05-28' })
+    try {
+      await flushPromises()
+      expect(wrapper.findComponent(UsageFilters).props('modelValue').group_id).toBe(42)
+    } finally { wrapper.unmount() }
+  })
+
   it('preserves the route group even when a valid account default exists', async () => {
     localStorage.setItem(storageKey, JSON.stringify({ default_group: '42' }))
     const wrapper = await mountUsage({ group_id: '9' })

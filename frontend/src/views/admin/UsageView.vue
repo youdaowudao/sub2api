@@ -1107,8 +1107,10 @@ const handleColumnClickOutside = (event: MouseEvent) => {
   }
 }
 
+// 从仪表盘排行、订阅等页面带筛选条件跳转进来时，不套用默认分组，避免只看到默认分组内的数据
+const routeFilterKeys = ['user_id', ...restoredStringFilters, ...restoredNumberFilters, ...restoredBooleanFilters] as const
 const initializeDefaultGroup = () => {
-  if (route.query.group_id !== undefined) return
+  if (routeFilterKeys.some(key => route.query[key] !== undefined)) return
   let groupId: number
   try {
     const value = JSON.parse(localStorage.getItem('account-filter-values') ?? 'null')?.default_group

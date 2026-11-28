@@ -80,10 +80,13 @@
         </div>
 
         <!-- Model Filter -->
-        <div class="relative w-full sm:w-auto sm:min-w-[220px]">
-          <label class="input-label">{{ t('usage.model') }}</label>
+        <div class="w-full sm:w-auto sm:min-w-[220px]">
+          <!-- 排序口径提示放在标签旁的提示图标里，不占高度，避免与同行/下一行字段错位 -->
+          <label class="input-label flex items-center gap-1">
+            {{ t('usage.model') }}
+            <HelpTooltip v-if="showActions && modelRankingAvailable !== undefined" :content="t(modelRankingAvailable ? 'admin.usage.modelRankingBasis' : 'admin.usage.noModelRanking')" />
+          </label>
           <Select v-model="filters.model" :options="modelOptions" searchable :creatable="showActions" @change="emitChange" />
-          <p v-if="showActions && modelRankingAvailable !== undefined" class="absolute left-0 top-full mt-1 whitespace-nowrap text-xs text-gray-500">{{ t(modelRankingAvailable ? 'admin.usage.modelRankingBasis' : 'admin.usage.noModelRanking') }}</p>
         </div>
 
         <!-- Account Filter -->
@@ -219,6 +222,7 @@ import { adminAPI } from '@/api/admin'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import AdminUserHistoryList from './AdminUserHistoryList.vue'
 import AdminGroupPicker from '@/components/admin/AdminGroupPicker.vue'
+import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import { useAdminUserHistory } from '@/composables/useAdminUserHistory'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 import type { SimpleApiKey, SimpleUser } from '@/api/admin/usage'

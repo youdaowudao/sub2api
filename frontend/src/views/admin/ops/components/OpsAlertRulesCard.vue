@@ -571,7 +571,8 @@ function cancelDelete() {
               :groups="groups"
               :options="groupOptions"
               :special-options="isGroupMetricSelected ? [] : [{ value: null, label: t('admin.ops.alertRules.form.allGroups') }]"
-              :aria-invalid="isGroupMetricSelected && !draftGroupId"
+              :placeholder="t('admin.ops.alertRules.form.groupPlaceholder')"
+              :error="isGroupMetricSelected && !draftGroupId"
               @update:model-value="draftGroupId = $event as number | null"
             />
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">

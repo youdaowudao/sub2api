@@ -130,4 +130,21 @@ describe('AdminGroupPicker', () => {
     expect(wrapper.get('button').attributes('aria-expanded')).toBe('false')
     expect(wrapper.emitted('change')).toBeUndefined()
   })
+
+  it('uses the same boxed trigger as neighbouring filter fields', () => {
+    const trigger = mountPicker().get('button')
+    expect(trigger.classes()).toEqual(expect.arrayContaining(['input', 'h-[42px]']))
+    expect(trigger.classes()).not.toContain('-mx-2')
+  })
+
+  it('shows the placeholder when nothing is selected and marks errors', () => {
+    const wrapper = mount(AdminGroupPicker, {
+      props: { modelValue: null, groups, options, specialOptions: [], placeholder: 'Pick a group', error: true },
+      global: { plugins: [createPinia()], stubs: { Teleport: true } },
+    })
+    const trigger = wrapper.get('button')
+    expect(trigger.text()).toContain('Pick a group')
+    expect(trigger.classes()).toContain('input-error')
+    expect(trigger.attributes('aria-invalid')).toBe('true')
+  })
 })
