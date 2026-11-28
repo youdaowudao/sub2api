@@ -1421,6 +1421,13 @@ export async function updateRegistrationIPBlacklist(
   return data;
 }
 
+export async function appendRegistrationIPBlacklist(ip: string): Promise<{ ip: string; added: boolean }> {
+  const { data } = await apiClient.post<{ ip: string; added: boolean }>(
+    "/admin/settings/registration-ip-blacklist/append", { ip },
+  );
+  return data;
+}
+
 export async function getPanelRateLimitSettings(): Promise<PanelRateLimitSettings> {
   const { data } = await apiClient.get<PanelRateLimitSettings>(
     "/admin/settings/panel-rate-limit",
@@ -1696,6 +1703,7 @@ export const settingsAPI = {
   updateRateLimit429CooldownSettings,
   getRegistrationIPBlacklist,
   updateRegistrationIPBlacklist,
+  appendRegistrationIPBlacklist,
   getRegistrationEmailBlacklist,
   updateRegistrationEmailBlacklist,
   getPanelRateLimitSettings,

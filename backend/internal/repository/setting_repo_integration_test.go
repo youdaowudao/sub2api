@@ -41,6 +41,32 @@ func (s *SettingRepoSuite) TestSet_Upsert() {
 	s.Require().Equal("v2", got, "upsert mismatch")
 }
 
+func (s *SettingRepoSuite) TestCompareAndSetRegistrationIPBlacklist() {
+	const key = service.SettingKeyRegistrationIPBlacklist
+	s.Require().NoError(s.repo.Delete(s.ctx, key))
+	old := `["192.0.2.1"]`
+	added, err := s.repo.CompareAndSetRegistrationIPBlacklist(s.ctx, nil, old)
+	s.Require().NoError(err)
+	s.Require().True(added)
+	added, err = s.repo.CompareAndSetRegistrationIPBlacklist(s.ctx, nil, `[]`)
+	s.Require().NoError(err)
+	s.Require().False(added)
+	newValue := `["192.0.2.1","192.0.2.2"]`
+	added, err = s.repo.CompareAndSetRegistrationIPBlacklist(s.ctx, &old, newValue)
+	s.Require().NoError(err)
+	s.Require().True(added)
+	added, err = s.repo.CompareAndSetRegistrationIPBlacklist(s.ctx, &old, `["192.0.2.3"]`)
+	s.Require().NoError(err)
+	s.Require().False(added)
+	got, err := s.repo.GetValue(s.ctx, key)
+	s.Require().NoError(err)
+	s.Require().Equal(newValue, got)
+	s.Require().NoError(s.repo.Delete(s.ctx, key))
+	added, err = s.repo.CompareAndSetRegistrationIPBlacklist(s.ctx, &newValue, old)
+	s.Require().NoError(err)
+	s.Require().False(added)
+}
+
 func (s *SettingRepoSuite) TestGetValue_Missing() {
 	_, err := s.repo.GetValue(s.ctx, "nonexistent")
 	s.Require().Error(err, "expected error for missing key")

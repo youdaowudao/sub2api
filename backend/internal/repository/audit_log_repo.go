@@ -153,6 +153,10 @@ func buildAuditLogsWhere(filter *service.AuditLogFilter) (string, []any) {
 		idx := itoa(len(args))
 		clauses = append(clauses, "(l.actor_email ILIKE $"+idx+" OR "+auditRegistrationEmail+" ILIKE $"+idx+")")
 	}
+	if v := strings.TrimSpace(filter.RegistrationEmail); v != "" {
+		args = append(args, v)
+		clauses = append(clauses, "LOWER(BTRIM("+auditRegistrationEmail+")) = LOWER($"+itoa(len(args))+")")
+	}
 	if v := strings.TrimSpace(filter.AuthMethod); v != "" {
 		args = append(args, v)
 		clauses = append(clauses, "l.auth_method = $"+itoa(len(args)))

@@ -82,6 +82,24 @@ func (r *settingRepository) Set(ctx context.Context, key, value string) error {
 		Exec(ctx)
 }
 
+// CompareAndSetRegistrationIPBlacklist preserves changes committed since the
+// caller read the list. A nil previous value means the key did not exist.
+func (r *settingRepository) CompareAndSetRegistrationIPBlacklist(ctx context.Context, previous *string, value string) (bool, error) {
+	const key = service.SettingKeyRegistrationIPBlacklist
+	query := `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, $3) ON CONFLICT (key) DO NOTHING`
+	args := []any{key, value, time.Now()}
+	if previous != nil {
+		query = `UPDATE settings SET value = $2, updated_at = $3 WHERE key = $1 AND value = $4`
+		args = append(args, *previous)
+	}
+	result, err := r.client.ExecContext(ctx, query, args...)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
+}
+
 // ReplaceExistingAdminAPIKey 原子轮换仍存在的旧版管理员密钥。
 // 受影响行数为零表示密钥已被删除或不存在，绝不能通过 upsert 重新创建。
 func (r *settingRepository) ReplaceExistingAdminAPIKey(ctx context.Context, value string) (bool, error) {

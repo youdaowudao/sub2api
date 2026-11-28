@@ -76,6 +76,18 @@ func TestAuditRegistrationEmailSearch(t *testing.T) {
 	require.Zero(t, got.Total)
 	got = list(service.AuditLogFilter{Query: "auth.login"})
 	require.Equal(t, 2, got.Total)
+
+	// The user-list shortcut must match exactly without reading detail bodies.
+	register(`{"email":"prefix-registration_test%unique@example.com"}`, 200)
+	got = list(service.AuditLogFilter{RegistrationEmail: "REGISTRATION_TEST%UNIQUE@example.com"})
+	require.Equal(t, 2, got.Total)
+	got = list(service.AuditLogFilter{RegistrationEmail: email, Success: &success})
+	require.Equal(t, 1, got.Total)
+	require.Len(t, got.Logs, 1)
+	require.Equal(t, address, got.Logs[0].ClientIP)
+	require.Empty(t, got.Logs[0].RequestBody)
+	got = list(service.AuditLogFilter{RegistrationEmail: "registration_test%"})
+	require.Zero(t, got.Total)
 }
 
 // TestAuditRegistrationEmailSearchCost compares the same count+page shape with

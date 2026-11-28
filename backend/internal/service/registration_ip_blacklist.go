@@ -89,6 +89,56 @@ func (s *SettingService) SetRegistrationIPBlacklist(ctx context.Context, ips []s
 	return normalized, nil
 }
 
+// AppendRegistrationIPBlacklist adds one address without replacing changes
+// made by another writer after the read. An existing address is a no-op.
+func (s *SettingService) AppendRegistrationIPBlacklist(ctx context.Context, address string) (string, bool, error) {
+	normalized, err := NormalizeRegistrationIPBlacklist([]string{address})
+	if err != nil {
+		return "", false, err
+	}
+	if len(normalized) != 1 {
+		return "", false, invalidRegistrationIPBlacklist("A valid individual IP address is required")
+	}
+	address = normalized[0]
+	var previous *string
+	var ips []string
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyRegistrationIPBlacklist)
+	switch {
+	case errors.Is(err, ErrSettingNotFound):
+	case err != nil:
+		return "", false, fmt.Errorf("get registration IP blacklist: %w", err)
+	default:
+		previous = &raw
+		ips, err = ParseRegistrationIPBlacklist(raw)
+		if err != nil {
+			return "", false, invalidRegistrationIPBlacklist("The stored registration IP blacklist is invalid. Correct it in system settings before adding an IP.")
+		}
+	}
+	for _, ip := range ips {
+		if ip == address {
+			return address, false, nil
+		}
+	}
+	data, err := json.Marshal(append(ips, address))
+	if err != nil {
+		return "", false, fmt.Errorf("encode registration IP blacklist: %w", err)
+	}
+	repo, ok := s.settingRepo.(interface {
+		CompareAndSetRegistrationIPBlacklist(context.Context, *string, string) (bool, error)
+	})
+	if !ok {
+		return "", false, infraerrors.InternalServer("REGISTRATION_IP_BLACKLIST_APPEND_UNSUPPORTED", "The registration IP blacklist does not support safe appending")
+	}
+	saved, err := repo.CompareAndSetRegistrationIPBlacklist(ctx, previous, string(data))
+	if err != nil {
+		return "", false, fmt.Errorf("append registration IP blacklist: %w", err)
+	}
+	if !saved {
+		return "", false, infraerrors.Conflict("REGISTRATION_IP_BLACKLIST_CHANGED", "The registration IP blacklist changed. Confirm again to add this IP to the latest list.")
+	}
+	return address, true, nil
+}
+
 // GetRegistrationAccessSettings replaces the existing single registration-enabled query.
 // A missing or invalid list adds no restriction; query failure retains the previous closed default.
 func (s *SettingService) GetRegistrationAccessSettings(ctx context.Context) (bool, []string) {

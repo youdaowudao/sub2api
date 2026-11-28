@@ -677,7 +677,8 @@
     <Teleport to="body">
       <div
         v-if="activeMenuId !== null && menuPosition"
-        class="action-menu-content fixed z-[9999] w-48 overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10"
+        ref="actionMenuRef"
+        class="action-menu-content fixed z-[9999] w-48 max-h-[calc(100vh-16px)] overflow-y-auto rounded-xl bg-white shadow-lg ring-1 ring-black/5 dark:bg-dark-800 dark:ring-white/10"
         :style="{ top: menuPosition.top + 'px', left: menuPosition.left + 'px' }"
       >
         <div class="py-1">
@@ -743,6 +744,16 @@
 
               <div class="my-1 border-t border-gray-100 dark:border-dark-700"></div>
 
+              <button
+                type="button"
+                data-test="add-registration-ip"
+                @click="registrationIPUser = user; closeActionMenu()"
+                class="flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+              >
+                <Icon name="ban" size="sm" class="shrink-0 text-amber-500" :stroke-width="2" />
+                {{ t('admin.settings.registration.ipBlacklist.addFromUser') }}
+              </button>
+
               <!-- Delete (not for admin) -->
               <button
                 v-if="user.role !== 'admin'"
@@ -758,6 +769,7 @@
       </div>
     </Teleport>
 
+    <UserRegistrationIPBlacklistModal v-if="registrationIPUser" :user="registrationIPUser" @close="registrationIPUser = null" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.users.deleteUser')" :message="t('admin.users.deleteConfirm', { email: deletingUser?.email })" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog
       :show="bulkDeleteIds.length > 0"
@@ -795,7 +807,7 @@
 import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
@@ -832,6 +844,7 @@ import UserApiKeysModal from '@/components/admin/user/UserApiKeysModal.vue'
 import UserAllowedGroupsModal from '@/components/admin/user/UserAllowedGroupsModal.vue'
 import UserBalanceModal from '@/components/admin/user/UserBalanceModal.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
+import UserRegistrationIPBlacklistModal from '@/components/admin/user/UserRegistrationIPBlacklistModal.vue'
 import GroupReplaceModal from '@/components/admin/user/GroupReplaceModal.vue'
 
 const appStore = useAppStore()
@@ -1454,8 +1467,10 @@ const refreshCurrentPageSecondaryData = () => {
 // Action Menu State
 const activeMenuId = ref<number | null>(null)
 const menuPosition = ref<{ top: number; left: number } | null>(null)
+const actionMenuRef = ref<HTMLElement | null>(null)
+const registrationIPUser = ref<AdminUser | null>(null)
 
-const openActionMenu = (user: AdminUser, e: MouseEvent) => {
+const openActionMenu = async (user: AdminUser, e: MouseEvent) => {
   if (activeMenuId.value === user.id) {
     closeActionMenu()
   } else {
@@ -1466,9 +1481,15 @@ const openActionMenu = (user: AdminUser, e: MouseEvent) => {
     }
 
     const rect = target.getBoundingClientRect()
-    const menuWidth = 200
-    const menuHeight = 240
     const padding = 8
+    // The extra action can wrap on a narrow menu. Measure rather than guessing
+    // the menu height so its final items remain accessible at the bottom edge.
+    menuPosition.value = { top: padding, left: padding }
+    activeMenuId.value = user.id
+    await nextTick()
+    if (activeMenuId.value !== user.id) return
+    const menuWidth = actionMenuRef.value?.offsetWidth || 200
+    const menuHeight = actionMenuRef.value?.offsetHeight || 240
     const viewportWidth = window.innerWidth
     const viewportHeight = window.innerHeight
 
@@ -1504,7 +1525,6 @@ const openActionMenu = (user: AdminUser, e: MouseEvent) => {
     }
 
     menuPosition.value = { top, left }
-    activeMenuId.value = user.id
   }
 }
 
