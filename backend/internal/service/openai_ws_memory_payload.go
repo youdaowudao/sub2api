@@ -537,16 +537,6 @@ func (m *wsMaterializer) array(result gjson.Result) []gjson.Result {
 	m.forEachArray(result, func(_, item gjson.Result) bool { items = append(items, item); return true })
 	return items
 }
-func (m *wsMaterializer) getMany(body []byte, paths ...string) []gjson.Result {
-	if m == nil {
-		return gjson.GetManyBytes(body, paths...)
-	}
-	result := make([]gjson.Result, len(paths))
-	for i, path := range paths {
-		result[i] = m.get(body, path)
-	}
-	return result
-}
 
 // reserveText holds the independent generated string until the caller's
 // conversion completes. A helper may release a short-lived temporary sooner.

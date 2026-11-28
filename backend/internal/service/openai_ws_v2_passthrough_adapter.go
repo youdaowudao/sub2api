@@ -168,9 +168,17 @@ func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte, m
 }
 
 func (m *openAIWSPassthroughUsageMeta) captureRequestedReasoningEffort(originalBody []byte, modelCandidates ...string) {
-	m.captureRequestedReasoningEffortWithMemory(nil, originalBody, modelCandidates...)
+	if m == nil {
+		return
+	}
+	candidates := append([]string{m.sessionRequestModel}, modelCandidates...)
+	m.requestedReasoningEffort.Store(CanonicalRequestedReasoningEffort(originalBody, candidates...))
 }
 func (m *openAIWSPassthroughUsageMeta) captureRequestedReasoningEffortWithMemory(mem *wsMaterializer, originalBody []byte, modelCandidates ...string) {
+	if mem == nil {
+		m.captureRequestedReasoningEffort(originalBody, modelCandidates...)
+		return
+	}
 	if m == nil {
 		return
 	}

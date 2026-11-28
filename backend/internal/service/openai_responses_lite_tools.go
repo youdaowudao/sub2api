@@ -287,7 +287,13 @@ func normalizeOpenAIResponsesLitePayloadForAccount(body []byte, account *Account
 		return body, false, nil
 	}
 	if account.IsOpenAIOAuthLike() {
+		if wsMem == nil {
+			return normalizeOpenAIResponsesLiteToolsPayload(body)
+		}
 		return normalizeOpenAIResponsesLiteToolsPayloadWithMemory(body, wsMem)
+	}
+	if wsMem == nil {
+		return normalizeOpenAIResponsesLiteParallelToolCallsPayload(body)
 	}
 	return normalizeOpenAIResponsesLiteParallelToolCallsPayloadWithMemory(body, wsMem)
 }

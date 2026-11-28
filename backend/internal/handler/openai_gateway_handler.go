@@ -3591,8 +3591,6 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			if strippedOwner != nil {
 				strippedOwner.Drop()
 				strippedOwner = nil
-				wsFirstOwner = nil
-				wsFirstMessage = nil
 			}
 			if err == nil {
 				reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
