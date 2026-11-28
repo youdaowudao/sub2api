@@ -8,7 +8,6 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 const (
@@ -520,7 +519,9 @@ func sanitizeGroupReasoningEffortPolicy(group *Group) {
 // request when that source value is present. Omitted values remain untouched
 // so upstream defaults stay in control. It understands both OpenAI and
 // Anthropic request field shapes.
-func ApplyReasoningEffortPolicy(body []byte, maxEffort string, mappings []ReasoningEffortMapping, overLimit string) ([]byte, bool, error) {
+func ApplyReasoningEffortPolicy(body []byte, maxEffort string, mappings []ReasoningEffortMapping, overLimit string, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	maxRank, hasMax := reasoningEffortRank(maxEffort)
 	if len(body) == 0 || (!hasMax && len(mappings) == 0) {
 		return body, false, nil
@@ -528,11 +529,11 @@ func ApplyReasoningEffortPolicy(body []byte, maxEffort string, mappings []Reason
 	deny := hasMax && NormalizeMaxReasoningEffortOverLimit(overLimit) == ReasoningEffortOverLimitDeny
 	canonicalMax := NormalizeMaxReasoningEffort(maxEffort)
 
-	requestModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	requestModel := strings.TrimSpace(wsMem.get(body, "model").String())
 	result := body
 	changed := false
 	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
-		field := gjson.GetBytes(result, path)
+		field := wsMem.get(result, path)
 		if !field.Exists() || field.Type != gjson.String {
 			continue
 		}
@@ -562,7 +563,7 @@ func ApplyReasoningEffortPolicy(body []byte, maxEffort string, mappings []Reason
 			continue
 		}
 
-		updated, err := sjson.SetBytes(result, path, effective)
+		updated, err := wsMem.set(result, path, effective)
 		if err != nil {
 			continue
 		}
@@ -572,11 +573,13 @@ func ApplyReasoningEffortPolicy(body []byte, maxEffort string, mappings []Reason
 	return result, changed, nil
 }
 
-func applyOpenAIWSReasoningEffortPolicy(payload []byte, hooks *OpenAIWSIngressHooks) ([]byte, error) {
+func applyOpenAIWSReasoningEffortPolicy(payload []byte, hooks *OpenAIWSIngressHooks, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if hooks == nil || (hooks.MaxReasoningEffort == "" && len(hooks.ReasoningEffortMappings) == 0) {
 		return payload, nil
 	}
-	capped, changed, err := ApplyOpenAIReasoningEffortPolicy(payload, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings, hooks.MaxReasoningEffortOverLimit)
+	capped, changed, err := ApplyOpenAIReasoningEffortPolicy(payload, hooks.MaxReasoningEffort, hooks.ReasoningEffortMappings, hooks.MaxReasoningEffortOverLimit, wsMem)
 	if err != nil {
 		return payload, err
 	}
@@ -587,6 +590,8 @@ func applyOpenAIWSReasoningEffortPolicy(payload []byte, hooks *OpenAIWSIngressHo
 }
 
 // ApplyOpenAIReasoningEffortPolicy is retained for OpenAI forwarding callers.
-func ApplyOpenAIReasoningEffortPolicy(body []byte, maxEffort string, mappings []ReasoningEffortMapping, overLimit string) ([]byte, bool, error) {
-	return ApplyReasoningEffortPolicy(body, maxEffort, mappings, overLimit)
+func ApplyOpenAIReasoningEffortPolicy(body []byte, maxEffort string, mappings []ReasoningEffortMapping, overLimit string, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	return ApplyReasoningEffortPolicy(body, maxEffort, mappings, overLimit, wsMem)
 }

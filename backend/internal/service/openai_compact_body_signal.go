@@ -25,15 +25,17 @@ func MarkOpenAINativeCompactionV2(c *gin.Context) {
 
 // NormalizeCompactionTriggerInputOrder keeps a single compaction trigger as
 // the final Responses input item, as required by the upstream v2 wire format.
-func NormalizeCompactionTriggerInputOrder(body []byte) ([]byte, bool, error) {
+func NormalizeCompactionTriggerInputOrder(body []byte, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if len(body) == 0 {
 		return body, false, nil
 	}
-	if !compactionTriggerNeedsDecode(body) {
+	if !compactionTriggerNeedsDecode(body, wsMem) {
 		return body, false, nil
 	}
 	var payload map[string]any
-	if err := decodeOpenAIJSONUseNumber(body, &payload); err != nil {
+	if err := wsMem.decode(body, &payload); err != nil {
 		return body, false, err
 	}
 	input, ok := payload["input"].([]any)
@@ -60,7 +62,7 @@ func NormalizeCompactionTriggerInputOrder(body []byte) ([]byte, bool, error) {
 	}
 	normalized = append(normalized, map[string]any{"type": "compaction_trigger"})
 	payload["input"] = normalized
-	encoded, err := marshalOpenAIUpstreamJSON(payload)
+	encoded, err := wsMem.encode(payload)
 	if err != nil {
 		return body, false, err
 	}
@@ -79,7 +81,8 @@ var compactionTriggerToken = []byte("compaction_trigger")
 //
 // Either way the body is returned unchanged. Such a body must still be a valid
 // JSON object, so decode errors keep surfacing from the original path.
-func compactionTriggerNeedsDecode(body []byte) bool {
+func compactionTriggerNeedsDecode(body []byte, memories ...*wsMaterializer) bool {
+	mem := firstWSMaterializer(memories)
 	if JSONMayEscapePlainASCII(body) {
 		return true
 	}
@@ -88,7 +91,7 @@ func compactionTriggerNeedsDecode(body []byte) bool {
 		trimmed := bytes.TrimLeft(body, " \t\r\n")
 		return len(trimmed) == 0 || trimmed[0] != '{' || !gjson.ValidBytes(body)
 	case 1:
-		return !compactionTriggerIsLastInputItem(body) || !gjson.ValidBytes(body)
+		return !compactionTriggerIsLastInputItem(body, mem) || !gjson.ValidBytes(body)
 	default:
 		return true
 	}
@@ -96,13 +99,19 @@ func compactionTriggerNeedsDecode(body []byte) bool {
 
 // compactionTriggerIsLastInputItem reports whether the last element of the
 // top-level input array is an object whose type is "compaction_trigger".
-func compactionTriggerIsLastInputItem(body []byte) bool {
-	input := parseRawJSONView(body).Get("input")
+func compactionTriggerIsLastInputItem(body []byte, memories ...*wsMaterializer) bool {
+	mem := firstWSMaterializer(memories)
+	var input gjson.Result
+	if mem == nil {
+		input = parseRawJSONView(body).Get("input")
+	} else {
+		input = mem.get(body, "input")
+	}
 	if !input.IsArray() {
 		return false
 	}
 	var last gjson.Result
-	input.ForEach(func(_, item gjson.Result) bool {
+	mem.forEachArray(input, func(_, item gjson.Result) bool {
 		last = item
 		return true
 	})

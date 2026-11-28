@@ -97,7 +97,8 @@ func openAIRequestPayloadView(body []byte) gjson.Result {
 // session/conversation/prompt_cache_key is present. Non-Grok groups omit this
 // so HTTP OpenAI paths that delete previous_response_id before upstream are
 // unchanged.
-func explicitOpenAIRequestSessionID(c *gin.Context, body []byte) string {
+func explicitOpenAIRequestSessionID(c *gin.Context, body []byte, memories ...*wsMaterializer) string {
+	mem := firstWSMaterializer(memories)
 	if c == nil {
 		return ""
 	}
@@ -107,10 +108,20 @@ func explicitOpenAIRequestSessionID(c *gin.Context, body []byte) string {
 		sessionID = strings.TrimSpace(c.GetHeader(grokConversationIDHeader))
 	}
 	if sessionID == "" && len(body) > 0 {
-		sessionID = strings.TrimSpace(openAIRequestPayloadView(body).Get("prompt_cache_key").String())
+		if mem == nil {
+			sessionID = strings.TrimSpace(openAIRequestPayloadView(body).Get("prompt_cache_key").String())
+		} else {
+			view := body
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(mem.get(body, "type").String())), "response.") {
+				if response := mem.get(body, "response"); response.IsObject() {
+					view = mem.rawView(response.Raw)
+				}
+			}
+			sessionID = strings.TrimSpace(mem.get(view, "prompt_cache_key").String())
+		}
 	}
 	if sessionID == "" && isGrokRequestContext(c) && len(body) > 0 {
-		sessionID = grokPreviousResponseSessionSeed(body)
+		sessionID = grokPreviousResponseSessionSeed(body, mem)
 	}
 	return sessionID
 }
@@ -118,8 +129,9 @@ func explicitOpenAIRequestSessionID(c *gin.Context, body []byte) string {
 // grokPreviousResponseSessionSeed returns a stable sticky seed from a Responses
 // previous_response_id. Only resp_* response ids are accepted; message ids and
 // unknown shapes must not pin sticky routing or prompt-cache identity.
-func grokPreviousResponseSessionSeed(body []byte) string {
-	id := strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String())
+func grokPreviousResponseSessionSeed(body []byte, memories ...*wsMaterializer) string {
+	mem := firstWSMaterializer(memories)
+	id := strings.TrimSpace(mem.get(body, "previous_response_id").String())
 	if id == "" {
 		return ""
 	}
@@ -127,7 +139,7 @@ func grokPreviousResponseSessionSeed(body []byte) string {
 		return ""
 	}
 	// Namespace so content-derived seeds never collide with response ids.
-	return "grok-prev-resp:" + id
+	return mem.join([]string{"grok-prev-resp:", id}, "")
 }
 
 // GenerateExplicitSessionHash generates a sticky-session hash only from explicit
@@ -162,20 +174,24 @@ func (s *OpenAIGatewayService) GenerateExplicitSessionHash(c *gin.Context, body 
 // sticky seed with the client-requested model so switching models does not
 // inherit a stale account binding (grok2api affinityKey pattern).
 func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) string {
+	return s.generateSessionHash(c, body, nil)
+}
+
+func (s *OpenAIGatewayService) generateSessionHash(c *gin.Context, body []byte, mem *wsMaterializer) string {
 	if c == nil {
 		return ""
 	}
 
-	sessionID := explicitOpenAIRequestSessionID(c, body)
+	sessionID := explicitOpenAIRequestSessionID(c, body, mem)
 	if sessionID == "" && len(body) > 0 {
-		sessionID = deriveOpenAIContentSessionSeed(body)
+		sessionID = deriveOpenAIContentSessionSeed(body, mem)
 	}
 	if sessionID == "" {
 		return ""
 	}
 
 	if isGrokRequestContext(c) {
-		sessionID = grokStickyAffinitySeed(sessionID, body)
+		sessionID = grokStickyAffinitySeed(sessionID, body, mem)
 	}
 
 	currentHash, legacyHash := deriveOpenAISessionHashes(sessionID)
@@ -185,19 +201,20 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 
 // grokStickyAffinitySeed scopes sticky routing by model without changing the
 // upstream prompt_cache_key written by applyGrokResponsesCacheIdentity.
-func grokStickyAffinitySeed(sessionID string, body []byte) string {
+func grokStickyAffinitySeed(sessionID string, body []byte, memories ...*wsMaterializer) string {
+	mem := firstWSMaterializer(memories)
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return ""
 	}
 	model := ""
 	if len(body) > 0 {
-		model = strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "model").String()))
+		model = strings.ToLower(strings.TrimSpace(mem.get(body, "model").String()))
 	}
 	if model == "" {
-		return "grok-affinity:v1:" + sessionID
+		return mem.join([]string{"grok-affinity:v1:", sessionID}, "")
 	}
-	return "grok-affinity:v1:" + model + ":" + sessionID
+	return mem.join([]string{"grok-affinity:v1:", model, ":", sessionID}, "")
 }
 
 // GenerateSessionHashWithFallback 先按常规信号生成会话哈希；
@@ -1788,4 +1805,21 @@ func (s *OpenAIGatewayService) schedulingConfig() config.GatewaySchedulingConfig
 		LoadBatchEnabled:         true,
 		SlotCleanupInterval:      30 * time.Second,
 	}
+}
+
+// GenerateWSSessionHash applies the existing hash/fallback rules without
+// unaccounted content-seed materialization on the budgeted WS path.
+func (s *OpenAIGatewayService) GenerateWSSessionHash(ctx context.Context, c *gin.Context, body []byte, fallback string) (string, error) {
+	mem := newWSMaterializer(ctx)
+	defer mem.close()
+	hash := s.generateSessionHash(c, body, mem)
+	if mem != nil && mem.err != nil {
+		return "", mem.err
+	}
+	if hash == "" && strings.TrimSpace(fallback) != "" {
+		hash, legacy := deriveOpenAISessionHashes(strings.TrimSpace(fallback))
+		attachOpenAILegacySessionHashToGin(c, legacy)
+		return hash, nil
+	}
+	return hash, nil
 }

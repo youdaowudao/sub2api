@@ -8,33 +8,44 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 // sanitizeGrokResponsesModelInput converts replay items from OpenAI and Chat
 // shapes into the subset accepted by xAI's ModelInput decoder. Call IDs are
 // assigned in a separate pass so an output can safely appear before its call.
-func sanitizeGrokResponsesModelInput(body []byte) ([]byte, error) {
-	input := gjson.GetBytes(body, "input")
+func sanitizeGrokResponsesModelInput(body []byte, memories ...*wsMaterializer) ([]byte, error) {
+	wsMem := firstWSMaterializer(memories)
+
+	input := wsMem.get(body, "input")
 	if !input.Exists() || input.Type == gjson.String {
 		return body, nil
 	}
 	if input.IsObject() {
 		var err error
-		body, err = sjson.SetRawBytes(body, "input", []byte("["+input.Raw+"]"))
+		wrapped := wsMem.join([]string{"[", input.Raw, "]"}, "")
+		if wsMem != nil && wsMem.err != nil {
+			return nil, wsMem.err
+		}
+		body, err = wsMem.setRaw(body, "input", wsMem.rawView(wrapped))
 		if err != nil {
 			return nil, fmt.Errorf("wrap Grok Responses model input: %w", err)
 		}
-		input = gjson.GetBytes(body, "input")
+		input = wsMem.get(body, "input")
 	}
 	if !input.IsArray() {
 		return body, nil
 	}
 
 	var items []any
-	decoder := json.NewDecoder(bytes.NewReader([]byte(input.Raw)))
-	decoder.UseNumber()
-	if err := decoder.Decode(&items); err != nil {
+	var decodeErr error
+	if wsMem == nil {
+		decoder := json.NewDecoder(bytes.NewReader(wsMem.rawView(input.Raw)))
+		decoder.UseNumber()
+		decodeErr = decoder.Decode(&items)
+	} else {
+		decodeErr = wsMem.decode(wsMem.rawView(input.Raw), &items)
+	}
+	if err := decodeErr; err != nil {
 		return nil, fmt.Errorf("parse Grok Responses model input: %w", err)
 	}
 	callIDs, outputIDs := pairGrokReplayCallIDs(items)
@@ -56,7 +67,7 @@ func sanitizeGrokResponsesModelInput(body []byte) ([]byte, error) {
 		if role == "tool" || role == "function" || isGrokReplayOutputType(itemType) {
 			callID := outputIDs[index]
 			rawOutput := firstNonNilGrokJSONValue(item["output"], item["content"], item["results"])
-			output, nestedImages := normalizeGrokToolOutput(rawOutput, callID)
+			output, nestedImages := normalizeGrokToolOutput(rawOutput, callID, wsMem)
 			filtered = append(filtered, map[string]any{
 				"type":    "function_call_output",
 				"call_id": callID,
@@ -71,7 +82,7 @@ func sanitizeGrokResponsesModelInput(body []byte) ([]byte, error) {
 
 		switch itemType {
 		case "agent_message":
-			content, err := json.Marshal(item["content"])
+			content, err := wsMem.marshal(item["content"])
 			if err != nil {
 				return nil, fmt.Errorf("serialize Grok agent message content: %w", err)
 			}
@@ -151,7 +162,7 @@ func sanitizeGrokResponsesModelInput(body []byte) ([]byte, error) {
 			}
 			item["call_id"] = callIDs[index]
 			item["name"] = name
-			item["arguments"] = grokModelInputString(arguments, "{}")
+			item["arguments"] = grokModelInputString(arguments, "{}", wsMem)
 			for _, field := range []string{"id", "status", "tool_call_id", "function", "input", "query", "execution"} {
 				delete(item, field)
 			}
@@ -163,11 +174,11 @@ func sanitizeGrokResponsesModelInput(body []byte) ([]byte, error) {
 	}
 	filtered = appendGrokToolOutputImageMessage(filtered, pendingOutputImages)
 
-	encoded, err := json.Marshal(filtered)
+	encoded, err := wsMem.marshal(filtered)
 	if err != nil {
 		return nil, fmt.Errorf("serialize Grok Responses model input: %w", err)
 	}
-	updated, err := sjson.SetRawBytes(body, "input", encoded)
+	updated, err := wsMem.setRaw(body, "input", encoded)
 	if err != nil {
 		return nil, fmt.Errorf("set Grok Responses model input: %w", err)
 	}
@@ -182,15 +193,17 @@ type grokToolOutputImage struct {
 // Grok 1.0.5 returns read_file media as structured output parts rather than
 // top-level images. xAI requires function_call_output.output to be a string,
 // so remove those media parts before stringifying and lift them separately.
-func normalizeGrokToolOutput(value any, callID string) (string, []grokToolOutputImage) {
+func normalizeGrokToolOutput(value any, callID string, memories ...*wsMaterializer) (string, []grokToolOutputImage) {
+	wsMem := firstWSMaterializer(memories)
+
 	stripped, images, keep := stripGrokToolOutputImages(value, callID)
 	if len(images) == 0 {
-		return grokModelInputString(value, "(empty)"), nil
+		return grokModelInputString(value, "(empty)", wsMem), nil
 	}
 	if !keep {
 		return "(empty)", images
 	}
-	return grokStructuredToolOutputString(stripped, "(empty)"), images
+	return grokStructuredToolOutputString(stripped, "(empty)", wsMem), images
 }
 
 func stripGrokToolOutputImages(value any, callID string) (any, []grokToolOutputImage, bool) {
@@ -251,21 +264,23 @@ func stripGrokToolOutputImages(value any, callID string) (any, []grokToolOutputI
 	}
 }
 
-func grokStructuredToolOutputString(value any, fallback string) string {
+func grokStructuredToolOutputString(value any, fallback string, memories ...*wsMaterializer) string {
+	wsMem := firstWSMaterializer(memories)
+
 	parts, ok := value.([]any)
 	if !ok || len(parts) == 0 {
-		return grokModelInputString(value, fallback)
+		return grokModelInputString(value, fallback, wsMem)
 	}
 
 	texts := make([]string, 0, len(parts))
 	for _, rawPart := range parts {
 		part, ok := rawPart.(map[string]any)
 		if !ok {
-			return grokModelInputString(value, fallback)
+			return grokModelInputString(value, fallback, wsMem)
 		}
 		partType := strings.ToLower(strings.TrimSpace(grokStringValue(part["type"])))
 		if partType != "text" && partType != "input_text" && partType != "output_text" {
-			return grokModelInputString(value, fallback)
+			return grokModelInputString(value, fallback, wsMem)
 		}
 		if text := strings.TrimSpace(grokStringValue(part["text"])); text != "" {
 			texts = append(texts, text)
@@ -274,7 +289,7 @@ func grokStructuredToolOutputString(value any, fallback string) string {
 	if len(texts) == 0 {
 		return fallback
 	}
-	return strings.Join(texts, "\n")
+	return wsMem.join(texts, "\n")
 }
 
 // Grok Shell attaches local image results to function_call_output.images.
@@ -529,7 +544,9 @@ func grokStringValue(value any) string {
 	return text
 }
 
-func grokModelInputString(value any, fallback string) string {
+func grokModelInputString(value any, fallback string, memories ...*wsMaterializer) string {
+	wsMem := firstWSMaterializer(memories)
+
 	if text, ok := value.(string); ok {
 		if strings.TrimSpace(text) == "" {
 			return fallback
@@ -539,11 +556,11 @@ func grokModelInputString(value any, fallback string) string {
 	if value == nil {
 		return fallback
 	}
-	encoded, err := json.Marshal(value)
-	if err != nil || len(encoded) == 0 || string(encoded) == "null" {
+	encoded, err := wsMem.marshal(value)
+	if err != nil || len(encoded) == 0 || wsMem.string(encoded) == "null" {
 		return fallback
 	}
-	return string(encoded)
+	return wsMem.string(encoded)
 }
 
 func grokIsCompleteOutputMessage(item map[string]any) bool {

@@ -86,6 +86,9 @@ type RelayOptions struct {
 	AfterClientWrite                func(msgType coderws.MessageType, payload []byte, writeErr error)
 	BeforeRelayCancel               func(exit RelayExit)
 	ReadClientFrame                 func(ctx context.Context, clientConn FrameConn) (coderws.MessageType, []byte, error)
+	ReleaseClientFrame              func()
+	DrainClientReadError            func(error) bool
+	JoinClientReader                func(exit RelayExit)
 	OnTrace                         func(event RelayTraceEvent)
 	// IsFirstTokenEvent decides which upstream event marks the first token.
 	// Nil keeps the built-in delta-based rule.
@@ -210,6 +213,9 @@ func Relay(
 		return upstreamConn.WriteFrame(writeCtx, msgType, payload)
 	}
 	writeClientFrameUpstream := func(msgType coderws.MessageType, payload []byte) error {
+		if options.ReleaseClientFrame != nil {
+			defer options.ReleaseClientFrame()
+		}
 		isResponseCreate := isClientResponseCreateFrame(msgType, payload)
 		if isResponseCreate {
 			state.setRequestModel(strings.TrimSpace(gjson.GetBytes(payload, "model").String()))
@@ -287,11 +293,18 @@ func Relay(
 	exitCh := make(chan relayExitSignal, 3)
 	dropDownstreamWrites := atomic.Bool{}
 	clientReaderStarted := atomic.Bool{}
+	clientDone := make(chan struct{})
 	startClientReader := func() {
 		if !clientReaderStarted.CompareAndSwap(false, true) {
 			return
 		}
-		go runClientToUpstream(relayCtx, clientConn, options.ReadClientFrame, writeClientFrameUpstream, markActivity, clientToUpstreamFrames, onTrace, exitCh)
+		go func() {
+			defer close(clientDone)
+			if options.ReleaseClientFrame != nil {
+				defer options.ReleaseClientFrame()
+			}
+			runClientToUpstream(relayCtx, clientConn, options.ReadClientFrame, writeClientFrameUpstream, markActivity, clientToUpstreamFrames, onTrace, exitCh, options.DrainClientReadError)
+		}()
 	}
 	if !options.StartClientAfterFirstDownstream {
 		startClientReader()
@@ -381,12 +394,26 @@ func Relay(
 	// fallback. Join the reader before touching relayState or firing the final
 	// turn callback; otherwise a late read can race Relay's result settlement.
 	<-upstreamDone
+	// Budgeted adapters keep the actual client read/write owner until this
+	// goroutine exits. The adapter emits its existing close status before
+	// the join; pre-output retries never start this reader.
+	if options.JoinClientReader != nil && clientReaderStarted.Load() {
+		select {
+		case <-clientDone:
+		default:
+			options.JoinClientReader(RelayExit{Stage: firstExit.stage, Err: firstExit.err, Graceful: firstExit.graceful, WroteDownstream: combinedWroteDownstream})
+			<-clientDone
+		}
+	}
 
 	emitTurnComplete(options.OnTurnComplete, state, finalizePendingBareError(state, nowFn()))
 	enrichResult(&result, state, nowFn().Sub(startAt))
 	result.ClientToUpstreamFrames = clientToUpstreamFrames.Load()
 	result.UpstreamToClientFrames = upstreamToClientFrames.Load()
 	result.DroppedDownstreamFrames = droppedDownstreamFrames.Load()
+	if firstExit.stage == "read_client" && options.DrainClientReadError != nil && options.DrainClientReadError(firstExit.err) {
+		return result, &RelayExit{Stage: firstExit.stage, Err: firstExit.err, WroteDownstream: combinedWroteDownstream}
+	}
 	if options.FirstMessageSent && firstExit.stage == "read_client" && firstExit.graceful {
 		emitRelayTrace(onTrace, RelayTraceEvent{
 			Stage:           "relay_client_closed",
@@ -487,7 +514,7 @@ func runClientToUpstream(
 	markActivity func(),
 	forwardedFrames *atomic.Int64,
 	onTrace func(event RelayTraceEvent),
-	exitCh chan<- relayExitSignal,
+	exitCh chan<- relayExitSignal, drainErrors ...func(error) bool,
 ) {
 	if readClientFrame == nil {
 		readClientFrame = func(ctx context.Context, conn FrameConn) (coderws.MessageType, []byte, error) {
@@ -497,13 +524,17 @@ func runClientToUpstream(
 	for {
 		msgType, payload, err := readClientFrame(ctx, clientConn)
 		if err != nil {
+			graceful := isDisconnectError(err)
+			if len(drainErrors) > 0 && drainErrors[0] != nil && drainErrors[0](err) {
+				graceful = true
+			}
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:     "read_client_failed",
 				Direction: "client_to_upstream",
 				Error:     err.Error(),
-				Graceful:  isDisconnectError(err),
+				Graceful:  graceful,
 			})
-			exitCh <- relayExitSignal{stage: "read_client", err: err, graceful: isDisconnectError(err)}
+			exitCh <- relayExitSignal{stage: "read_client", err: err, graceful: graceful}
 			return
 		}
 		markActivity()

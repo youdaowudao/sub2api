@@ -237,15 +237,21 @@ func openAIResponsesLiteToolIdentityForError(rawTool any) string {
 }
 
 func normalizeOpenAIResponsesLiteToolsPayload(body []byte) ([]byte, bool, error) {
+	return normalizeOpenAIResponsesLiteToolsPayloadWithMemory(body)
+}
+
+func normalizeOpenAIResponsesLiteToolsPayloadWithMemory(body []byte, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	var requestBody map[string]any
-	if err := decodeOpenAIJSONUseNumber(body, &requestBody); err != nil {
+	if err := wsMem.decode(body, &requestBody); err != nil {
 		return body, false, fmt.Errorf("decode responses Lite request body: %w", err)
 	}
 	changed, err := normalizeOpenAIResponsesLiteTools(requestBody)
 	if err != nil || !changed {
 		return body, false, err
 	}
-	rebuilt, err := marshalOpenAIUpstreamJSON(requestBody)
+	rebuilt, err := wsMem.encode(requestBody)
 	if err != nil {
 		return body, false, fmt.Errorf("encode responses Lite request body: %w", err)
 	}
@@ -253,27 +259,35 @@ func normalizeOpenAIResponsesLiteToolsPayload(body []byte) ([]byte, bool, error)
 }
 
 func normalizeOpenAIResponsesLiteParallelToolCallsPayload(body []byte) ([]byte, bool, error) {
+	return normalizeOpenAIResponsesLiteParallelToolCallsPayloadWithMemory(body)
+}
+
+func normalizeOpenAIResponsesLiteParallelToolCallsPayloadWithMemory(body []byte, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	var requestBody map[string]any
-	if err := decodeOpenAIJSONUseNumber(body, &requestBody); err != nil {
+	if err := wsMem.decode(body, &requestBody); err != nil {
 		return body, false, fmt.Errorf("decode responses Lite request body: %w", err)
 	}
 	changed, err := ensureOpenAIResponsesLiteParallelToolCalls(requestBody, false)
 	if err != nil || !changed {
 		return body, false, err
 	}
-	rebuilt, err := marshalOpenAIUpstreamJSON(requestBody)
+	rebuilt, err := wsMem.encode(requestBody)
 	if err != nil {
 		return body, false, fmt.Errorf("encode responses Lite request body: %w", err)
 	}
 	return rebuilt, true, nil
 }
 
-func normalizeOpenAIResponsesLitePayloadForAccount(body []byte, account *Account) ([]byte, bool, error) {
+func normalizeOpenAIResponsesLitePayloadForAccount(body []byte, account *Account, memories ...*wsMaterializer) ([]byte, bool, error) {
+	wsMem := firstWSMaterializer(memories)
+
 	if account == nil || !account.IsOpenAI() {
 		return body, false, nil
 	}
 	if account.IsOpenAIOAuthLike() {
-		return normalizeOpenAIResponsesLiteToolsPayload(body)
+		return normalizeOpenAIResponsesLiteToolsPayloadWithMemory(body, wsMem)
 	}
-	return normalizeOpenAIResponsesLiteParallelToolCallsPayload(body)
+	return normalizeOpenAIResponsesLiteParallelToolCallsPayloadWithMemory(body, wsMem)
 }

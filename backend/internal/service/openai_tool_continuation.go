@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -230,11 +231,28 @@ type ToolCallOutputContextCoverage struct {
 // 与可重建上下文。不能复用 ValidateFunctionCallOutputContextBytes 的 HasToolCallContext：
 // 该标志只代表"存在某一个上下文项"，部分覆盖的续链仍会被上游拒绝。
 func AnalyzeToolCallOutputContextCoverageBytes(body []byte) ToolCallOutputContextCoverage {
+	return analyzeToolCallOutputContextCoverageBytes(body, nil)
+}
+func AnalyzeWSBodyToolCoverage(ctx context.Context, body []byte) (ToolCallOutputContextCoverage, error) {
+	mem := newWSMaterializer(ctx)
+	defer mem.close()
+	coverage := analyzeToolCallOutputContextCoverageBytes(body, mem)
+	if mem != nil && mem.err != nil {
+		return coverage, mem.err
+	}
+	return coverage, nil
+}
+func analyzeToolCallOutputContextCoverageBytes(body []byte, mem *wsMaterializer) ToolCallOutputContextCoverage {
 	coverage := ToolCallOutputContextCoverage{}
 	if len(body) == 0 {
 		return coverage
 	}
-	input := parseRawJSONView(body).Get("input")
+	var input gjson.Result
+	if mem == nil {
+		input = parseRawJSONView(body).Get("input")
+	} else {
+		input = mem.get(body, "input")
+	}
 	if !input.IsArray() && !input.IsObject() {
 		return coverage
 	}
@@ -246,11 +264,11 @@ func AnalyzeToolCallOutputContextCoverageBytes(body []byte) ToolCallOutputContex
 		if !item.IsObject() {
 			return
 		}
-		itemType := item.Get("type").String()
+		itemType := mem.resultGet(item, "type").String()
 		switch {
 		case isCodexToolCallOutputItemType(itemType):
 			coverage.HasFunctionCallOutput = true
-			callID := strings.TrimSpace(item.Get("call_id").String())
+			callID := strings.TrimSpace(mem.resultGet(item, "call_id").String())
 			if callID == "" {
 				missingCallID = true
 				return
@@ -260,7 +278,7 @@ func AnalyzeToolCallOutputContextCoverageBytes(body []byte) ToolCallOutputContex
 			}
 			outputCallIDs[callID] = struct{}{}
 		case isCodexToolCallContextItemType(itemType):
-			callID := strings.TrimSpace(item.Get("call_id").String())
+			callID := strings.TrimSpace(mem.resultGet(item, "call_id").String())
 			if callID == "" {
 				return
 			}
@@ -269,7 +287,7 @@ func AnalyzeToolCallOutputContextCoverageBytes(body []byte) ToolCallOutputContex
 			}
 			contextIDs[callID] = struct{}{}
 		case itemType == "item_reference":
-			idValue := strings.TrimSpace(item.Get("id").String())
+			idValue := strings.TrimSpace(mem.resultGet(item, "id").String())
 			if idValue == "" {
 				return
 			}
@@ -280,7 +298,7 @@ func AnalyzeToolCallOutputContextCoverageBytes(body []byte) ToolCallOutputContex
 		}
 	}
 	if input.IsArray() {
-		input.ForEach(func(_, item gjson.Result) bool {
+		mem.forEachArray(input, func(_, item gjson.Result) bool {
 			analyzeItem(item)
 			return true
 		})

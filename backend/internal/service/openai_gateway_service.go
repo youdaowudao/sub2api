@@ -310,6 +310,31 @@ type OpenAIForwardResult struct {
 
 	wsReplayInput       []json.RawMessage
 	wsReplayInputExists bool
+	wsReplayMemory      *wsMemoryReplay
+	wsHistoryMemoryErr  error
+}
+
+// UsageSnapshotWithoutWSReplay leaves the private replay history in its
+// connection-owned result instead of retaining it in an asynchronous bill.
+func (r *OpenAIForwardResult) UsageSnapshotWithoutWSReplay() *OpenAIForwardResult {
+	if r == nil {
+		return nil
+	}
+	snapshot := *r
+	snapshot.wsReplayInput = nil
+	snapshot.wsReplayInputExists = false
+	snapshot.wsReplayMemory = nil
+	snapshot.wsHistoryMemoryErr = nil
+	return &snapshot
+}
+
+func (r *OpenAIForwardResult) releaseWSReplayMemory() {
+	if r != nil && r.wsReplayMemory != nil {
+		r.wsReplayMemory.drop()
+		r.wsReplayMemory = nil
+		r.wsReplayInput = nil
+		r.wsReplayInputExists = false
+	}
 }
 
 // SucceededForScheduling reports whether this result is an upstream success
