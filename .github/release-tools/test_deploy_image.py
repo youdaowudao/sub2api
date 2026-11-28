@@ -67,7 +67,7 @@ class RegistryTests(unittest.TestCase):
     def test_registry_info_metadata_only(self):
         raw, dg, obj = self.fixture()
         with patch.object(d, 'command', side_effect=[raw, json.dumps(obj).encode()]) as command:
-            self.assertEqual(d.registry_info(V, LABELS), {'registry_ref': d.PACKAGE+'@'+dg, 'image_id': ID})
+            self.assertEqual(d.registry_info(V, LABELS), {'registry_ref': d.PACKAGE+'@'+dg, 'config_digest': ID})
         self.assertNotEqual(dg, ID)
         self.assertEqual(command.call_args_list[0].args[0][-2:], ['--raw', d.PACKAGE+':'+V])
         self.assertEqual(command.call_args_list[1].args[0][-3:], ['--format', '{{json .}}', d.PACKAGE+'@'+dg])
@@ -87,6 +87,25 @@ class RegistryTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 d.registry_info(V, LABELS)
             self.assertEqual(call.call_count, 1)
+
+    def test_verify_local_identity_classic_containerd_and_bad_metadata(self):
+        _, manifest, _ = self.fixture()
+        receipt = {'registry_ref': d.PACKAGE+'@'+manifest, 'config_digest': ID}
+        classic = {'Id': ID, 'Os': 'linux', 'Architecture': 'amd64', 'RepoDigests': [receipt['registry_ref']]}
+        containerd = {**classic, 'Id': manifest, 'Descriptor': {'digest': manifest, 'mediaType': d.SINGLE_MANIFEST_TYPES[0]}}
+        self.assertEqual(d.verify_local_image_identity(classic, receipt, require_repo_digest=True), ID)
+        self.assertEqual(d.verify_local_image_identity(containerd, receipt, require_repo_digest=True), manifest)
+        # Older APIs may omit the descriptor, but exact manifest identity is still required.
+        self.assertEqual(d.verify_local_image_identity({**classic, 'Id': manifest}, receipt), manifest)
+        for obj, ref in [({**classic, 'Id': 'sha256:'+'9'*64}, receipt),
+                         ({**classic, 'Architecture': 'arm64'}, receipt),
+                         ({**containerd, 'Descriptor': {'digest': ID, 'mediaType': d.SINGLE_MANIFEST_TYPES[0]}}, receipt),
+                         ({**containerd, 'Descriptor': {'digest': manifest, 'mediaType': 'application/vnd.oci.image.index.v1+json'}}, receipt),
+                         ({**containerd, 'Id': ID}, receipt),
+                         ({**containerd, 'RepoDigests': []}, receipt),
+                         (classic, {**receipt, 'config_digest': 'sha256:'+'9'*64})]:
+            with self.subTest(obj=obj, ref=ref), self.assertRaises(RuntimeError):
+                d.verify_local_image_identity(obj, ref, require_repo_digest=True)
 
     def test_latest_success_only(self):
         row = {'headBranch': 'main', 'event': 'workflow_dispatch', 'conclusion': 'success',
@@ -139,9 +158,11 @@ class GitTests(unittest.TestCase):
 
 
 class PublishTests(unittest.TestCase):
-    def scenario(self, probe, *, smoke_failure=False, registry_failure=False, ref='refs/heads/main', wrong_id=False):
+    def scenario(self, probe, *, smoke_failure=False, registry_failure=False, ref='refs/heads/main', wrong_id=False, containerd=False, wrong_manifest=False):
         actions = []
-        expected = {'registry_ref': d.PACKAGE+'@sha256:'+'e'*64, 'image_id': 'sha256:'+'f'*64 if wrong_id else ID}
+        manifest_id = 'sha256:'+'e'*64
+        expected = {'registry_ref': d.PACKAGE+'@'+('sha256:'+'f'*64 if wrong_manifest else manifest_id),
+                    'config_digest': 'sha256:'+'f'*64 if wrong_id else ID}
         def execute(args, cwd=None):
             actions.append(tuple(args))
             if smoke_failure and args[0] == 'bash':
@@ -153,17 +174,22 @@ class PublishTests(unittest.TestCase):
             return expected
         env = {'GITHUB_EVENT_NAME': 'workflow_dispatch', 'GITHUB_REF': ref}
         labels = d.labels_for(V, C, RUN, hashlib.sha256(b'{}').hexdigest())
+        obj = {'Id': ID, 'Os': 'linux', 'Architecture': 'amd64', 'Config': {'Labels': labels}, 'RepoDigests': [d.PACKAGE+'@'+manifest_id]}
+        if containerd:
+            obj['Id'] = manifest_id
+            obj['Descriptor'] = {'digest': obj['Id'], 'mediaType': d.SINGLE_MANIFEST_TYPES[0]}
         with patch.dict(os.environ, env), patch.object(d, 'version_at', return_value=V), \
                 patch.object(d, 'migrations_bytes', return_value=b'{}'), \
                 patch.object(d, 'command', side_effect=lambda args, cwd=None: C.encode() if args[0] == 'git' else (b'--platform' if args[-1] == '--help' else b'1.48')), \
                 patch.object(d, 'probe_tag', side_effect=probe), patch.object(d, 'registry_info', side_effect=registry), \
-                patch.object(d, 'local_image', return_value={'Id': ID, 'Config': {'Labels': labels}}), \
+                patch.object(d, 'local_image', return_value=obj), \
                 patch.object(d, 'image_smoke_metadata', side_effect=lambda *args: actions.append(('metadata-smoke',))), \
                 patch.object(d, 'run', side_effect=execute):
             try:
                 d.publish(ROOT, C, RUN, 'fixture', 'fixture')
                 return True, actions
-            except RuntimeError:
+            except RuntimeError as exc:
+                self.last_error = str(exc)
                 return False, actions
 
     def test_publish_same_image_after_smoke(self):
@@ -190,6 +216,20 @@ class PublishTests(unittest.TestCase):
         self.assertTrue(any(a[:2] == ('docker', 'pull') and '@sha256:' in a[-1] for a in actions))
         self.assertTrue(any(a[0] == 'bash' for a in actions))
         self.assertFalse(any(a[:3] in (('docker', 'image', 'push'), ('docker', 'buildx', 'build')) for a in actions))
+
+    def test_containerd_publish_after_smoke_and_same_run_resume(self):
+        for probe, existing in (([False, False], False), ([True], True)):
+            with self.subTest(existing=existing):
+                ok, actions = self.scenario(probe, containerd=True)
+                self.assertTrue(ok, getattr(self, 'last_error', ''))
+                self.assertTrue(any(a[0] == 'bash' for a in actions))
+                self.assertEqual(any(a[:3] == ('docker', 'image', 'push') for a in actions), not existing)
+
+    def test_containerd_publish_rejects_different_manifest(self):
+        ok, actions = self.scenario([False, False], containerd=True, wrong_manifest=True)
+        self.assertFalse(ok)
+        self.assertIn('不等于已核对', self.last_error)
+        self.assertTrue(any(a[:3] == ('docker', 'image', 'push') for a in actions))
 
     def test_published_identity_mismatch_fails(self):
         ok, actions = self.scenario([False, False], wrong_id=True)
