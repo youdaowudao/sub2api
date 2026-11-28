@@ -76,8 +76,17 @@ type DashboardStats struct {
 	TodayAverageDurationMs *float64 `json:"today_average_duration_ms"` // 今日平均响应时间；无请求时为 nil
 
 	// 性能指标
-	Rpm int64 `json:"rpm"` // 近5分钟平均每分钟请求数
-	Tpm int64 `json:"tpm"` // 近5分钟平均每分钟Token数
+	Rpm             int64                     `json:"rpm"` // 近5分钟平均每分钟请求数
+	Tpm             int64                     `json:"tpm"` // 近5分钟平均每分钟Token数
+	ConnectionUsage *DashboardConnectionUsage `json:"connection_usage,omitempty"`
+}
+
+// DashboardConnectionUsage counts distinct users with usage records by type
+// in the five-minute window ending at WindowEnd. The groups can overlap.
+type DashboardConnectionUsage struct {
+	WSUsers   int64  `json:"ws_users"`
+	HTTPUsers int64  `json:"http_users"`
+	WindowEnd string `json:"window_end"`
 }
 
 // TrendDataPoint represents a single point in trend data

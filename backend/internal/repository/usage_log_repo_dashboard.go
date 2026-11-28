@@ -34,6 +34,36 @@ func (r *usageLogRepository) getPerformanceStats(ctx context.Context, userID int
 	return requestCount / 5, tokenCount / 5, nil
 }
 
+// fillDashboardPerformanceStats extends the existing global performance query
+// without changing the historical RPM/TPM lower-bound-only calculation.
+func (r *usageLogRepository) fillDashboardPerformanceStats(ctx context.Context, stats *DashboardStats, now time.Time) error {
+	wsCondition, wsArgs := buildRequestTypeFilterCondition(3, int16(service.RequestTypeWSV2))
+	syncCondition, syncArgs := buildRequestTypeFilterCondition(4, int16(service.RequestTypeSync))
+	streamCondition, streamArgs := buildRequestTypeFilterCondition(5, int16(service.RequestTypeStream))
+	query := `
+		SELECT
+			COUNT(*) as request_count,
+			COALESCE(SUM(input_tokens + output_tokens), 0) as token_count,
+			COUNT(DISTINCT user_id) FILTER (WHERE created_at < $2 AND ` + wsCondition + `) as ws_users,
+			COUNT(DISTINCT user_id) FILTER (WHERE created_at < $2 AND (` + syncCondition + ` OR ` + streamCondition + `)) as http_users
+		FROM usage_logs
+		WHERE created_at >= $1`
+	args := []any{now.Add(-5 * time.Minute), now}
+	args = append(args, wsArgs...)
+	args = append(args, syncArgs...)
+	args = append(args, streamArgs...)
+
+	var requestCount, tokenCount int64
+	usage := usagestats.DashboardConnectionUsage{WindowEnd: now.UTC().Format(time.RFC3339Nano)}
+	if err := scanSingleRow(ctx, r.sql, query, args, &requestCount, &tokenCount, &usage.WSUsers, &usage.HTTPUsers); err != nil {
+		return err
+	}
+	stats.Rpm = requestCount / 5
+	stats.Tpm = tokenCount / 5
+	stats.ConnectionUsage = &usage
+	return nil
+}
+
 // UserStats 用户使用统计
 type UserStats struct {
 	TotalRequests   int64   `json:"total_requests"`
@@ -90,12 +120,9 @@ func (r *usageLogRepository) GetDashboardStats(ctx context.Context) (*DashboardS
 		return nil, err
 	}
 
-	rpm, tpm, err := r.getPerformanceStats(ctx, 0)
-	if err != nil {
+	if err := r.fillDashboardPerformanceStats(ctx, stats, time.Now()); err != nil {
 		return nil, err
 	}
-	stats.Rpm = rpm
-	stats.Tpm = tpm
 
 	return stats, nil
 }
@@ -118,12 +145,9 @@ func (r *usageLogRepository) GetDashboardStatsWithRange(ctx context.Context, sta
 		return nil, err
 	}
 
-	rpm, tpm, err := r.getPerformanceStats(ctx, 0)
-	if err != nil {
+	if err := r.fillDashboardPerformanceStats(ctx, stats, time.Now()); err != nil {
 		return nil, err
 	}
-	stats.Rpm = rpm
-	stats.Tpm = tpm
 
 	return stats, nil
 }

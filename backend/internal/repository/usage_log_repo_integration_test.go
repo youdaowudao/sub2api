@@ -773,6 +773,7 @@ func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
 
 	stats, err := s.repo.GetDashboardStats(s.ctx)
 	s.Require().NoError(err, "GetDashboardStats")
+	s.Require().NotNil(stats.ConnectionUsage)
 
 	s.Require().Equal(baseStats.TotalUsers+2, stats.TotalUsers, "TotalUsers mismatch")
 	s.Require().Equal(baseStats.TodayNewUsers+1, stats.TodayNewUsers, "TodayNewUsers mismatch")
@@ -876,6 +877,7 @@ func (s *UsageLogRepoSuite) TestDashboardStatsWithRange_Fallback() {
 
 	stats, err := s.repo.GetDashboardStatsWithRange(s.ctx, rangeStart, rangeEnd)
 	s.Require().NoError(err)
+	s.Require().NotNil(stats.ConnectionUsage)
 	s.Require().Equal(int64(2), stats.TotalRequests)
 	s.Require().Equal(int64(15), stats.TotalInputTokens)
 	s.Require().Equal(int64(26), stats.TotalOutputTokens)
@@ -1744,4 +1746,64 @@ func (s *UsageLogRepoSuite) TestListWithFilters_CombinedFilters() {
 	s.Require().NoError(err, "ListWithFilters combined")
 	s.Require().Len(logs, 2)
 	s.Require().Equal(int64(2), page.Total)
+}
+
+func (s *UsageLogRepoSuite) TestDashboardConnectionUsageFiveMinuteBoundary() {
+	now := time.Now().UTC().Truncate(time.Second).Add(48 * time.Hour)
+	var existing int64
+	require.NoError(s.T(), scanSingleRow(s.ctx, s.tx, "SELECT COUNT(*) FROM usage_logs WHERE created_at >= $1", []any{now.Add(-5 * time.Minute)}, &existing))
+	require.Zero(s.T(), existing)
+	acc := mustCreateAccount(s.T(), s.client, &service.Account{Name: "connection-main"})
+	acc2 := mustCreateAccount(s.T(), s.client, &service.Account{Name: "connection-alternate"})
+	users := map[string]*service.User{}
+	keys := map[string]*service.APIKey{}
+	for _, letter := range "ABCDEFGHIJKLMNOPQR" {
+		id := string(letter)
+		users[id] = mustCreateUser(s.T(), s.client, &service.User{Email: "connection-" + id + "@example.test"})
+		keys[id] = mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: users[id].ID, Key: "sk-connection-" + id, Name: "k"})
+	}
+	altKey := mustCreateApiKey(s.T(), s.client, &service.APIKey{UserID: users["A"].ID, Key: "sk-connection-A-alt", Name: "k"})
+	add := func(id string, key *service.APIKey, account *service.Account, typ int16, ws, stream bool, at time.Time) {
+		log := s.createUsageLog(users[id], key, account, 1, 2, 0.1, at)
+		_, err := s.tx.ExecContext(s.ctx, "UPDATE usage_logs SET request_type=$1, openai_ws_mode=$2, stream=$3 WHERE id=$4", typ, ws, stream, log.ID)
+		s.Require().NoError(err)
+		var gotType int16
+		var gotWS, gotStream bool
+		s.Require().NoError(scanSingleRow(s.ctx, s.tx, "SELECT request_type, openai_ws_mode, stream FROM usage_logs WHERE id=$1", []any{log.ID}, &gotType, &gotWS, &gotStream))
+		s.Require().Equal(typ, gotType)
+		s.Require().Equal(ws, gotWS)
+		s.Require().Equal(stream, gotStream)
+	}
+	in := now.Add(-time.Minute)
+	add("A", keys["A"], acc, 3, true, true, in)
+	add("A", altKey, acc2, 3, true, true, in)
+	add("A", keys["A"], acc, 3, true, true, in)
+	add("A", keys["A"], acc, 1, false, false, in)
+	for _, row := range []struct {
+		id         string
+		typ        int16
+		ws, stream bool
+		at         time.Time
+	}{
+		{"B", 3, true, true, now.Add(-5 * time.Minute)},
+		{"C", 0, true, false, in}, {"D", 0, true, true, in}, {"E", 3, false, false, in},
+		{"F", 1, true, false, in}, {"G", 2, true, true, in}, {"H", 0, false, false, in}, {"I", 0, false, true, in},
+		{"J", 4, true, true, in}, {"K", 5, true, true, in},
+		{"L", 3, true, true, now}, {"M", 3, true, true, now.Add(time.Second)}, {"N", 3, true, true, now.Add(-5*time.Minute - time.Second)},
+		{"O", 1, false, false, now}, {"P", 2, false, true, now.Add(time.Second)}, {"Q", 1, false, false, now.Add(-5 * time.Minute)}, {"R", 2, false, true, now.Add(-5*time.Minute - time.Second)},
+	} {
+		add(row.id, keys[row.id], acc, row.typ, row.ws, row.stream, row.at)
+	}
+	for _, tc := range []struct {
+		at                 time.Time
+		ws, http, rpm, tpm int64
+	}{
+		{now, 5, 6, 3, 11}, {now.Add(5 * time.Minute), 2, 2, 0, 2}, {now.Add(10*time.Minute + 2*time.Second), 0, 0, 0, 0},
+	} {
+		stats := &DashboardStats{}
+		s.Require().NoError(s.repo.fillDashboardPerformanceStats(s.ctx, stats, tc.at))
+		s.Require().Equal(&usagestats.DashboardConnectionUsage{WSUsers: tc.ws, HTTPUsers: tc.http, WindowEnd: tc.at.Format(time.RFC3339Nano)}, stats.ConnectionUsage)
+		s.Require().Equal(tc.rpm, stats.Rpm)
+		s.Require().Equal(tc.tpm, stats.Tpm)
+	}
 }
