@@ -32,22 +32,6 @@ jobs:
         env:
           GOFLAGS: -v
         run: make test-integration
-      # Temporary, user-approved measurement on the isolated WS development branch.
-      - name: WS body memory measurement
-        if: github.ref == 'refs/heads/ws-bridge-fixes'
-        working-directory: backend
-        run: |
-          set -eu
-          measure_bin="$RUNNER_TEMP/ws-body-memory.test"
-          trap 'test ! -e "$measure_bin" || unlink "$measure_bin"' EXIT
-          go test -c -tags=unit -o "$measure_bin" ./internal/handler
-          sudo systemd-run --wait --pipe --collect --quiet \
-            --uid="$(id -u)" --gid="$(id -g)" --working-directory="$PWD" \
-            -p MemoryMax=1792M -p MemorySwapMax=0 -p CPUQuota=100% \
-            -p PrivateNetwork=yes -p RuntimeMaxSec=210s \
-            --setenv=SUB2API_WS_BODY_MEMORY_MEASURE=1 \
-            --setenv=GOMAXPROCS=1 --setenv=GOMEMLIMIT=1536MiB \
-            "$measure_bin" -test.v -test.run='^TestOpenAIWSBodyMemoryLocalMeasure$' -test.timeout=200s
 
   # RED 回归核对：提交说明写了 "RED: ./<包> <测试名>" 时，证明该测试在旧代码上失败、在新代码上通过；没写且不需要时直接通过。
   red:
