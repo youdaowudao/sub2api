@@ -3227,7 +3227,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				// 当前账号，越线即要求客户端重连重选（连接绑定单一上游账号，
 				// 无法中途换号）。本 turn 的准入与计费共用同一 pricingAt。
 				turnKey := apiKey
-				turnBillingCtx := ctx
+				var turnBillingCtx context.Context
 				var rec openAIWSLogicalTurnRecord
 				turnAt := time.Time{}
 				if standardMode {
