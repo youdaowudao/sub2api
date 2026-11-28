@@ -22,7 +22,7 @@ func NewVideoRelayHandler(relay *service.VideoRelayService, gateway *OpenAIGatew
 
 func (h *VideoRelayHandler) requestKey(c *gin.Context) (*service.APIKey, bool) {
 	if h == nil || h.relay == nil || h.gateway == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"type": "api_error", "message": "Video relay is temporarily unavailable."}})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": gin.H{"type": "api_error", "message": "Video relay is temporarily unavailable. 视频服务暂时不可用，请稍后重试。"}})
 		return nil, false
 	}
 	key, ok := middleware2.GetAPIKeyFromContext(c)

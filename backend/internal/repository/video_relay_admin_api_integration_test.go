@@ -102,7 +102,7 @@ func TestVideoRelayRepoAdminEndpointIsReadOnly(t *testing.T) {
 	require.Len(t, envelope.Data.Items, 1)
 	item := envelope.Data.Items[0]
 	require.ElementsMatch(t, []string{
-		"task_id", "user_id", "user_email", "group_id", "account_id", "model", "upstream_model", "seconds", "resolution",
+		"task_id", "user_id", "user_email", "user_name", "group_id", "group_name", "account_id", "account_name", "account_deleted", "model", "upstream_model", "seconds", "resolution",
 		"hold_amount", "status", "billing_state", "failure_reason", "upstream_task_id", "created_at", "settled_at", "risk",
 	}, slices.Collect(maps.Keys(item)))
 	require.JSONEq(t, `"confirmation"`, string(item["status"]))

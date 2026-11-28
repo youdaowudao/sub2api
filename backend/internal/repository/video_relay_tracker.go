@@ -228,9 +228,14 @@ const videoRelayAdminFilterSQL = ` WHERE ($3='' OR p.display_status=$3) AND (NOT
 func (r *videoRelayRepository) ListAdmin(ctx context.Context, filter service.VideoRelayAdminFilter, offset, limit int) ([]service.VideoRelayAdminRow, int64, error) {
 	args := []any{filter.UserID, filter.TaskID, filter.Status, filter.RiskOnly}
 	rows, err := r.db.QueryContext(ctx, videoRelayAdminProjectionSQL+`
-		SELECT p.*,COALESCE(u.email,'') FROM projected p
-		LEFT JOIN users u ON u.id=p.user_id AND u.deleted_at IS NULL`+videoRelayAdminFilterSQL+`
-		ORDER BY p.created_at DESC,p.task_id DESC LIMIT $5 OFFSET $6`, append(args, limit, offset)...)
+		SELECT p.*,COALESCE(u.email,''),COALESCE(u.username,''),COALESCE(a.name,''),
+			COALESCE(a.deleted_at IS NOT NULL,false),COALESCE(g.name,'')
+		FROM (SELECT p.* FROM projected p`+videoRelayAdminFilterSQL+`
+			ORDER BY p.created_at DESC,p.task_id DESC LIMIT $5 OFFSET $6) p
+		LEFT JOIN users u ON u.id=p.user_id AND u.deleted_at IS NULL
+		LEFT JOIN accounts a ON a.id=p.account_id
+		LEFT JOIN groups g ON g.id=p.group_id
+		ORDER BY p.created_at DESC,p.task_id DESC`, append(args, limit, offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -240,7 +245,7 @@ func (r *videoRelayRepository) ListAdmin(ctx context.Context, filter service.Vid
 		var item service.VideoRelayAdminRow
 		err := rows.Scan(&item.TaskID, &item.UserID, &item.GroupID, &item.AccountID, &item.Model, &item.UpstreamModel,
 			&item.Seconds, &item.Resolution, &item.HoldAmount, &item.Status, &item.BillingState, &item.FailureReason,
-			&item.UpstreamTaskID, &item.CreatedAt, &item.SettledAt, &item.Risk, &item.UserEmail)
+			&item.UpstreamTaskID, &item.CreatedAt, &item.SettledAt, &item.Risk, &item.UserEmail, &item.UserName, &item.AccountName, &item.AccountDeleted, &item.GroupName)
 		if err != nil {
 			return nil, 0, err
 		}

@@ -181,6 +181,10 @@ type VideoRelayAdminRow struct {
 	TaskID         string     `json:"task_id"`
 	UserID         int64      `json:"user_id"`
 	UserEmail      string     `json:"user_email"`
+	UserName       string     `json:"user_name"`
+	AccountName    string     `json:"account_name"`
+	AccountDeleted bool       `json:"account_deleted"`
+	GroupName      string     `json:"group_name"`
 	GroupID        int64      `json:"group_id"`
 	AccountID      int64      `json:"account_id"`
 	Model          string     `json:"model"`

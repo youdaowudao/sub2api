@@ -145,7 +145,7 @@ func validateVideoRelayMedia(resp *http.Response, wanted *videoRelayRange) (*Vid
 }
 
 func videoRelayRangeError() *VideoRelayError {
-	return &VideoRelayError{Status: http.StatusRequestedRangeNotSatisfiable, Code: "invalid_request_error", Message: "Request a single valid byte range for this video."}
+	return &VideoRelayError{Status: http.StatusRequestedRangeNotSatisfiable, Code: "invalid_request_error", Message: "Request a single valid byte range for this video. 下载范围无效，请只请求一段有效范围。"}
 }
 
 func (s *VideoRelayService) Download(c *gin.Context, key *APIKey, id string, ranges []string) (*VideoRelayDownload, *VideoRelayError) {
@@ -155,7 +155,7 @@ func (s *VideoRelayService) Download(c *gin.Context, key *APIKey, id string, ran
 		return nil, err
 	}
 	if !task.CanDownload() {
-		return nil, &VideoRelayError{Status: http.StatusConflict, Code: "invalid_request_error", Message: "The video is not available for download. Check the task status first."}
+		return nil, &VideoRelayError{Status: http.StatusConflict, Code: "invalid_request_error", Message: "The video is not available for download. Check the task status first. 视频还不能下载，请先查询任务状态。"}
 	}
 	var rangeHeader string
 	if len(ranges) > 1 || len(ranges) == 1 && strings.TrimSpace(ranges[0]) == "" {

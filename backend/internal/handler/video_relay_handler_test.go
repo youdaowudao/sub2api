@@ -71,8 +71,8 @@ func TestVideoRelayHandlerOnlyReportsRefundAfterSettlement(t *testing.T) {
 
 func TestVideoRelayHandlerReportsTrackingAndRemovedRouteRefunds(t *testing.T) {
 	for reason, message := range map[string]string{
-		service.VideoRelayTrackingExpired: "Video tracking expired. The frozen amount was returned. Submit a new request if you still need the video.",
-		service.VideoRelayAccountDeleted:  "The video route was removed. The frozen amount was returned. Submit a new request if you still need the video.",
+		service.VideoRelayTrackingExpired: "Video tracking expired. The frozen amount was returned. Submit a new request if you still need the video. 等待超时，冻结金额已退回；如仍需要，请重新提交。",
+		service.VideoRelayAccountDeleted:  "The video route was removed. The frozen amount was returned. Submit a new request if you still need the video. 视频线路已移除，冻结金额已退回；如仍需要，请重新提交。",
 	} {
 		for _, state := range []string{service.VideoRelayRefunded, service.VideoRelayHeld} {
 			recorder := httptest.NewRecorder()
@@ -593,4 +593,14 @@ func TestVideoRelayHandlerDownloadRejectsImplicitlyDecompressed206(t *testing.T)
 		require.Equal(t, http.StatusPartialContent, partial.Code)
 		require.Equal(t, []string{byteRange}, <-observedRanges)
 	})
+}
+
+func TestVideoRelayHandlerUnavailableMessageIsBilingual(t *testing.T) {
+	handler := NewVideoRelayHandler(nil, nil)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	handler.Submit(c)
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.JSONEq(t, `{"error":{"type":"api_error","message":"Video relay is temporarily unavailable. 视频服务暂时不可用，请稍后重试。"}}`, recorder.Body.String())
 }

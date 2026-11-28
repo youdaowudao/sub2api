@@ -4,7 +4,7 @@ vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn()
 }))
 
-import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
+import { buildModelMappingWithOrder, orderedMappingKeys, buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
 import { BUILTIN_PLATFORM_CATALOG, resetPlatformCatalog, setPlatformCatalog } from '@/constants/platformCatalog'
 
 describe('useModelWhitelist', () => {
@@ -311,5 +311,41 @@ describe('useModelWhitelist', () => {
       allowedModels: ['gpt-5.4'],
       modelMappings: [{ from: 'gpt-latest', to: 'gpt-5.4' }]
     })
+  })
+})
+
+describe('model mapping display order', () => {
+  it('preserves first successful insertion including numeric keys and duplicate overwrites', () => {
+    const result = buildModelMappingWithOrder('combined', ['z', '9', 'bad*'], [
+      { from: 'a', to: 'target-a' }, { from: '2', to: 'target-2' },
+      { from: 'z', to: 'target-z' }, { from: ' ', to: 'x' },
+      { from: 'bad*pattern', to: 'x' }, { from: 'skip', to: '*' },
+    ])
+    expect(result).toEqual({
+      mapping: { z: 'target-z', '9': '9', a: 'target-a', '2': 'target-2' },
+      order: ['z', '9', 'a', '2'],
+    })
+    expect(buildModelMappingWithOrder('mapping', [], [])).toEqual({ mapping: null, order: [] })
+  })
+
+  it('round trips both independent sections and tolerates legacy, stale and malformed order', () => {
+    let result = buildModelMappingWithOrder('combined', ['z', 'a'], [{ from: 'y', to: 'target-y' }, { from: 'b', to: 'target-b' }])
+    for (let i = 0; i < 2; i++) {
+      const parsed = splitModelMappingObject(result.mapping, result.order)
+      expect(parsed.allowedModels).toEqual(['z', 'a'])
+      expect(parsed.modelMappings).toEqual([{ from: 'y', to: 'target-y' }, { from: 'b', to: 'target-b' }])
+      result = buildModelMappingWithOrder('combined', parsed.allowedModels, parsed.modelMappings)
+      expect(result.order).toEqual(['z', 'a', 'y', 'b'])
+    }
+    const raw = { z: 'z', b: 'target-b', ' a ': ' a ', invalid: 5, empty: ' ' }
+    expect(splitModelMappingObject(raw, ['z', 'missing', 'z', 1, 'b'])).toEqual({
+      allowedModels: ['z', 'a'], modelMappings: [{ from: 'b', to: 'target-b' }],
+    })
+    for (const order of [undefined, 'z', {}, null]) {
+      expect(splitModelMappingObject(raw, order)).toEqual({
+        allowedModels: ['a', 'z'], modelMappings: [{ from: 'b', to: 'target-b' }],
+      })
+    }
+    expect(orderedMappingKeys({ z: '1', a: '2', '3': '3' }, ['z', '3', 'z', 'stale', 1])).toEqual(['z', '3', 'a'])
   })
 })

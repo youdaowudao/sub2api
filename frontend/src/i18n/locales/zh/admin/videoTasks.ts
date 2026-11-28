@@ -10,6 +10,9 @@ export default {
     loadFailed: '视频任务加载失败，请重试。',
     invalidUserId: '用户 ID 须为有效的正整数。',
     invalidTaskId: '请输入完整的本站视频任务号。',
+    columnSettings: '列设置',
+    deleted: '（已删除）',
+    deletedAccount: '已删除账号',
     columns: {
       task_id: '任务号',
       user_id: '用户',

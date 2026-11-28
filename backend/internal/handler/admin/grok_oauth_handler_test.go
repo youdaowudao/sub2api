@@ -432,3 +432,12 @@ func TestGrokOAuthHandlerReconcileExplicitApply(t *testing.T) {
 	require.Equal(t, 25, reconciler.input.Limit)
 	require.Equal(t, time.Hour, reconciler.input.RefreshWindow)
 }
+
+func TestGrokSSOImportPreservesMappingOrder(t *testing.T) {
+	credentials := grokSSOImportCredentials(nil, map[string]any{
+		"model_mapping":       map[string]any{"z": "z", "a": "a"},
+		"model_mapping_order": []any{"z", "a"},
+	})
+	require.Equal(t, []any{"z", "a"}, credentials["model_mapping_order"])
+	require.Equal(t, map[string]any{"z": "z", "a": "a"}, credentials["model_mapping"])
+}

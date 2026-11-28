@@ -22225,6 +22225,8 @@ type GroupMutation struct {
 	fallback_group_id_on_invalid_request    *int64
 	addfallback_group_id_on_invalid_request *int64
 	model_routing                           *map[string][]int64
+	model_routing_order                     *[]string
+	appendmodel_routing_order               []string
 	model_routing_enabled                   *bool
 	mcp_xml_inject                          *bool
 	supported_model_scopes                  *[]string
@@ -24847,6 +24849,71 @@ func (m *GroupMutation) ResetModelRouting() {
 	delete(m.clearedFields, group.FieldModelRouting)
 }
 
+// SetModelRoutingOrder sets the "model_routing_order" field.
+func (m *GroupMutation) SetModelRoutingOrder(s []string) {
+	m.model_routing_order = &s
+	m.appendmodel_routing_order = nil
+}
+
+// ModelRoutingOrder returns the value of the "model_routing_order" field in the mutation.
+func (m *GroupMutation) ModelRoutingOrder() (r []string, exists bool) {
+	v := m.model_routing_order
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldModelRoutingOrder returns the old "model_routing_order" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldModelRoutingOrder(ctx context.Context) (v []string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldModelRoutingOrder is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldModelRoutingOrder requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldModelRoutingOrder: %w", err)
+	}
+	return oldValue.ModelRoutingOrder, nil
+}
+
+// AppendModelRoutingOrder adds s to the "model_routing_order" field.
+func (m *GroupMutation) AppendModelRoutingOrder(s []string) {
+	m.appendmodel_routing_order = append(m.appendmodel_routing_order, s...)
+}
+
+// AppendedModelRoutingOrder returns the list of values that were appended to the "model_routing_order" field in this mutation.
+func (m *GroupMutation) AppendedModelRoutingOrder() ([]string, bool) {
+	if len(m.appendmodel_routing_order) == 0 {
+		return nil, false
+	}
+	return m.appendmodel_routing_order, true
+}
+
+// ClearModelRoutingOrder clears the value of the "model_routing_order" field.
+func (m *GroupMutation) ClearModelRoutingOrder() {
+	m.model_routing_order = nil
+	m.appendmodel_routing_order = nil
+	m.clearedFields[group.FieldModelRoutingOrder] = struct{}{}
+}
+
+// ModelRoutingOrderCleared returns if the "model_routing_order" field was cleared in this mutation.
+func (m *GroupMutation) ModelRoutingOrderCleared() bool {
+	_, ok := m.clearedFields[group.FieldModelRoutingOrder]
+	return ok
+}
+
+// ResetModelRoutingOrder resets all changes to the "model_routing_order" field.
+func (m *GroupMutation) ResetModelRoutingOrder() {
+	m.model_routing_order = nil
+	m.appendmodel_routing_order = nil
+	delete(m.clearedFields, group.FieldModelRoutingOrder)
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (m *GroupMutation) SetModelRoutingEnabled(b bool) {
 	m.model_routing_enabled = &b
@@ -26179,7 +26246,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 71)
+	fields := make([]string, 0, 72)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26320,6 +26387,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.model_routing != nil {
 		fields = append(fields, group.FieldModelRouting)
+	}
+	if m.model_routing_order != nil {
+		fields = append(fields, group.FieldModelRoutingOrder)
 	}
 	if m.model_routing_enabled != nil {
 		fields = append(fields, group.FieldModelRoutingEnabled)
@@ -26495,6 +26565,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.FallbackGroupIDOnInvalidRequest()
 	case group.FieldModelRouting:
 		return m.ModelRouting()
+	case group.FieldModelRoutingOrder:
+		return m.ModelRoutingOrder()
 	case group.FieldModelRoutingEnabled:
 		return m.ModelRoutingEnabled()
 	case group.FieldMcpXMLInject:
@@ -26646,6 +26718,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldFallbackGroupIDOnInvalidRequest(ctx)
 	case group.FieldModelRouting:
 		return m.OldModelRouting(ctx)
+	case group.FieldModelRoutingOrder:
+		return m.OldModelRoutingOrder(ctx)
 	case group.FieldModelRoutingEnabled:
 		return m.OldModelRoutingEnabled(ctx)
 	case group.FieldMcpXMLInject:
@@ -27031,6 +27105,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetModelRouting(v)
+		return nil
+	case group.FieldModelRoutingOrder:
+		v, ok := value.([]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetModelRoutingOrder(v)
 		return nil
 	case group.FieldModelRoutingEnabled:
 		v, ok := value.(bool)
@@ -27623,6 +27704,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	if m.FieldCleared(group.FieldModelRouting) {
 		fields = append(fields, group.FieldModelRouting)
 	}
+	if m.FieldCleared(group.FieldModelRoutingOrder) {
+		fields = append(fields, group.FieldModelRoutingOrder)
+	}
 	return fields
 }
 
@@ -27702,6 +27786,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldModelRouting:
 		m.ClearModelRouting()
+		return nil
+	case group.FieldModelRoutingOrder:
+		m.ClearModelRoutingOrder()
 		return nil
 	}
 	return fmt.Errorf("unknown Group nullable field %s", name)
@@ -27851,6 +27938,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldModelRouting:
 		m.ResetModelRouting()
+		return nil
+	case group.FieldModelRoutingOrder:
+		m.ResetModelRoutingOrder()
 		return nil
 	case group.FieldModelRoutingEnabled:
 		m.ResetModelRoutingEnabled()

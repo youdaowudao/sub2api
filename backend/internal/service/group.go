@@ -90,6 +90,7 @@ type Group struct {
 	// key: 模型匹配模式（支持 * 通配符，如 "claude-opus-*"）
 	// value: 优先账号 ID 列表
 	ModelRouting        map[string][]int64
+	ModelRoutingOrder   []string
 	ModelRoutingEnabled bool
 
 	// MCP XML 协议注入开关（仅 antigravity 平台使用）

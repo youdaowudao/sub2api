@@ -147,3 +147,63 @@ func TestVideoRelayLogRawCoverage(t *testing.T) {
 	require.Len(t, logs, 1, "keep malformed consumption as evidence against an unnumbered match")
 	require.Empty(t, logs[0].TaskID, "a conflicting record cannot supply an upstream task ID")
 }
+
+func TestVideoRelayFailureMessageRequestFields(t *testing.T) {
+	for _, field := range []string{"size", "some_field-1.2", strings.Repeat("a", 64)} {
+		data, err := json.Marshal(map[string]any{"model": "fixture", "prompt": "fixture", field: true})
+		require.NoError(t, err)
+		_, invalid := ParseVideoRelayRequest("application/json", data)
+		require.NotNil(t, invalid)
+		require.Equal(t, http.StatusBadRequest, invalid.Status)
+		require.Equal(t, "invalid_request_error", invalid.Code)
+		require.Equal(t, "The video endpoint does not support the field \""+field+"\". 视频接口不支持字段「"+field+"」。", invalid.Message)
+	}
+	for _, field := range []string{"", "http:fixture", "a/b", "a b", strings.Repeat("a", 65), "中文"} {
+		data, err := json.Marshal(map[string]any{"model": "fixture", "prompt": "fixture", field: true})
+		require.NoError(t, err)
+		_, invalid := ParseVideoRelayRequest("application/json", data)
+		require.NotNil(t, invalid)
+		require.Equal(t, http.StatusBadRequest, invalid.Status)
+		require.Equal(t, "invalid_request_error", invalid.Code)
+		require.Equal(t, "The request contains a field that the video endpoint does not support. 请求里有视频接口不支持的字段。", invalid.Message)
+	}
+}
+
+func TestVideoRelayFailureMessageBilingual(t *testing.T) {
+	for reason, want := range map[string]string{
+		VideoRelayNotSent:          "The video request was not sent. The frozen amount was returned. 本次视频请求未发出，冻结金额已退回。",
+		VideoRelayUpstreamRejected: "The video request was rejected. The frozen amount was returned. 视频请求被拒绝，冻结金额已退回。",
+		VideoRelayUpstreamFailed:   "Video generation failed. The frozen amount was returned. 视频生成失败，冻结金额已退回。",
+		VideoRelayUnconfirmed:      "The video request could not be confirmed. The frozen amount was returned. 无法确认本次提交是否成功，冻结金额已退回。",
+		VideoRelayTrackingExpired:  "Video tracking expired. The frozen amount was returned. Submit a new request if you still need the video. 等待超时，冻结金额已退回；如仍需要，请重新提交。",
+		VideoRelayAccountDeleted:   "The video route was removed. The frozen amount was returned. Submit a new request if you still need the video. 视频线路已移除，冻结金额已退回；如仍需要，请重新提交。",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			require.Equal(t, want, VideoRelayFailureMessage(reason))
+		})
+	}
+}
+
+func TestVideoRelayFailureMessageRequestTranslations(t *testing.T) {
+	const base = `"model":"demo-video","prompt":"Waves"`
+	for _, tc := range []struct {
+		contentType, body string
+		status            int
+		message           string
+	}{
+		{"text/plain", "{}", http.StatusUnsupportedMediaType, "Send the video request as application/json. 请用 JSON 格式提交视频请求。"},
+		{"application/json", "[]", http.StatusBadRequest, "Send one JSON object containing the video settings. 请求体必须是一个 JSON 对象。"},
+		{"application/json", "{}", http.StatusBadRequest, "Provide a prompt and a model name of at most 100 characters. 请填写提示词和模型名，模型名最多 100 个字符。"},
+		{"application/json", "{" + base + `,"seconds":0}`, http.StatusBadRequest, "Provide seconds as a positive whole number. 秒数必须是正整数。"},
+		{"application/json", "{" + base + `,"resolution":"4k"}`, http.StatusBadRequest, "Choose 480p, 720p, or 1080p for resolution. 分辨率请选择 480p、720p 或 1080p。"},
+		{"application/json", "{" + base + `,"aspect_ratio":"0:9"}`, http.StatusBadRequest, "Provide aspect_ratio as two positive whole numbers separated by a colon. 画面比例请写成 16:9 这样的格式。"},
+		{"application/json", "{" + base + `,"images":["file:///fixture"]}`, http.StatusBadRequest, "Provide at most one reference image using a valid HTTP or HTTPS URL. 最多提供一张参考图，必须是有效的 HTTP 或 HTTPS 链接。"},
+		{"application/json", "{" + base + `,"n":2}`, http.StatusBadRequest, "Only one video can be submitted per request. 每次请求只能生成一条视频。"},
+	} {
+		_, failure := ParseVideoRelayRequest(tc.contentType, []byte(tc.body))
+		require.NotNil(t, failure)
+		require.Equal(t, tc.status, failure.Status)
+		require.Equal(t, "invalid_request_error", failure.Code)
+		require.Equal(t, tc.message, failure.Message)
+	}
+}

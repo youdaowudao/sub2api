@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -64,7 +65,8 @@ type Channel struct {
 	// 模型定价列表（每条含 Platform 字段）
 	ModelPricing []ChannelModelPricing
 	// 渠道级模型映射（按平台分组：platform → {src→dst}）
-	ModelMapping map[string]map[string]string
+	ModelMapping      map[string]map[string]string
+	ModelMappingOrder map[string][]string
 
 	// 账号统计定价
 	ApplyPricingToAccountStats bool                      // 是否应用渠道模型定价到账号统计
@@ -260,6 +262,12 @@ func (c *Channel) Clone() *Channel {
 				inner[k] = v
 			}
 			cp.ModelMapping[platform] = inner
+		}
+	}
+	if c.ModelMappingOrder != nil {
+		cp.ModelMappingOrder = make(map[string][]string, len(c.ModelMappingOrder))
+		for platform, order := range c.ModelMappingOrder {
+			cp.ModelMappingOrder[platform] = slices.Clone(order)
 		}
 	}
 	if c.FeaturesConfig != nil {

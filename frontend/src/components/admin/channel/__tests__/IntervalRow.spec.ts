@@ -27,3 +27,15 @@ describe('pricing interval token bounds', () => {
     expect(wrapper.emitted('update')?.[1]?.[0]).toMatchObject({ max_tokens: max })
   })
 })
+
+describe('customer video interval', () => {
+  it('only edits the displayed resolution and price, preserving stored bounds', async () => {
+    const stored = { ...interval, min_tokens: 5, max_tokens: 20, tier_label: '720p', per_request_price: 0.48 }
+    const wrapper = mount(IntervalRow, { props: { interval: stored, mode: 'video', customerVideoPricing: true } })
+    expect(wrapper.findAll('input')).toHaveLength(2)
+    await wrapper.get('input[type="text"]').setValue('1080p')
+    await wrapper.get('input[type="number"]').setValue('0.6')
+    expect(wrapper.emitted('update')?.[0]?.[0]).toEqual({ ...stored, tier_label: '1080p' })
+    expect(wrapper.emitted('update')?.[1]?.[0]).toEqual({ ...stored, per_request_price: '0.6' })
+  })
+})

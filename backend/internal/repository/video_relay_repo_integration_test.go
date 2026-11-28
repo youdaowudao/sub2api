@@ -831,7 +831,7 @@ func TestVideoRelayRepoZeroRateSavedThroughGroupAPIAndChargedThroughGateway(t *t
 	outside := submit("31")
 	require.Zero(t, posts.Load(), "an unsupported video duration must make zero collection POSTs")
 	require.Equal(t, http.StatusBadRequest, outside.Code, outside.Body.String())
-	require.Contains(t, outside.Body.String(), "No available video route supports these seconds and resolution")
+	require.Contains(t, outside.Body.String(), "No available video route supports these seconds and resolution. 没有可用的视频线路支持这个秒数和分辨率，本次未扣费。")
 	var count int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM video_relay_tasks WHERE user_id=$1`, fixture.UserID).Scan(&count))
 	require.Zero(t, count)
@@ -891,7 +891,7 @@ func TestVideoRelayRepoZeroRateSavedThroughGroupAPIAndChargedThroughGateway(t *t
 		assertVideoRelayFunds(t, secondDB, refunded, 5, 0, 0)
 		require.Equal(t, service.VideoRelayRefunded, state)
 		require.Equal(t, service.VideoRelayUpstreamRejected, reason)
-		require.Contains(t, rejected.Body.String(), "The frozen amount was returned.", "explicit rejection must report the persisted refund")
+		require.Contains(t, rejected.Body.String(), "The video request was rejected. The frozen amount was returned. 视频请求被拒绝，冻结金额已退回。", "explicit rejection must report the persisted refund")
 		require.Equal(t, http.StatusBadGateway, rejected.Code, rejected.Body.String())
 		require.NotContains(t, rejected.Body.String(), "provider-only rejection")
 	})
@@ -909,7 +909,7 @@ func TestVideoRelayRepoZeroRateSavedThroughGroupAPIAndChargedThroughGateway(t *t
 			before := posts.Load()
 			response := submit("30")
 			require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
-			require.Contains(t, response.Body.String(), "The frozen amount was returned.")
+			require.Contains(t, response.Body.String(), "The video request was not sent. The frozen amount was returned. 本次视频请求未发出，冻结金额已退回。")
 			require.Equal(t, before, posts.Load(), "the HTTP client must never receive the POST")
 			secondDB := videoRelayIndependentDB(t)
 			var id string
@@ -954,7 +954,7 @@ func TestVideoRelayRepoZeroRateSavedThroughGroupAPIAndChargedThroughGateway(t *t
 		require.Equal(t, service.VideoRelayRefunded, reloaded.BillingState)
 		require.Equal(t, service.VideoRelayUnconfirmed, reloaded.FailureReason)
 		require.Empty(t, reloaded.UpstreamTaskID)
-		require.Contains(t, response.Body.String(), "The frozen amount was returned.")
+		require.Contains(t, response.Body.String(), "The video request could not be confirmed. The frozen amount was returned. 无法确认本次提交是否成功，冻结金额已退回。")
 		assertVideoRelayFunds(t, secondDB, task, 5, 0, 0)
 	})
 

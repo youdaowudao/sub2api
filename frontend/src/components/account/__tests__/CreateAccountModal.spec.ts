@@ -15,6 +15,7 @@ const {
   showWarningMock,
   importCodexSessionMock,
   createOpenAICodexPATMock,
+  createGrokSSOMock,
   authIsSimpleMode,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
@@ -24,6 +25,7 @@ const {
   showWarningMock: vi.fn(),
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
+  createGrokSSOMock: vi.fn(),
   authIsSimpleMode: { value: true },
 }))
 
@@ -54,6 +56,7 @@ vi.mock('@/api/admin', () => ({
       importCodexSession: importCodexSessionMock,
       createOpenAICodexPAT: createOpenAICodexPATMock,
     },
+    grok: { createFromSSO: createGrokSSOMock },
     settings: {
       getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
       getSettings: vi.fn().mockResolvedValue({}),
@@ -94,7 +97,7 @@ const OAuthAuthorizationFlowStub = defineComponent({
     initialInputMethod: String,
   },
   data: () => ({ inputMethod: 'manual' }),
-  emits: ['import-codex-session', 'import-codex-pat'],
+  emits: ['import-codex-session', 'import-codex-pat', 'import-sso'],
   template: `
     <div>
       <button data-testid="import-codex-session" @click="$emit('import-codex-session', 'session-json')">session</button>
@@ -218,6 +221,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
       warnings: [],
     })
     createOpenAICodexPATMock.mockReset().mockResolvedValue({})
+    createGrokSSOMock.mockReset().mockResolvedValue({ created: [{}], failed: [] })
   })
 
   afterEach(() => vi.useRealTimers())
@@ -304,6 +308,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(payload.extra.openai_passthrough).toBe(true)
     expect(payload.extra.openai_passthrough_model_filter).toBe(true)
     expect(payload.credentials.model_mapping).toEqual({ 'qwen3.8-max': 'qwen3.8-max' })
+    expect(payload.credentials.model_mapping_order).toEqual(['qwen3.8-max'])
     wrapper.unmount()
   })
 
@@ -488,6 +493,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.credentials?.model_mapping).toEqual({
       'public-glm': 'glm-5.3'
     })
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials?.model_mapping_order).toEqual(['public-glm'])
     expect(syncUpstreamModelsMock).toHaveBeenCalledWith(42)
   })
 
@@ -950,6 +956,64 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(payload?.upstream_billing_probe_enabled).toBe(true)
     // 创建成功后前端立即发起一次首探（与其他 apikey 平台一致）。
     expect(probeUpstreamBillingMock).toHaveBeenCalledWith(42)
+  })
+
+  it('sends the Grok SSO import model mapping order', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'Grok')
+    await selectButtonByText(wrapper, 'admin.accounts.modelWhitelist')
+    await wrapper.getComponent(ModelWhitelistSelectorStub).vm.$emit('update:modelValue', ['z', 'a'])
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Grok fixture')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    const flow = wrapper.getComponent(OAuthAuthorizationFlowStub)
+    flow.vm.$emit('import-sso', 'fixture-only')
+    await flushPromises()
+    expect(createGrokSSOMock).toHaveBeenCalledTimes(1)
+    expect(createGrokSSOMock.mock.lastCall![0].credentials).toMatchObject({
+      model_mapping: { z: 'z', a: 'a' },
+      model_mapping_order: ['z', 'a'],
+    })
+    wrapper.unmount()
+  })
+
+  it.each(['session', 'pat'] as const)('sends order alongside nonempty Codex %s import mappings', async method => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.getComponent(ModelWhitelistSelectorStub).vm.$emit('update:modelValue', ['z', 'a'])
+    const compactSection = wrapper.findAll('label').find(label => label.text() === 'admin.accounts.openai.compactModelMapping')!.element.parentElement!
+    for (const [index, from] of ['compact-z', 'compact-a'].entries()) {
+      const add = Array.from(compactSection.querySelectorAll('button')).at(-1)!
+      add.click()
+      await flushPromises()
+      await wrapper.findAll('input[placeholder="admin.accounts.fromModel"]')[index].setValue(from)
+      await wrapper.findAll('input[placeholder="admin.accounts.toModel"]')[index].setValue(from + '-target')
+    }
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-' + method + '"]').trigger('click')
+    await flushPromises()
+    const request = (method === 'session' ? importCodexSessionMock : createOpenAICodexPATMock).mock.lastCall![0]
+    expect(request.credential_extras).toMatchObject({
+      model_mapping: { z: 'z', a: 'a' }, model_mapping_order: ['z', 'a'],
+      compact_model_mapping: { 'compact-z': 'compact-z-target', 'compact-a': 'compact-a-target' },
+      compact_model_mapping_order: ['compact-z', 'compact-a'],
+    })
+    wrapper.unmount()
+  })
+
+  it.each(['session', 'pat'] as const)('omits empty Codex %s import mappings and orders', async method => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.getComponent(ModelWhitelistSelectorStub).vm.$emit('update:modelValue', [])
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex import')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-' + method + '"]').trigger('click')
+    await flushPromises()
+    const credentials = (method === 'session' ? importCodexSessionMock : createOpenAICodexPATMock).mock.lastCall![0].credential_extras ?? {}
+    for (const key of ['model_mapping', 'model_mapping_order', 'compact_model_mapping', 'compact_model_mapping_order']) {
+      expect(credentials).not.toHaveProperty(key)
+    }
+    wrapper.unmount()
   })
 
   it('leaves Codex session import billing ownership to the backend', async () => {

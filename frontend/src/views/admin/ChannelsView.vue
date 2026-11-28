@@ -402,7 +402,7 @@
               </div>
               <div v-else class="space-y-1">
                 <div
-                  v-for="(_, srcModel) in section.model_mapping"
+                  v-for="srcModel in section.model_mapping_order"
                   :key="srcModel"
                   class="flex items-center gap-2"
                 >
@@ -466,6 +466,7 @@
                   :entry="entry"
                   :platform="section.platform"
                   enable-time-pricing
+                  customer-video-pricing
                   enable-tier-multipliers
                   @update="updatePricingEntry(sIdx, idx, $event)"
                   @remove="removePricingEntry(sIdx, idx)"
@@ -671,6 +672,7 @@ import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Toggle from '@/components/common/Toggle.vue'
+import { orderedMappingKeys } from '@/composables/useModelWhitelist'
 import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
@@ -719,6 +721,7 @@ interface PlatformSection {
   collapsed: boolean
   group_ids: number[]
   model_mapping: Record<string, string>
+  model_mapping_order: string[]
   model_pricing: PricingFormEntry[]
   web_search_emulation: boolean
   codex_image_generation_bridge: boolean
@@ -821,6 +824,7 @@ function addPlatformSection(platform: GroupPlatform) {
     collapsed: false,
     group_ids: [],
     model_mapping: {},
+    model_mapping_order: [],
     model_pricing: [],
     web_search_emulation: false,
     codex_image_generation_bridge: false,
@@ -979,10 +983,13 @@ function addMappingEntry(sectionIdx: number) {
     i++
   }
   mapping[key] = ''
+  form.platforms[sectionIdx].model_mapping_order.push(key)
 }
 
 function removeMappingEntry(sectionIdx: number, key: string) {
-  delete form.platforms[sectionIdx].model_mapping[key]
+  const section = form.platforms[sectionIdx]
+  delete section.model_mapping[key]
+  section.model_mapping_order = section.model_mapping_order.filter(item => item !== key)
 }
 
 function renameMappingKey(sectionIdx: number, oldKey: string, newKey: string) {
@@ -993,6 +1000,9 @@ function renameMappingKey(sectionIdx: number, oldKey: string, newKey: string) {
   const value = mapping[oldKey]
   delete mapping[oldKey]
   mapping[newKey] = value
+  const order = form.platforms[sectionIdx].model_mapping_order
+  const index = order.indexOf(oldKey)
+  if (index !== -1) order[index] = newKey
 }
 
 // ── Account Stats Pricing helpers ──
@@ -1148,10 +1158,11 @@ function accountStatsRulesToAPI(): AccountStatsPricingRule[] {
 }
 
 // ── Form ↔ API conversion ──
-function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[], model_mapping: Record<string, Record<string, string>>, features_config: Record<string, unknown> } {
+function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[], model_mapping: Record<string, Record<string, string>>, model_mapping_order: Record<string, string[]>, features_config: Record<string, unknown> } {
   const group_ids: number[] = []
   const model_pricing: ChannelModelPricing[] = []
   const model_mapping: Record<string, Record<string, string>> = {}
+  const model_mapping_order: Record<string, string[]> = {}
   // Preserve existing features_config fields not managed by the form
   const featuresConfig: Record<string, unknown> = editingChannel.value?.features_config
     ? { ...editingChannel.value.features_config }
@@ -1164,6 +1175,7 @@ function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[
     // Model mapping per platform
     if (Object.keys(section.model_mapping).length > 0) {
       model_mapping[section.platform] = { ...section.model_mapping }
+      model_mapping_order[section.platform] = [...section.model_mapping_order]
     }
 
     // Model pricing with platform tag
@@ -1227,7 +1239,7 @@ function formToAPI(): { group_ids: number[], model_pricing: ChannelModelPricing[
   // Channel-level boolean: lets users see the actual response model in usage records.
   featuresConfig.expose_response_model = !!form.expose_response_model
 
-  return { group_ids: uniqueGroupIds, model_pricing, model_mapping, features_config: featuresConfig }
+  return { group_ids: uniqueGroupIds, model_pricing, model_mapping, model_mapping_order, features_config: featuresConfig }
 }
 
 function apiToForm(channel: Channel): PlatformSection[] {
@@ -1301,6 +1313,7 @@ function apiToForm(channel: Channel): PlatformSection[] {
       collapsed: false,
       group_ids: groupIds,
       model_mapping: { ...mapping },
+      model_mapping_order: orderedMappingKeys(mapping, channel.model_mapping_order?.[platform]),
       model_pricing: pricing,
       web_search_emulation: webSearchEnabled,
       codex_image_generation_bridge: codexImageGenerationBridgeEnabled,
@@ -1642,7 +1655,7 @@ async function handleSubmit() {
     }
   }
 
-  const { group_ids, model_pricing, model_mapping, features_config } = formToAPI()
+  const { group_ids, model_pricing, model_mapping, model_mapping_order, features_config } = formToAPI()
 
   submitting.value = true
   try {
@@ -1654,6 +1667,7 @@ async function handleSubmit() {
         group_ids,
         model_pricing,
         model_mapping: Object.keys(model_mapping).length > 0 ? model_mapping : {},
+        model_mapping_order,
         billing_model_source: form.billing_model_source,
         restrict_models: form.restrict_models,
         features_config,
@@ -1669,6 +1683,7 @@ async function handleSubmit() {
         group_ids,
         model_pricing,
         model_mapping: Object.keys(model_mapping).length > 0 ? model_mapping : {},
+        model_mapping_order,
         billing_model_source: form.billing_model_source,
         restrict_models: form.restrict_models,
         features_config,

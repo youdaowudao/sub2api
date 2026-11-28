@@ -3525,7 +3525,8 @@ import {
 import {
   getPresetMappingsByPlatform,
   commonErrorCodes,
-  buildModelMappingObject,
+  buildModelMappingWithOrder,
+  orderedMappingKeys,
   splitModelMappingObject,
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
@@ -3952,7 +3953,7 @@ function sameGrokMapping(left: Record<string, string>, right: Record<string, str
 const grokDiagnosticsDirty = computed(() => {
   if (props.account?.platform !== 'grok') return false
   const credentials = (props.account.credentials as Record<string, unknown> | undefined) || {}
-  if (!sameGrokMapping(normalizedGrokMapping(credentials.model_mapping), normalizedGrokMapping(buildModelRestrictionMapping()))) {
+  if (!sameGrokMapping(normalizedGrokMapping(credentials.model_mapping), normalizedGrokMapping(buildModelRestrictionMapping().mapping))) {
     return true
   }
 
@@ -4631,8 +4632,8 @@ const normalizePoolModeRetryCount = (value: number) => {
   return normalized
 }
 
-const loadModelRestrictionFromMapping = (rawMapping?: Record<string, unknown>) => {
-  const parsed = splitModelMappingObject(rawMapping)
+const loadModelRestrictionFromMapping = (rawMapping?: Record<string, unknown>, order?: unknown) => {
+  const parsed = splitModelMappingObject(rawMapping, order)
   allowedModels.value = parsed.allowedModels
   modelMappings.value = parsed.modelMappings
   modelRestrictionMode.value =
@@ -4642,28 +4643,23 @@ const loadModelRestrictionFromMapping = (rawMapping?: Record<string, unknown>) =
 }
 
 const buildModelRestrictionMapping = () =>
-  buildModelMappingObject('combined', allowedModels.value, modelMappings.value)
+  buildModelMappingWithOrder('combined', allowedModels.value, modelMappings.value)
 
 const applyOpenAIModelMappingCredentials = (credentials: Record<string, unknown>) => {
   const shouldApplyModelMapping = !isOpenAIModelRestrictionDisabled.value
 
   if (shouldApplyModelMapping) {
-    const modelMapping = buildModelRestrictionMapping()
-    if (modelMapping) {
-      credentials.model_mapping = modelMapping
-    } else {
-      delete credentials.model_mapping
-    }
+    const { mapping: modelMapping, order: modelMappingOrder } = buildModelRestrictionMapping()
+    credentials.model_mapping = modelMapping ?? {}
+    credentials.model_mapping_order = modelMappingOrder
   } else if (!credentials.model_mapping) {
     delete credentials.model_mapping
+    delete credentials.model_mapping_order
   }
 
-  const compactModelMapping = buildModelMappingObject('mapping', [], openAICompactModelMappings.value)
-  if (compactModelMapping) {
-    credentials.compact_model_mapping = compactModelMapping
-  } else {
-    delete credentials.compact_model_mapping
-  }
+  const { mapping: compactModelMapping, order: compactModelMappingOrder } = buildModelMappingWithOrder('mapping', [], openAICompactModelMappings.value)
+  credentials.compact_model_mapping = compactModelMapping ?? {}
+  credentials.compact_model_mapping_order = compactModelMappingOrder
 }
 
 const syncFormFromAccount = (newAccount: Account | null) => {
@@ -4816,7 +4812,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     const credentials = newAccount.credentials as Record<string, unknown> | undefined
     const compactMappings = credentials?.compact_model_mapping as Record<string, string> | undefined
     if (compactMappings && typeof compactMappings === 'object') {
-      openAICompactModelMappings.value = Object.entries(compactMappings).map(([from, to]) => ({ from, to }))
+      openAICompactModelMappings.value = orderedMappingKeys(compactMappings, credentials?.compact_model_mapping_order).map(from => ({ from, to: compactMappings[from] }))
     }
   }
   if (newAccount.platform === 'anthropic' && newAccount.type === 'apikey') {
@@ -4878,7 +4874,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     // 从 model_mapping 读取映射配置
     const rawAgMapping = credentials?.model_mapping as Record<string, string> | undefined
     if (rawAgMapping && typeof rawAgMapping === 'object') {
-      const entries = Object.entries(rawAgMapping)
+      const entries = orderedMappingKeys(rawAgMapping, credentials?.model_mapping_order).map(from => [from, rawAgMapping[from]] as const)
       // 无论是白名单样式(key===value)还是真正的映射，都统一转换为映射列表
       antigravityModelMappings.value = entries.map(([from, to]) => ({ from, to }))
     } else {
@@ -4888,6 +4884,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
         antigravityModelMappings.value = rawWhitelist
           .map((v) => String(v).trim())
           .filter((v) => v.length > 0)
+          .sort()
           .map((m) => ({ from: m, to: m }))
       } else {
         antigravityModelMappings.value = []
@@ -5027,7 +5024,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       : (credentials.base_url as string) || platformDefaultUrl
 
     // Load model mappings and detect mode
-    loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined)
+    loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined, credentials.model_mapping_order)
 
     // Load pool mode
     poolModeEnabled.value = credentials.pool_mode === true
@@ -5078,7 +5075,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     loadQuotaNotifyFromExtra(bedrockExtra)
 
     // Load model mappings for bedrock
-    loadModelRestrictionFromMapping(bedrockCreds.model_mapping as Record<string, unknown> | undefined)
+    loadModelRestrictionFromMapping(bedrockCreds.model_mapping as Record<string, unknown> | undefined, bedrockCreds.model_mapping_order)
   } else if (newAccount.type === 'upstream' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
     editBaseUrl.value = (credentials.base_url as string) || ''
@@ -5090,7 +5087,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     editVertexApiKey.value = ''
 
     // Load model mappings for service_account
-    loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined)
+    loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined, credentials.model_mapping_order)
   } else {
     const platformDefaultUrl =
       newAccount.platform === 'openai'
@@ -5105,7 +5102,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     // Load model mappings for OpenAI/Grok OAuth accounts
     if ((newAccount.platform === 'openai' || newAccount.platform === 'grok') && newAccount.credentials) {
       const oauthCredentials = newAccount.credentials as Record<string, unknown>
-      loadModelRestrictionFromMapping(oauthCredentials.model_mapping as Record<string, unknown> | undefined)
+      loadModelRestrictionFromMapping(oauthCredentials.model_mapping as Record<string, unknown> | undefined, oauthCredentials.model_mapping_order)
     } else {
       modelRestrictionMode.value = 'whitelist'
       modelMappings.value = []
@@ -5826,23 +5823,17 @@ const handleSubmit = async () => {
 
       // Add model mapping if configured（OpenAI 开启自动透传时保留现有映射，不再编辑）
       if (shouldApplyModelMapping) {
-        const modelMapping = buildModelRestrictionMapping()
-        if (modelMapping) {
-          newCredentials.model_mapping = modelMapping
-        } else {
-          delete newCredentials.model_mapping
-        }
+        const { mapping: modelMapping, order: modelMappingOrder } = buildModelRestrictionMapping()
+        newCredentials.model_mapping = modelMapping ?? {}
+        newCredentials.model_mapping_order = modelMappingOrder
       } else if (currentCredentials.model_mapping) {
         newCredentials.model_mapping = currentCredentials.model_mapping
       }
       if (props.account.platform === 'openai') {
         applyOpenAIEndpointCapabilities(newCredentials)
-        const compactModelMapping = buildModelMappingObject('mapping', [], openAICompactModelMappings.value)
-        if (compactModelMapping) {
-          newCredentials.compact_model_mapping = compactModelMapping
-        } else {
-          delete newCredentials.compact_model_mapping
-        }
+        const { mapping: compactModelMapping, order: compactModelMappingOrder } = buildModelMappingWithOrder('mapping', [], openAICompactModelMappings.value)
+        newCredentials.compact_model_mapping = compactModelMapping ?? {}
+        newCredentials.compact_model_mapping_order = compactModelMappingOrder
       }
 
       // Add pool mode if enabled
@@ -5978,12 +5969,9 @@ const handleSubmit = async () => {
       newCredentials.tier_id = 'vertex'
 
       // Add model mapping if configured
-      const modelMapping = buildModelRestrictionMapping()
-      if (modelMapping) {
-        newCredentials.model_mapping = modelMapping
-      } else {
-        delete newCredentials.model_mapping
-      }
+      const { mapping: modelMapping, order: modelMappingOrder } = buildModelRestrictionMapping()
+      newCredentials.model_mapping = modelMapping ?? {}
+      newCredentials.model_mapping_order = modelMappingOrder
 
       applyInterceptWarmup(newCredentials, interceptWarmupRequests.value, 'edit')
       applyAccountSchedulingThresholdOverridePatch(newCredentials, currentCredentials)
@@ -6036,12 +6024,9 @@ const handleSubmit = async () => {
       }
 
       // Model mapping
-      const modelMapping = buildModelRestrictionMapping()
-      if (modelMapping) {
-        newCredentials.model_mapping = modelMapping
-      } else {
-        delete newCredentials.model_mapping
-      }
+      const { mapping: modelMapping, order: modelMappingOrder } = buildModelRestrictionMapping()
+      newCredentials.model_mapping = modelMapping ?? {}
+      newCredentials.model_mapping_order = modelMappingOrder
 
       applyInterceptWarmup(newCredentials, interceptWarmupRequests.value, 'edit')
       applyAccountSchedulingThresholdOverridePatch(newCredentials, currentCredentials)
@@ -6074,12 +6059,9 @@ const handleSubmit = async () => {
       if (props.account.platform === 'openai') {
         applyOpenAIModelMappingCredentials(newCredentials)
       } else {
-        const modelMapping = buildModelRestrictionMapping()
-        if (modelMapping) {
-          newCredentials.model_mapping = modelMapping
-        } else {
-          delete newCredentials.model_mapping
-        }
+        const { mapping: modelMapping, order: modelMappingOrder } = buildModelRestrictionMapping()
+        newCredentials.model_mapping = modelMapping ?? {}
+        newCredentials.model_mapping_order = modelMappingOrder
       }
 
       updatePayload.credentials = newCredentials
@@ -6152,16 +6134,16 @@ const handleSubmit = async () => {
       // 移除旧字段
       delete newCredentials.model_whitelist
       delete newCredentials.model_mapping
+      delete newCredentials.model_mapping_order
 
       // 只使用映射模式
-      const antigravityModelMapping = buildModelMappingObject(
+      const { mapping: antigravityModelMapping, order: antigravityModelMappingOrder } = buildModelMappingWithOrder(
         'mapping',
         [],
         antigravityModelMappings.value
       )
-      if (antigravityModelMapping) {
-        newCredentials.model_mapping = antigravityModelMapping
-      }
+      newCredentials.model_mapping = antigravityModelMapping ?? {}
+      newCredentials.model_mapping_order = antigravityModelMappingOrder
 
       updatePayload.credentials = newCredentials
     }

@@ -44,6 +44,9 @@ func TestVideoRelayPriceUsesFullDurationAndGroupPrice(t *testing.T) {
 	group.ModelPricing[0].PerRequestPrice = nil
 	_, _, err = gateway.videoRelayPrice(context.Background(), key, "fixture-video", 30, "720p")
 	require.NotNil(t, err)
+	require.Equal(t, http.StatusBadRequest, err.Status)
+	require.Equal(t, "invalid_request_error", err.Code)
+	require.Equal(t, "This model has no video price for the requested resolution. 这个模型还没有配置该分辨率的视频价格，本次未扣费。", err.Message)
 
 	group.VideoRateIndependent = true
 	group.VideoRateMultiplier = 0
@@ -500,6 +503,7 @@ func TestVideoRelaySelectRouteFiltersUnsupportedSpecsInOneSchedulingPass(t *test
 	}{
 		{"use the compatible account", []Account{unavailable, matching}, true, false},
 		{"all accounts have incompatible specs", []Account{unavailable}, false, false},
+		{"no available route", nil, false, false},
 		{"advanced scheduling uses the compatible account", []Account{unavailable, matching}, true, true},
 		{"advanced scheduling has no compatible account", []Account{unavailable}, false, true},
 	} {
@@ -522,7 +526,15 @@ func TestVideoRelaySelectRouteFiltersUnsupportedSpecsInOneSchedulingPass(t *test
 				require.Equal(t, matching.ID, task.AccountID)
 			} else {
 				require.NotNil(t, failure)
-				require.Equal(t, http.StatusBadRequest, failure.Status)
+				if len(tc.accounts) == 0 {
+					require.Equal(t, http.StatusServiceUnavailable, failure.Status)
+					require.Equal(t, "upstream_error", failure.Code)
+					require.Equal(t, "No video route is available. Try again later. 暂时没有可用的视频线路，请稍后重试。本次未扣费。", failure.Message)
+				} else {
+					require.Equal(t, http.StatusBadRequest, failure.Status)
+					require.Equal(t, "invalid_request_error", failure.Code)
+					require.Equal(t, "No available video route supports these seconds and resolution. 没有可用的视频线路支持这个秒数和分辨率，本次未扣费。", failure.Message)
+				}
 			}
 			require.Equal(t, 1, accounts.groupReads, "video specs can be checked on the already loaded scheduling candidates")
 		})
@@ -918,4 +930,92 @@ func TestVideoRelaySubmitKeepsAccountSlotAfterClientDisconnect(t *testing.T) {
 	}
 	require.Len(t, released, 1)
 	require.Equal(t, int32(1), posts.Load())
+}
+
+type videoRelayBlockedMessageStore struct {
+	videoRelaySubmissionStore
+	reserveErr error
+}
+
+func (r *videoRelayBlockedMessageStore) Reserve(ctx context.Context, task *VideoRelayTask) error {
+	if r.reserveErr != nil {
+		return r.reserveErr
+	}
+	return r.videoRelaySubmissionStore.Reserve(ctx, task)
+}
+
+func (r *videoRelayBlockedMessageStore) AcquireSend(context.Context, *VideoRelayTask) (*VideoRelayTask, error) {
+	return nil, ErrVideoRelaySendBlocked
+}
+
+func TestVideoRelayFailureMessageSubmissionStates(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		reserveErr    error
+		status        int
+		code, message string
+	}{
+		{"blocked", nil, http.StatusTooManyRequests, "rate_limit_error", "This video route is confirming an earlier submission. This request was not sent. Try again shortly. 视频线路正在确认上一笔提交，本次未发出，冻结金额已退回，请稍后重试。"},
+		{"balance", ErrBatchImageInsufficientBalance, http.StatusPaymentRequired, "insufficient_balance", "Your available balance is too low for this video. The request was not sent. 余额不足，本次未提交、未扣费。"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &videoRelayBlockedMessageStore{reserveErr: tc.reserveErr}
+			svc := NewVideoRelayService(store, &OpenAIGatewayService{}, nil)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			task := &VideoRelayTask{TaskID: "video_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", UserID: 1, APIKeyID: 2}
+			result, failure := svc.submitSelected(c, VideoRelayRequest{Prompt: "fixture"}, nil, task, nil)
+			require.Nil(t, result)
+			require.NotNil(t, failure)
+			require.Equal(t, tc.status, failure.Status)
+			require.Equal(t, tc.code, failure.Code)
+			require.Equal(t, tc.message, failure.Message)
+			if tc.reserveErr == nil {
+				require.Equal(t, VideoRelayRefunded, store.task.BillingState)
+				require.NotContains(t, failure.Message, "未扣费")
+				require.Equal(t, VideoRelayFailureMessage(VideoRelayNotSent), store.task.ErrorMessage)
+			}
+		})
+	}
+}
+
+func TestVideoRelayFailureMessagePermissionAndLookup(t *testing.T) {
+	svc := NewVideoRelayService(nil, &OpenAIGatewayService{cfg: &config.Config{RunMode: config.RunModeSimple}}, nil)
+	failure := svc.CheckSubmitMode(nil)
+	require.Equal(t, http.StatusForbidden, failure.Status)
+	require.Equal(t, "permission_error", failure.Code)
+	require.Equal(t, "Video generation requires a balance-billed group. 视频生成只支持按余额计费的分组。", failure.Message)
+	failure = svc.CheckSubmitMode(&APIKey{Group: &Group{SubscriptionType: SubscriptionTypeStandard}})
+	require.Equal(t, http.StatusForbidden, failure.Status)
+	require.Equal(t, "permission_error", failure.Code)
+	require.Equal(t, "Video generation requires standard billing mode. 视频生成只支持标准计费模式。", failure.Message)
+	_, failure = svc.GetOwned(context.Background(), nil, "invalid")
+	require.Equal(t, http.StatusNotFound, failure.Status)
+	require.Equal(t, "not_found_error", failure.Code)
+	require.Equal(t, "Video request not found 找不到这个视频任务。", failure.Message)
+	failure = videoRelayBillingUnavailable()
+	require.Equal(t, http.StatusServiceUnavailable, failure.Status)
+	require.Equal(t, "billing_error", failure.Code)
+	require.Equal(t, "Video billing is temporarily unavailable. Check the video status if you have a task ID. 计费暂时不可用。如果已经拿到任务号，请查询任务状态，不要重复提交。", failure.Message)
+}
+
+func TestVideoRelayFailureMessageDownloadStates(t *testing.T) {
+	task := VideoRelayTask{
+		TaskID: "video_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		UserID: 1, APIKeyID: 2, Status: VideoRelayStatusQueued, BillingState: VideoRelayHeld,
+	}
+	store := &videoRelaySubmissionStore{task: task}
+	svc := NewVideoRelayService(store, &OpenAIGatewayService{}, nil)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/videos/"+task.TaskID+"/content", nil)
+	key := &APIKey{UserID: task.UserID, ID: task.APIKeyID}
+	_, failure := svc.Download(c, key, task.TaskID, nil)
+	require.Equal(t, http.StatusConflict, failure.Status)
+	require.Equal(t, "The video is not available for download. Check the task status first. 视频还不能下载，请先查询任务状态。", failure.Message)
+	store.task.Status, store.task.BillingState, store.task.UpstreamTaskID = VideoRelayStatusCompleted, VideoRelayCharged, "fixture-id"
+	_, failure = svc.Download(c, key, task.TaskID, []string{"bytes=0-1", "bytes=2-3"})
+	require.Equal(t, http.StatusRequestedRangeNotSatisfiable, failure.Status)
+	require.Equal(t, "invalid_request_error", failure.Code)
+	require.Equal(t, "Request a single valid byte range for this video. 下载范围无效，请只请求一段有效范围。", failure.Message)
+	require.Equal(t, "Video content is temporarily unavailable. Retry the download later. 视频暂时取不到，请稍后重试下载。", videoRelayDownloadMessage)
 }

@@ -30,6 +30,21 @@
             </label>
             <button class="btn btn-primary" type="submit">{{ t('common.search') }}</button>
             <button class="btn btn-secondary" type="button" @click="loadPage">{{ t('common.refresh') }}</button>
+            <div ref="columnDropdownRef" class="relative">
+              <button type="button" class="btn btn-secondary" :aria-expanded="showColumnDropdown"
+                :title="t('admin.videoTasks.columnSettings')" @click="showColumnDropdown = !showColumnDropdown">
+                <Icon name="grid" size="md" class="mr-2" />
+                {{ t('admin.videoTasks.columnSettings') }}
+              </button>
+              <div v-if="showColumnDropdown" class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800">
+                <button v-for="col in toggleableColumns" :key="col.key" type="button"
+                  :aria-pressed="!hiddenColumns.has(col.key)" @click="toggleColumn(col.key)"
+                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700">
+                  <span>{{ col.label }}</span>
+                  <Icon v-if="!hiddenColumns.has(col.key)" name="check" size="sm" class="text-primary-500" :stroke-width="2" />
+                </button>
+              </div>
+            </div>
           </div>
           <p v-if="filterError" id="video-filter-error" class="text-sm text-red-600 dark:text-red-400" role="alert">
             {{ t(`admin.videoTasks.${filterError}`) }}
@@ -50,11 +65,14 @@
             <span class="font-mono text-xs">{{ value }}</span>
           </template>
           <template #cell-user_id="{ row }">
-            <span>{{ row.user_email || '—' }}</span>
-            <span class="ml-1 text-xs text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
+            <span>{{ row.user_email || (!row.user_name ? '—' : '') }}</span>
+            <span v-if="row.user_name" class="block text-xs text-gray-500 dark:text-gray-400">{{ row.user_name }}</span>
           </template>
-          <template #cell-group_id="{ value }">#{{ value }}</template>
-          <template #cell-account_id="{ value }">#{{ value }}</template>
+          <template #cell-group_id="{ row }">{{ row.group_name || '—' }}</template>
+          <template #cell-account_id="{ row }">
+            <span>{{ row.account_name || t('admin.videoTasks.deletedAccount') }}</span>
+            <span v-if="row.account_name && row.account_deleted" class="ml-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.videoTasks.deleted') }}</span>
+          </template>
           <template #cell-seconds="{ value }">{{ t('admin.videoTasks.duration', { seconds: value }) }}</template>
           <template #cell-hold_amount="{ value }">${{ formatCostFixed(value) }}</template>
           <template #cell-status="{ value }">{{ t(`admin.videoTasks.statuses.${value}`) }}</template>
@@ -91,10 +109,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import type { VideoTask, VideoTasksQuery, VideoTaskStatus } from '@/api/admin/videoTasks'
+import Icon from '@/components/icons/Icon.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
@@ -126,11 +145,60 @@ const statuses = computed(() => [
   }))
 ])
 
-const columns = computed<Column[]>(() => [
+const allColumns = computed<Column[]>(() => [
   'task_id', 'user_id', 'group_id', 'account_id', 'model', 'upstream_model', 'seconds',
   'resolution', 'hold_amount', 'status', 'billing_state', 'failure_reason', 'upstream_task_id',
   'created_at', 'settled_at'
 ].map(key => ({ key, label: t(`admin.videoTasks.columns.${key}`) })))
+
+const HIDDEN_COLUMNS_KEY = 'video-tasks-hidden-columns'
+const COLUMN_SETTINGS_VERSION_KEY = 'video-tasks-column-settings-version'
+const COLUMN_SETTINGS_VERSION = 1
+const hiddenColumns = ref(new Set<string>(['group_id']))
+const showColumnDropdown = ref(false)
+const columnDropdownRef = ref<HTMLElement | null>(null)
+const toggleableColumns = computed(() => allColumns.value.filter(col => col.key !== 'task_id'))
+const columns = computed(() => allColumns.value.filter(col => !hiddenColumns.value.has(col.key)))
+
+function loadSavedColumns() {
+  try {
+    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
+    if (saved === null) {
+      saveColumns()
+      return
+    }
+    const parsed: unknown = JSON.parse(saved)
+    if (Array.isArray(parsed)) {
+      const validKeys = new Set(toggleableColumns.value.map(col => col.key))
+      hiddenColumns.value = new Set(parsed.filter((key): key is string => typeof key === 'string' && validKeys.has(key)))
+      if (localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) === null) saveColumns()
+    }
+  } catch {
+    // Keep the default column visibility when storage is unavailable.
+  }
+}
+
+function saveColumns() {
+  try {
+    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns.value]))
+    localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
+  } catch {
+    // The current page remains usable even when storage is unavailable.
+  }
+}
+
+function toggleColumn(key: string) {
+  if (!toggleableColumns.value.some(col => col.key === key)) return
+  if (hiddenColumns.value.has(key)) hiddenColumns.value.delete(key)
+  else hiddenColumns.value.add(key)
+  saveColumns()
+}
+
+function handleClickOutside(event: MouseEvent) {
+  if (columnDropdownRef.value && !columnDropdownRef.value.contains(event.target as Node)) {
+    showColumnDropdown.value = false
+  }
+}
 
 async function loadPage() {
   const request = ++latestRequest
@@ -191,5 +259,10 @@ function changePageSize(value: number) {
 }
 
 watch([status, riskOnly], search)
-onMounted(loadPage)
+onMounted(() => {
+  loadSavedColumns()
+  document.addEventListener('click', handleClickOutside)
+  void loadPage()
+})
+onUnmounted(() => document.removeEventListener('click', handleClickOutside))
 </script>

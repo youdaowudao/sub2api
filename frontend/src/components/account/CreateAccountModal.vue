@@ -4150,6 +4150,7 @@ import {
   getModelsByPlatform,
   commonErrorCodes,
   buildModelMappingObject,
+  buildModelMappingWithOrder,
   fetchAntigravityDefaultMappings,
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
@@ -4936,7 +4937,7 @@ function buildAntigravityExtra(): Record<string, unknown> | undefined {
 }
 
 const buildOpenAICompactModelMapping = () =>
-  buildModelMappingObject('mapping', [], openAICompactModelMappings.value)
+  buildModelMappingWithOrder('mapping', [], openAICompactModelMappings.value)
 
 const showMixedChannelWarning = ref(false)
 const mixedChannelWarningDetails = ref<{ groupName: string; currentPlatform: string; otherPlatform: string } | null>(
@@ -6083,11 +6084,12 @@ const handleSubmit = async () => {
     }
 
     // Model mapping
-    const modelMapping = buildModelMappingObject(
+    const { mapping: modelMapping, order: modelMappingOrder } = buildModelMappingWithOrder(
       modelRestrictionMode.value, allowedModels.value, modelMappings.value
     )
     if (modelMapping) {
       credentials.model_mapping = modelMapping
+      credentials.model_mapping_order = modelMappingOrder
     }
 
     // Pool mode
@@ -6128,13 +6130,14 @@ const handleSubmit = async () => {
     }
 
     // Antigravity 只使用映射模式
-    const antigravityModelMapping = buildModelMappingObject(
+    const { mapping: antigravityModelMapping, order: antigravityModelMappingOrder } = buildModelMappingWithOrder(
       'mapping',
       [],
       antigravityModelMappings.value
     )
     if (antigravityModelMapping) {
       credentials.model_mapping = antigravityModelMapping
+      credentials.model_mapping_order = antigravityModelMappingOrder
     }
 
     applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
@@ -6252,16 +6255,18 @@ const handleSubmit = async () => {
 
   // Add model mapping if configured（OpenAI 开启自动透传时不应用）
   if (!isOpenAIModelRestrictionDisabled.value) {
-    const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+    const { mapping: modelMapping, order: modelMappingOrder } = buildModelMappingWithOrder(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
     if (modelMapping) {
       credentials.model_mapping = modelMapping
+      credentials.model_mapping_order = modelMappingOrder
     }
   }
   if (form.platform === 'openai') {
     applyOpenAIEndpointCapabilities(credentials)
-    const compactModelMapping = buildOpenAICompactModelMapping()
+    const { mapping: compactModelMapping, order: compactModelMappingOrder } = buildOpenAICompactModelMapping()
     if (compactModelMapping) {
       credentials.compact_model_mapping = compactModelMapping
+      credentials.compact_model_mapping_order = compactModelMappingOrder
     }
   }
 
@@ -6409,22 +6414,26 @@ const createAccountAndFinish = async (
     if (type === 'apikey') {
       applyOpenAIEndpointCapabilities(credentials)
     }
-    const compactModelMapping = buildOpenAICompactModelMapping()
+    const { mapping: compactModelMapping, order: compactModelMappingOrder } = buildOpenAICompactModelMapping()
     if (compactModelMapping) {
       credentials.compact_model_mapping = compactModelMapping
+      credentials.compact_model_mapping_order = compactModelMappingOrder
     } else {
       delete credentials.compact_model_mapping
+      delete credentials.compact_model_mapping_order
     }
   }
   if (platform === 'grok') {
     if (!credentials.base_url) {
       credentials.base_url = apiKeyBaseUrl.value.trim() || 'https://api.x.ai/v1'
     }
-    const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+    const { mapping: modelMapping, order: modelMappingOrder } = buildModelMappingWithOrder(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
     if (modelMapping) {
       credentials.model_mapping = modelMapping
+      credentials.model_mapping_order = modelMappingOrder
     } else {
       delete credentials.model_mapping
+      delete credentials.model_mapping_order
     }
   }
   await doCreateAccount({
@@ -6487,9 +6496,10 @@ const handleGrokValidateRT = async (refreshTokenInput: string) => {
         const extra = grokOAuth.buildExtraInfo(tokenInfo)
         const accountName = refreshTokens.length > 1 ? `${form.name || tokenInfo.email || 'Grok OAuth Account'} #${i + 1}` : (form.name || tokenInfo.email || 'Grok OAuth Account')
 
-        const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+        const { mapping: modelMapping, order: modelMappingOrder } = buildModelMappingWithOrder(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
         if (modelMapping) {
           credentials.model_mapping = modelMapping
+          credentials.model_mapping_order = modelMappingOrder
         }
         if (!applyTempUnschedConfig(credentials)) {
           return
@@ -6554,9 +6564,10 @@ const handleGrokImportSSO = async (ssoInput: string) => {
 
   const credentials: Record<string, unknown> = {}
   applyGrokOAuthUpstreamConfig(credentials)
-  const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+  const { mapping: modelMapping, order: modelMappingOrder } = buildModelMappingWithOrder(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
   if (modelMapping) {
     credentials.model_mapping = modelMapping
+    credentials.model_mapping_order = modelMappingOrder
   }
   if (!applyTempUnschedConfig(credentials)) {
     grokOAuth.loading.value = false
@@ -6660,13 +6671,14 @@ const handleGrokAuthorizePassword = async (emailPasswordInput: string) => {
             ? `${form.name || tokenInfo.email || 'Grok OAuth Account'} #${i + 1}`
             : form.name || tokenInfo.email || 'Grok OAuth Account'
 
-        const modelMapping = buildModelMappingObject(
+        const { mapping: modelMapping, order: modelMappingOrder } = buildModelMappingWithOrder(
           modelRestrictionMode.value,
           allowedModels.value,
           modelMappings.value
         )
         if (modelMapping) {
           credentials.model_mapping = modelMapping
+          credentials.model_mapping_order = modelMappingOrder
         }
         if (!applyTempUnschedConfig(credentials)) {
           return
@@ -6753,15 +6765,17 @@ const handleOpenAIExchange = async (authCode: string) => {
 
     // Add model mapping for OpenAI OAuth accounts（透传模式下不应用）
     if (shouldCreateOpenAI && !isOpenAIModelRestrictionDisabled.value) {
-      const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+      const { mapping: modelMapping, order: modelMappingOrder } = buildModelMappingWithOrder(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
       if (modelMapping) {
         credentials.model_mapping = modelMapping
+        credentials.model_mapping_order = modelMappingOrder
       }
     }
     if (shouldCreateOpenAI) {
-      const compactModelMapping = buildOpenAICompactModelMapping()
+      const { mapping: compactModelMapping, order: compactModelMappingOrder } = buildOpenAICompactModelMapping()
       if (compactModelMapping) {
         credentials.compact_model_mapping = compactModelMapping
+        credentials.compact_model_mapping_order = compactModelMappingOrder
       }
     }
 
@@ -6807,15 +6821,17 @@ const OPENAI_MOBILE_RT_CLIENT_ID = 'app_LlGpXReQgckcGGUo2JrYvtJK'
 const buildOpenAICodexImportCredentialExtras = (): Record<string, unknown> | null => {
   const credentials: Record<string, unknown> = {}
   if (!isOpenAIModelRestrictionDisabled.value) {
-    const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+    const { mapping: modelMapping, order: modelMappingOrder } = buildModelMappingWithOrder(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
     if (modelMapping) {
       credentials.model_mapping = modelMapping
+      credentials.model_mapping_order = modelMappingOrder
     }
   }
 
-  const compactModelMapping = buildOpenAICompactModelMapping()
+  const { mapping: compactModelMapping, order: compactModelMappingOrder } = buildOpenAICompactModelMapping()
   if (compactModelMapping) {
     credentials.compact_model_mapping = compactModelMapping
+    credentials.compact_model_mapping_order = compactModelMappingOrder
   }
 
   if (!applyTempUnschedConfig(credentials)) {
@@ -7035,15 +7051,17 @@ const handleOpenAIBatchRT = async (refreshTokenInput: string, clientId?: string)
 
         // Add model mapping for OpenAI OAuth accounts（透传模式下不应用）
         if (shouldCreateOpenAI && !isOpenAIModelRestrictionDisabled.value) {
-          const modelMapping = buildModelMappingObject(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
+          const { mapping: modelMapping, order: modelMappingOrder } = buildModelMappingWithOrder(modelRestrictionMode.value, allowedModels.value, modelMappings.value)
           if (modelMapping) {
             credentials.model_mapping = modelMapping
+            credentials.model_mapping_order = modelMappingOrder
           }
         }
         if (shouldCreateOpenAI) {
-          const compactModelMapping = buildOpenAICompactModelMapping()
+          const { mapping: compactModelMapping, order: compactModelMappingOrder } = buildOpenAICompactModelMapping()
           if (compactModelMapping) {
             credentials.compact_model_mapping = compactModelMapping
+            credentials.compact_model_mapping_order = compactModelMappingOrder
           }
         }
 
@@ -7265,13 +7283,14 @@ const handleAntigravityExchange = async (authCode: string) => {
 		applyAntigravityProjectID(credentials, antigravityProjectId.value, 'create')
 		applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
 		// Antigravity 只使用映射模式
-		const antigravityModelMapping = buildModelMappingObject(
+		const { mapping: antigravityModelMapping, order: antigravityModelMappingOrder } = buildModelMappingWithOrder(
 			'mapping',
 			[],
 			antigravityModelMappings.value
 		)
 		if (antigravityModelMapping) {
 			credentials.model_mapping = antigravityModelMapping
+			credentials.model_mapping_order = antigravityModelMappingOrder
 		}
 		const extra = buildAntigravityExtra()
 		await createAccountAndFinish('antigravity', 'oauth', credentials, extra)

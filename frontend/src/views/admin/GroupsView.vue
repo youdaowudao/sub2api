@@ -1485,7 +1485,7 @@
             <span><span class="block text-sm text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.longContext") }}</span><span class="block text-xs text-gray-500">{{ t("admin.groups.modelPricing.longContextHint") }}</span></span>
           </label>
           <div class="mt-3 space-y-2">
-            <PricingEntryCard v-for="(entry, index) in createForm.model_pricing" :key="index" :entry="entry" :platform="createForm.platform" hide-token-intervals @update="createForm.model_pricing[index] = $event" @remove="createForm.model_pricing.splice(index, 1)" />
+            <PricingEntryCard v-for="(entry, index) in createForm.model_pricing" :key="index" :entry="entry" :platform="createForm.platform" hide-token-intervals customer-video-pricing @update="createForm.model_pricing[index] = $event" @remove="createForm.model_pricing.splice(index, 1)" />
           </div>
         </div>
 
@@ -3127,7 +3127,7 @@
             <span><span class="block text-sm text-gray-700 dark:text-gray-300">{{ t("admin.groups.modelPricing.longContext") }}</span><span class="block text-xs text-gray-500">{{ t("admin.groups.modelPricing.longContextHint") }}</span></span>
           </label>
           <div class="mt-3 space-y-2">
-            <PricingEntryCard v-for="(entry, index) in editForm.model_pricing" :key="index" :entry="entry" :platform="editForm.platform" hide-token-intervals @update="editForm.model_pricing[index] = $event" @remove="editForm.model_pricing.splice(index, 1)" />
+            <PricingEntryCard v-for="(entry, index) in editForm.model_pricing" :key="index" :entry="entry" :platform="editForm.platform" hide-token-intervals customer-video-pricing @update="editForm.model_pricing[index] = $event" @remove="editForm.model_pricing.splice(index, 1)" />
           </div>
         </div>
 
@@ -4285,6 +4285,7 @@ import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesMo
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
+import { orderedMappingKeys } from "@/composables/useModelWhitelist";
 import PricingEntryCard from "@/components/admin/channel/PricingEntryCard.vue";
 import type { PricingFormEntry } from "@/components/admin/channel/types";
 import {
@@ -5324,9 +5325,9 @@ const moveEditModelAllowlistItem = (fromIndex: number, toIndex: number) => {
 // 将 UI 格式的路由规则转换为 API 格式
 const convertRoutingRulesToApiFormat = (
   rules: ModelRoutingRule[],
-): Record<string, number[]> | null => {
+): { model_routing: Record<string, number[]> | null; model_routing_order: string[] } => {
   const result: Record<string, number[]> = {};
-  let hasValidRules = false;
+  const order: string[] = [];
 
   for (const rule of rules) {
     const pattern = rule.pattern.trim();
@@ -5335,22 +5336,25 @@ const convertRoutingRulesToApiFormat = (
     const accountIds = rule.accounts.map((a) => a.id).filter((id) => id > 0);
 
     if (accountIds.length > 0) {
+      const existed = Object.prototype.hasOwnProperty.call(result, pattern);
       result[pattern] = accountIds;
-      hasValidRules = true;
+      if (!existed && Object.prototype.hasOwnProperty.call(result, pattern)) order.push(pattern);
     }
   }
 
-  return hasValidRules ? result : null;
+  return { model_routing: order.length > 0 ? result : null, model_routing_order: order };
 };
 
 // 将 API 格式的路由规则转换为 UI 格式（需要加载账号名称）
 const convertApiFormatToRoutingRules = async (
   apiFormat: Record<string, number[]> | null,
+  order?: unknown,
 ): Promise<ModelRoutingRule[]> => {
   if (!apiFormat) return [];
 
   const rules: ModelRoutingRule[] = [];
-  for (const [pattern, accountIds] of Object.entries(apiFormat)) {
+  for (const pattern of orderedMappingKeys(apiFormat, order)) {
+    const accountIds = apiFormat[pattern];
     // 加载账号信息
     const accounts: SimpleAccount[] = [];
     for (const id of accountIds) {
@@ -6035,9 +6039,7 @@ const handleCreateGroup = async () => {
       ...(Object.keys(videoModelPrices).length > 0
         ? { video_model_prices: videoModelPrices }
         : {}),
-      model_routing: convertRoutingRulesToApiFormat(
-        createModelRoutingRules.value,
-      ),
+      ...convertRoutingRulesToApiFormat(createModelRoutingRules.value),
       model_allowlist: buildModelAllowlistConfig(createModelAllowlistState),
       // 创建时固定账号 manifest 固定发送关闭状态（后端创建路径禁止开启）
       codex_models_manifest_config: createCodexManifestDefaults(),
@@ -6272,6 +6274,7 @@ const handleEdit = async (group: AdminGroup) => {
   // 加载模型路由规则（异步加载账号名称）
   editModelRoutingRules.value = await convertApiFormatToRoutingRules(
     group.model_routing,
+    group.model_routing_order,
   );
   loadModelAllowlistCandidates("edit", group.id, group.platform);
   showEditModal.value = true;
@@ -6342,6 +6345,7 @@ const handleUpdateGroup = async () => {
     return;
   }
   if (!validateGroupReasoningMultipliers(editForm.model_pricing)) return;
+  const routing = convertRoutingRulesToApiFormat(editModelRoutingRules.value);
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
   if (
     editModelAllowlistState.enabled &&
@@ -6400,9 +6404,8 @@ const handleUpdateGroup = async () => {
         editForm.fallback_group_id_on_invalid_request === null
           ? 0
           : editForm.fallback_group_id_on_invalid_request,
-      model_routing: convertRoutingRulesToApiFormat(
-        editModelRoutingRules.value,
-      ),
+      model_routing: routing.model_routing ?? {},
+      model_routing_order: routing.model_routing_order,
       model_allowlist: buildModelAllowlistConfig(editModelAllowlistState),
       // 非 openai 平台提交关闭状态，与后端归一化一致
       codex_models_manifest_config:

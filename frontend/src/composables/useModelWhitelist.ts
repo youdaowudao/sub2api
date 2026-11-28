@@ -593,8 +593,21 @@ export interface ModelMappingEntry {
   to: string
 }
 
+// 排序数据只用于显示；忽略无效、重复、过期的顺序项。
+export function orderedMappingKeys(mapping: Record<string, unknown>, order?: unknown): string[] {
+  const remaining = new Set(Object.keys(mapping))
+  const keys: string[] = []
+  if (Array.isArray(order)) {
+    for (const key of order) {
+      if (typeof key === 'string' && remaining.delete(key)) keys.push(key)
+    }
+  }
+  return [...keys, ...Array.from(remaining).sort()]
+}
+
 export function splitModelMappingObject(
-  modelMapping?: Record<string, unknown> | null
+  modelMapping?: Record<string, unknown> | null,
+  order?: unknown
 ): { allowedModels: string[]; modelMappings: ModelMappingEntry[] } {
   const allowedModels: string[] = []
   const modelMappings: ModelMappingEntry[] = []
@@ -603,7 +616,8 @@ export function splitModelMappingObject(
     return { allowedModels, modelMappings }
   }
 
-  for (const [rawFrom, rawTo] of Object.entries(modelMapping)) {
+  for (const rawFrom of orderedMappingKeys(modelMapping, order)) {
+    const rawTo = modelMapping[rawFrom]
     if (typeof rawTo !== 'string') continue
     const from = rawFrom.trim()
     const to = rawTo.trim()
@@ -624,7 +638,21 @@ export function buildModelMappingObject(
   allowedModels: string[],
   modelMappings: ModelMappingEntry[]
 ): Record<string, string> | null {
+  return buildModelMappingWithOrder(mode, allowedModels, modelMappings).mapping
+}
+
+export function buildModelMappingWithOrder(
+  mode: ModelRestrictionMode,
+  allowedModels: string[],
+  modelMappings: ModelMappingEntry[]
+): { mapping: Record<string, string> | null; order: string[] } {
   const mapping: Record<string, string> = {}
+  const order: string[] = []
+  const setMapping = (from: string, to: string) => {
+    const existed = Object.prototype.hasOwnProperty.call(mapping, from)
+    mapping[from] = to
+    if (!existed && Object.prototype.hasOwnProperty.call(mapping, from)) order.push(from)
+  }
 
   if (mode === 'whitelist' || mode === 'combined') {
     for (const model of allowedModels) {
@@ -634,7 +662,7 @@ export function buildModelMappingObject(
       // 写入 model_mapping 会导致 GetMappedModel() 把真实模型映射成 "claude-*"，从而转发失败。
       // 因此这里跳过包含通配符的条目。
       if (!normalizedModel.includes('*')) {
-        mapping[normalizedModel] = normalizedModel
+        setMapping(normalizedModel, normalizedModel)
       }
     }
   }
@@ -654,9 +682,9 @@ export function buildModelMappingObject(
         console.warn(`[buildModelMappingObject] Target model cannot contain a wildcard, skipped: ${from} -> ${to}`)
         continue
       }
-      mapping[from] = to
+      setMapping(from, to)
     }
   }
 
-  return Object.keys(mapping).length > 0 ? mapping : null
+  return { mapping: order.length > 0 ? mapping : null, order }
 }

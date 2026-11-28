@@ -44,6 +44,13 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	require.GreaterOrEqual(t, applied, 7, "expected schema_migrations to contain applied migrations")
 
 	// users: columns required by repository queries
+	requireColumn(t, tx, "channels", "model_mapping_order", "jsonb", 0, true)
+	requireColumn(t, tx, "groups", "model_routing_order", "jsonb", 0, true)
+	for _, field := range [][2]string{{"channels", "model_mapping_order"}, {"groups", "model_routing_order"}} {
+		var noDefault bool
+		require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT column_default IS NULL FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 AND column_name=$2", field[0], field[1]).Scan(&noDefault))
+		require.True(t, noDefault)
+	}
 	requireColumn(t, tx, "users", "username", "character varying", 100, false)
 	requireColumn(t, tx, "users", "notes", "text", 0, false)
 

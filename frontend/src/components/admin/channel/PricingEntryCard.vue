@@ -237,10 +237,21 @@
 
         <!-- Image/video mode -->
         <div v-else-if="entry.billing_mode === 'image' || entry.billing_mode === 'video'">
-          <!-- Default image price (per-request, same as per_request mode) -->
+          <div v-if="isCustomerVideoPricing" class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            <p class="font-medium">{{ t('admin.channels.form.videoPricingGuideTitle') }}</p>
+            <ol class="ml-4 mt-1 list-decimal space-y-1">
+              <li>{{ t('admin.channels.form.videoPricingGuideResolution') }}</li>
+              <li>{{ t('admin.channels.form.videoPricingGuideCharge') }}</li>
+              <li>{{ t('admin.channels.form.videoPricingGuideSettings') }}</li>
+              <li>{{ t('admin.channels.form.videoPricingGuideFallback') }} <strong>{{ t('admin.channels.form.videoPricingGuideZero') }}</strong> {{ t('admin.channels.form.videoPricingGuideValidation') }}</li>
+              <li><i18n-t keypath="admin.channels.form.videoPricingGuideGroup" scope="global"><template #group><strong>{{ t('admin.channels.form.videoPricingGuideGroupName') }}</strong></template></i18n-t></li>
+            </ol>
+            <p class="mt-1">{{ t('admin.channels.form.videoPricingGuideExample') }}</p>
+          </div>
+          <!-- Default media price -->
           <label class="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">
-            {{ entry.billing_mode === 'video' ? t('admin.channels.form.defaultVideoPrice') : t('admin.channels.form.defaultImagePrice') }}
-            <span class="ml-1 font-normal text-gray-400">$</span>
+            {{ isCustomerVideoPricing ? t('admin.channels.form.defaultVideoSecondPrice') : entry.billing_mode === 'video' ? t('admin.channels.form.defaultVideoPrice') : t('admin.channels.form.defaultImagePrice') }}
+            <span v-if="!isCustomerVideoPricing" class="ml-1 font-normal text-gray-400">$</span>
           </label>
           <div class="mt-1 w-48">
             <input :value="entry.per_request_price" @input="emitField('per_request_price', ($event.target as HTMLInputElement).value)"
@@ -262,6 +273,7 @@
               :key="idx"
               :interval="iv"
               :mode="entry.billing_mode"
+              :customer-video-pricing="isCustomerVideoPricing"
               @update="updateInterval(idx, $event)"
               @remove="removeInterval(idx)"
             />
@@ -331,10 +343,12 @@ const props = withDefaults(defineProps<{
   hideTokenIntervals?: boolean
   enableTimePricing?: boolean
   enableTierMultipliers?: boolean
+  customerVideoPricing?: boolean
 }>(), {
   hideTokenIntervals: false,
   enableTimePricing: false,
   enableTierMultipliers: false,
+  customerVideoPricing: false,
 })
 
 const emit = defineEmits<{
@@ -344,6 +358,8 @@ const emit = defineEmits<{
 
 // Collapse state: entries with existing models default to collapsed
 const collapsed = ref(props.entry.models.length > 0)
+
+const isCustomerVideoPricing = computed(() => props.customerVideoPricing && props.entry.billing_mode === 'video')
 
 const billingModeOptions = computed(() => [
   { value: 'token', label: t('admin.channels.billingMode.token') },

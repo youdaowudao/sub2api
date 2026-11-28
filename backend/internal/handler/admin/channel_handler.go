@@ -34,6 +34,7 @@ type createChannelRequest struct {
 	GroupIDs                   []int64                          `json:"group_ids"`
 	ModelPricing               []channelModelPricingRequest     `json:"model_pricing"`
 	ModelMapping               map[string]map[string]string     `json:"model_mapping"`
+	ModelMappingOrder          map[string][]string              `json:"model_mapping_order"`
 	BillingModelSource         string                           `json:"billing_model_source" binding:"omitempty,oneof=requested upstream channel_mapped response_model"`
 	RestrictModels             bool                             `json:"restrict_models"`
 	Features                   string                           `json:"features"`
@@ -49,6 +50,7 @@ type updateChannelRequest struct {
 	GroupIDs                   *[]int64                          `json:"group_ids"`
 	ModelPricing               *[]channelModelPricingRequest     `json:"model_pricing"`
 	ModelMapping               map[string]map[string]string      `json:"model_mapping"`
+	ModelMappingOrder          map[string][]string               `json:"model_mapping_order"`
 	BillingModelSource         string                            `json:"billing_model_source" binding:"omitempty,oneof=requested upstream channel_mapped response_model"`
 	RestrictModels             *bool                             `json:"restrict_models"`
 	Features                   *string                           `json:"features"`
@@ -127,6 +129,7 @@ type channelResponse struct {
 	GroupIDs                   []int64                           `json:"group_ids"`
 	ModelPricing               []channelModelPricingResponse     `json:"model_pricing"`
 	ModelMapping               map[string]map[string]string      `json:"model_mapping"`
+	ModelMappingOrder          map[string][]string               `json:"model_mapping_order"`
 	ApplyPricingToAccountStats bool                              `json:"apply_pricing_to_account_stats"`
 	AccountStatsPricingRules   []accountStatsPricingRuleResponse `json:"account_stats_pricing_rules"`
 	CreatedAt                  string                            `json:"created_at"`
@@ -199,17 +202,18 @@ func channelToResponse(ch *service.Channel) *channelResponse {
 		return nil
 	}
 	resp := &channelResponse{
-		ID:             ch.ID,
-		Name:           ch.Name,
-		Description:    ch.Description,
-		Status:         ch.Status,
-		RestrictModels: ch.RestrictModels,
-		Features:       ch.Features,
-		FeaturesConfig: ch.FeaturesConfig,
-		GroupIDs:       ch.GroupIDs,
-		ModelMapping:   ch.ModelMapping,
-		CreatedAt:      ch.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:      ch.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		ID:                ch.ID,
+		Name:              ch.Name,
+		Description:       ch.Description,
+		Status:            ch.Status,
+		RestrictModels:    ch.RestrictModels,
+		Features:          ch.Features,
+		FeaturesConfig:    ch.FeaturesConfig,
+		GroupIDs:          ch.GroupIDs,
+		ModelMapping:      ch.ModelMapping,
+		ModelMappingOrder: ch.ModelMappingOrder,
+		CreatedAt:         ch.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:         ch.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 	resp.BillingModelSource = ch.BillingModelSource
 	if resp.GroupIDs == nil {
@@ -510,6 +514,7 @@ func (h *ChannelHandler) Create(c *gin.Context) {
 		GroupIDs:                   req.GroupIDs,
 		ModelPricing:               pricing,
 		ModelMapping:               req.ModelMapping,
+		ModelMappingOrder:          req.ModelMappingOrder,
 		BillingModelSource:         req.BillingModelSource,
 		RestrictModels:             req.RestrictModels,
 		Features:                   req.Features,
@@ -546,6 +551,7 @@ func (h *ChannelHandler) Update(c *gin.Context) {
 		Status:                     req.Status,
 		GroupIDs:                   req.GroupIDs,
 		ModelMapping:               req.ModelMapping,
+		ModelMappingOrder:          req.ModelMappingOrder,
 		BillingModelSource:         req.BillingModelSource,
 		RestrictModels:             req.RestrictModels,
 		Features:                   req.Features,

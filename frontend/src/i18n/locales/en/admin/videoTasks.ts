@@ -10,6 +10,9 @@ export default {
     loadFailed: 'Video tasks could not be loaded. Please try again.',
     invalidUserId: 'Enter a valid positive user ID.',
     invalidTaskId: 'Enter the full video task ID from this site.',
+    columnSettings: 'Column settings',
+    deleted: '(Deleted)',
+    deletedAccount: 'Deleted account',
     columns: {
       task_id: 'Task ID',
       user_id: 'User',

@@ -1578,7 +1578,7 @@ import GroupSelector from '@/components/common/GroupSelector.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
 import {
-  buildModelMappingObject as buildModelMappingPayload,
+  buildModelMappingWithOrder as buildModelMappingPayload,
   getPresetMappingsByPlatform
 } from '@/composables/useModelWhitelist'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
@@ -2012,7 +2012,7 @@ const removeErrorCode = (code: number) => {
   }
 }
 
-const buildModelMappingObject = (): Record<string, string> | null => {
+const buildModelMappingObject = () => {
   return buildModelMappingPayload(
     modelRestrictionMode.value,
     allowedModels.value,
@@ -2020,7 +2020,7 @@ const buildModelMappingObject = (): Record<string, string> | null => {
   )
 }
 
-const buildOpenAICompactModelMapping = (): Record<string, string> | null => {
+const buildOpenAICompactModelMapping = () => {
   return buildModelMappingPayload('mapping', [], openAICompactModelMappings.value)
 }
 
@@ -2137,11 +2137,13 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
         mapping[m] = m
       }
       credentials.model_mapping = mapping
+      credentials.model_mapping_order = [...new Set(allowedModels.value)].filter(key => Object.prototype.hasOwnProperty.call(mapping, key))
       credentialsChanged = true
     } else {
       // 映射模式下空配置同样表示“支持所有模型”。
-      const modelMapping = buildModelMappingObject()
-      credentials.model_mapping = modelMapping ?? {}
+      const { mapping, order } = buildModelMappingObject()
+      credentials.model_mapping = mapping ?? {}
+      credentials.model_mapping_order = order
       credentialsChanged = true
     }
   }
@@ -2229,7 +2231,9 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
   }
 
   if (enableOpenAICompactModelMapping.value) {
-    credentials.compact_model_mapping = buildOpenAICompactModelMapping() ?? {}
+    const { mapping, order } = buildOpenAICompactModelMapping()
+    credentials.compact_model_mapping = mapping ?? {}
+    credentials.compact_model_mapping_order = order
     credentialsChanged = true
   }
 

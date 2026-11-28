@@ -931,6 +931,63 @@ describe('EditAccountModal', () => {
       'gpt-5.2-2025-12-11': 'gpt-5.2-2025-12-11',
       'gpt-latest': 'gpt-5.2'
     })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.model_mapping_order).toEqual(['gpt-5.2-2025-12-11', 'gpt-latest'])
+  })
+
+  it('reopens and saves both model mapping sections in their own order, retaining compact mappings', async () => {
+    let account = buildAccount()
+    account.credentials = {
+      ...account.credentials,
+      model_mapping: { a: 'a', b: 'target-b', y: 'target-y', z: 'z' },
+      model_mapping_order: ['z', 'a', 'y', 'b'],
+      compact_model_mapping: { a: 'compact-a', z: 'compact-z' },
+      compact_model_mapping_order: ['z', 'a'],
+    }
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+    for (let i = 0; i < 3; i++) {
+      const wrapper = mountModal(account)
+      expect(wrapper.get('[data-testid="model-whitelist-value"]').text()).toBe(i === 0 ? 'z,a' : 'zz,a')
+      expect(wrapper.getComponent(ModelWhitelistSelectorStub).props('modelMappings')).toEqual([
+        { from: 'y', to: 'target-y' }, { from: 'b', to: 'target-b' },
+      ])
+      expect(wrapper.findAll<HTMLInputElement>('input[placeholder="admin.accounts.fromModel"]').map(input => input.element.value)).toEqual(['z', 'a'])
+      if (i === 0) await wrapper.getComponent(ModelWhitelistSelectorStub).vm.$emit('update:modelValue', ['zz', 'a'])
+      if (i < 2) {
+        await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+        await flushPromises()
+        const credentials = updateAccountMock.mock.lastCall![1].credentials
+        expect(credentials.model_mapping_order).toEqual(['zz', 'a', 'y', 'b'])
+        expect(credentials.model_mapping).toEqual({ zz: 'zz', a: 'a', y: 'target-y', b: 'target-b' })
+        expect(credentials.compact_model_mapping_order).toEqual(['z', 'a'])
+        expect(credentials.compact_model_mapping).toEqual({ a: 'compact-a', z: 'compact-z' })
+        account = { ...account, credentials }
+      }
+      wrapper.unmount()
+    }
+  })
+
+  it('clears edited mapping and compact rows with explicit empty maps and orders', async () => {
+    const account = buildAccount()
+    account.credentials = {
+      ...account.credentials,
+      model_mapping: { z: 'z' }, model_mapping_order: ['z'],
+      compact_model_mapping: { a: 'compact-a' }, compact_model_mapping_order: ['a'],
+    }
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    wrapper.getComponent(ModelWhitelistSelectorStub).vm.$emit('update:modelValue', [])
+    const compact = wrapper.get('input[placeholder="admin.accounts.fromModel"]')
+    await compact.element.parentElement!.querySelector('button')!.click()
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    const credentials = updateAccountMock.mock.lastCall![1].credentials
+    expect(credentials).toMatchObject({
+      model_mapping: {}, model_mapping_order: [],
+      compact_model_mapping: {}, compact_model_mapping_order: [],
+    })
+    wrapper.unmount()
   })
 
   it('submits OpenAI compact mode and compact-only model mapping', async () => {
@@ -958,6 +1015,7 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.compact_model_mapping).toEqual({
       'gpt-5.4': 'gpt-5.4-openai-compact'
     })
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.compact_model_mapping_order).toEqual(['gpt-5.4'])
   })
 
   it('loads and submits the per-account OpenAI long-context billing toggle', async () => {
@@ -1291,9 +1349,11 @@ describe('EditAccountModal', () => {
       model_mapping: {
         'gpt-5.3-codex-spark': 'gpt-5.3-codex-spark'
       },
+      model_mapping_order: ['gpt-5.3-codex-spark'],
       compact_model_mapping: {
         'gpt-5.3-codex-spark': 'gpt-5.3-codex-spark-compact'
-      }
+      },
+      compact_model_mapping_order: ['gpt-5.3-codex-spark']
     })
   })
 
@@ -1950,6 +2010,32 @@ describe('EditAccountModal', () => {
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
     expect(updateAccountMock).not.toHaveBeenCalled()
+  })
+
+  it('preserves the single Antigravity section order including self mappings', async () => {
+    let account = buildAntigravityAccount()
+    account.credentials = {
+      ...account.credentials,
+      model_mapping: { a: 'target-a', z: 'z', m: 'target-m' },
+      model_mapping_order: ['z', 'm', 'a'],
+    }
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+    for (let i = 0; i < 3; i++) {
+      const wrapper = mountModal(account)
+      const from = wrapper.findAll<HTMLInputElement>('input[placeholder="admin.accounts.requestModel"]')
+      const to = wrapper.findAll<HTMLInputElement>('input[placeholder="admin.accounts.actualModel"]')
+      expect(from.map(input => input.element.value)).toEqual(['z', 'm', 'a'])
+      expect(to.map(input => input.element.value)).toEqual(['z', 'target-m', 'target-a'])
+      if (i < 2) {
+        await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+        await flushPromises()
+        const credentials = updateAccountMock.mock.lastCall![1].credentials
+        expect(credentials.model_mapping_order).toEqual(['z', 'm', 'a'])
+        account = { ...account, credentials }
+      }
+      wrapper.unmount()
+    }
   })
 
   it('loads and submits Antigravity configured project fallback', async () => {

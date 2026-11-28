@@ -160,6 +160,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 		FallbackGroupID:                 groupDuplicateTestPointer(int64(7)),
 		FallbackGroupIDOnInvalidRequest: groupDuplicateTestPointer(int64(8)),
 		ModelRouting:                    map[string][]int64{"gpt-*": {13, 17}},
+		ModelRoutingOrder:               []string{"gpt-*"},
 		ModelRoutingEnabled:             true,
 		MCPXMLInject:                    true,
 		SupportedModelScopes:            []string{"claude", "gemini_text"},
@@ -214,6 +215,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.Equal(t, source.WebSearchPricePerCall, duplicate.WebSearchPricePerCall)
 	require.Equal(t, source.FallbackGroupID, duplicate.FallbackGroupID)
 	require.Equal(t, source.ModelRouting, duplicate.ModelRouting)
+	require.Equal(t, source.ModelRoutingOrder, duplicate.ModelRoutingOrder)
 	require.Equal(t, source.MessagesDispatchModelConfig, duplicate.MessagesDispatchModelConfig)
 	require.Equal(t, source.ForceOpenAIFast, duplicate.ForceOpenAIFast)
 	require.Equal(t, source.ForceOpenAIUltrafast, duplicate.ForceOpenAIUltrafast)
@@ -233,6 +235,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	}, repo.createdBindings[duplicate.ID])
 
 	duplicate.ModelRouting["gpt-*"][0] = 999
+	duplicate.ModelRoutingOrder[0] = "changed"
 	duplicate.VideoModelPrices[VideoPriceFamilyGrokImagineVideo15][VideoBillingResolution720P] = 999
 	duplicate.SupportedModelScopes[0] = "changed"
 	duplicate.MessagesDispatchModelConfig.ExactModelMappings["claude-special"] = "changed"
@@ -240,6 +243,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	duplicate.ReasoningEffortMappings[0].To = "changed"
 	*duplicate.DailyLimitUSD = 999
 	require.Equal(t, int64(13), source.ModelRouting["gpt-*"][0])
+	require.Equal(t, []string{"gpt-*"}, source.ModelRoutingOrder)
 	require.Equal(t, 0.14, source.VideoModelPrices[VideoPriceFamilyGrokImagineVideo15][VideoBillingResolution720P])
 	require.Equal(t, "claude", source.SupportedModelScopes[0])
 	require.Equal(t, "gpt-special", source.MessagesDispatchModelConfig.ExactModelMappings["claude-special"])

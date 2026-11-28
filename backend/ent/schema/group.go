@@ -222,6 +222,11 @@ func (Group) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
 			Comment("模型路由配置：模型模式 -> 优先账号ID列表"),
 
+		field.JSON("model_routing_order", []string{}).
+			Optional().
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("分组模型路由在管理界面的显示顺序，仅管理员显示用，NULL 表示无顺序"),
+
 		// 模型路由开关 (added by migration 041)
 		field.Bool("model_routing_enabled").
 			Default(false).

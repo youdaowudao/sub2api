@@ -920,6 +920,24 @@ func (_u *GroupUpdate) ClearModelRouting() *GroupUpdate {
 	return _u
 }
 
+// SetModelRoutingOrder sets the "model_routing_order" field.
+func (_u *GroupUpdate) SetModelRoutingOrder(v []string) *GroupUpdate {
+	_u.mutation.SetModelRoutingOrder(v)
+	return _u
+}
+
+// AppendModelRoutingOrder appends value to the "model_routing_order" field.
+func (_u *GroupUpdate) AppendModelRoutingOrder(v []string) *GroupUpdate {
+	_u.mutation.AppendModelRoutingOrder(v)
+	return _u
+}
+
+// ClearModelRoutingOrder clears the value of the "model_routing_order" field.
+func (_u *GroupUpdate) ClearModelRoutingOrder() *GroupUpdate {
+	_u.mutation.ClearModelRoutingOrder()
+	return _u
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_u *GroupUpdate) SetModelRoutingEnabled(v bool) *GroupUpdate {
 	_u.mutation.SetModelRoutingEnabled(v)
@@ -1909,6 +1927,17 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.ModelRoutingCleared() {
 		_spec.ClearField(group.FieldModelRouting, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.ModelRoutingOrder(); ok {
+		_spec.SetField(group.FieldModelRoutingOrder, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedModelRoutingOrder(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldModelRoutingOrder, value)
+		})
+	}
+	if _u.mutation.ModelRoutingOrderCleared() {
+		_spec.ClearField(group.FieldModelRoutingOrder, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)
@@ -3201,6 +3230,24 @@ func (_u *GroupUpdateOne) ClearModelRouting() *GroupUpdateOne {
 	return _u
 }
 
+// SetModelRoutingOrder sets the "model_routing_order" field.
+func (_u *GroupUpdateOne) SetModelRoutingOrder(v []string) *GroupUpdateOne {
+	_u.mutation.SetModelRoutingOrder(v)
+	return _u
+}
+
+// AppendModelRoutingOrder appends value to the "model_routing_order" field.
+func (_u *GroupUpdateOne) AppendModelRoutingOrder(v []string) *GroupUpdateOne {
+	_u.mutation.AppendModelRoutingOrder(v)
+	return _u
+}
+
+// ClearModelRoutingOrder clears the value of the "model_routing_order" field.
+func (_u *GroupUpdateOne) ClearModelRoutingOrder() *GroupUpdateOne {
+	_u.mutation.ClearModelRoutingOrder()
+	return _u
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_u *GroupUpdateOne) SetModelRoutingEnabled(v bool) *GroupUpdateOne {
 	_u.mutation.SetModelRoutingEnabled(v)
@@ -4220,6 +4267,17 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if _u.mutation.ModelRoutingCleared() {
 		_spec.ClearField(group.FieldModelRouting, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.ModelRoutingOrder(); ok {
+		_spec.SetField(group.FieldModelRoutingOrder, field.TypeJSON, value)
+	}
+	if value, ok := _u.mutation.AppendedModelRoutingOrder(); ok {
+		_spec.AddModifier(func(u *sql.UpdateBuilder) {
+			sqljson.Append(u, group.FieldModelRoutingOrder, value)
+		})
+	}
+	if _u.mutation.ModelRoutingOrderCleared() {
+		_spec.ClearField(group.FieldModelRoutingOrder, field.TypeJSON)
 	}
 	if value, ok := _u.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)

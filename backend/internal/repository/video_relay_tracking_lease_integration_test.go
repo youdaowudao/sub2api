@@ -227,7 +227,7 @@ func testVideoRelayRefundBeforeGatewaySend(t *testing.T) {
 	select {
 	case response := <-result:
 		require.Equal(t, http.StatusServiceUnavailable, response.Code, response.Body.String())
-		require.Contains(t, response.Body.String(), "The frozen amount was returned.")
+		require.Contains(t, response.Body.String(), "The video request was not sent. The frozen amount was returned. 本次视频请求未发出，冻结金额已退回。")
 	case <-time.After(5 * time.Second):
 		t.Fatal("the original request did not finish after the restart settled its order")
 	}

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -142,6 +143,7 @@ func cloneGroupForDuplicate(source *Group, operationID string) *Group {
 		FallbackGroupID:                 cloneGroupValuePointer(source.FallbackGroupID),
 		FallbackGroupIDOnInvalidRequest: cloneGroupValuePointer(source.FallbackGroupIDOnInvalidRequest),
 		ModelRouting:                    cloneGroupModelRouting(source.ModelRouting),
+		ModelRoutingOrder:               slices.Clone(source.ModelRoutingOrder),
 		ModelRoutingEnabled:             source.ModelRoutingEnabled,
 		MCPXMLInject:                    source.MCPXMLInject,
 		SupportedModelScopes:            append([]string(nil), source.SupportedModelScopes...),

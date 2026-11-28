@@ -53,15 +53,15 @@ func ParseVideoRelayRequest(contentType string, body []byte) (VideoRelayRequest,
 	var result VideoRelayRequest
 	mediaType, _, err := mime.ParseMediaType(contentType)
 	if err != nil || mediaType != "application/json" {
-		return result, &VideoRelayError{Status: http.StatusUnsupportedMediaType, Code: "invalid_request_error", Message: "Send the video request as application/json."}
+		return result, &VideoRelayError{Status: http.StatusUnsupportedMediaType, Code: "invalid_request_error", Message: "Send the video request as application/json. 请用 JSON 格式提交视频请求。"}
 	}
 	in, err := decodeVideoRelayObject(body)
 	if err != nil {
-		return result, invalidVideoRelayRequest("Send one JSON object containing the video settings.")
+		return result, invalidVideoRelayRequest("Send one JSON object containing the video settings. 请求体必须是一个 JSON 对象。")
 	}
 	result.Model, result.Prompt = videoRelayString(in["model"]), videoRelayString(in["prompt"])
 	if result.Model == "" || utf8.RuneCountInString(result.Model) > 100 || result.Prompt == "" {
-		return result, invalidVideoRelayRequest("Provide a prompt and a model name of at most 100 characters.")
+		return result, invalidVideoRelayRequest("Provide a prompt and a model name of at most 100 characters. 请填写提示词和模型名，模型名最多 100 个字符。")
 	}
 	for field, value := range in {
 		switch field {
@@ -69,37 +69,53 @@ func ParseVideoRelayRequest(contentType string, body []byte) (VideoRelayRequest,
 		case "seconds":
 			result.Seconds = videoRelayPositiveSeconds(value)
 			if result.Seconds == 0 {
-				return result, invalidVideoRelayRequest("Provide seconds as a positive whole number.")
+				return result, invalidVideoRelayRequest("Provide seconds as a positive whole number. 秒数必须是正整数。")
 			}
 		case "resolution":
 			resolution, ok := LookupVideoBillingResolution(videoRelayString(value))
 			if !ok {
-				return result, invalidVideoRelayRequest("Choose 480p, 720p, or 1080p for resolution.")
+				return result, invalidVideoRelayRequest("Choose 480p, 720p, or 1080p for resolution. 分辨率请选择 480p、720p 或 1080p。")
 			}
 			result.Resolution = resolution
 		case "aspect_ratio":
 			ratio := videoRelayString(value)
 			width, height, ok := strings.Cut(ratio, ":")
 			if !ok || !videoRelayPositiveDigits(width) || !videoRelayPositiveDigits(height) {
-				return result, invalidVideoRelayRequest("Provide aspect_ratio as two positive whole numbers separated by a colon.")
+				return result, invalidVideoRelayRequest("Provide aspect_ratio as two positive whole numbers separated by a colon. 画面比例请写成 16:9 这样的格式。")
 			}
 			result.AspectRatio = ratio
 		case "n":
 			if string(bytes.TrimSpace(value)) != "1" {
-				return result, invalidVideoRelayRequest("Only one video can be submitted per request.")
+				return result, invalidVideoRelayRequest("Only one video can be submitted per request. 每次请求只能生成一条视频。")
 			}
 		default:
-			return result, invalidVideoRelayRequest("The request contains a field that the video endpoint does not support.")
+			return result, invalidVideoRelayRequest(unsupportedVideoRelayFieldMessage(field))
 		}
 	}
 	image, ok := videoRelayReference(in)
 	if !ok {
-		return result, invalidVideoRelayRequest("Provide at most one reference image using a valid HTTP or HTTPS URL.")
+		return result, invalidVideoRelayRequest("Provide at most one reference image using a valid HTTP or HTTPS URL. 最多提供一张参考图，必须是有效的 HTTP 或 HTTPS 链接。")
 	}
 	if image != "" {
 		result.Images = []string{image}
 	}
 	return result, nil
+}
+
+func unsupportedVideoRelayFieldMessage(field string) string {
+	if len(field) > 0 && len(field) <= 64 {
+		safe := true
+		for _, c := range field {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.') {
+				safe = false
+				break
+			}
+		}
+		if safe {
+			return fmt.Sprintf("The video endpoint does not support the field %q. 视频接口不支持字段「%s」。", field, field)
+		}
+	}
+	return "The request contains a field that the video endpoint does not support. 请求里有视频接口不支持的字段。"
 }
 
 func videoRelayReference(in map[string]json.RawMessage) (string, bool) {

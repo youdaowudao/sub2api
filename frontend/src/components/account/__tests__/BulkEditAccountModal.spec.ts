@@ -149,6 +149,30 @@ describe('BulkEditAccountModal', () => {
     expect(wrapper.text()).not.toContain('GPT-5.3 Codex Spark')
   })
 
+  it('批量保存普通模型映射时保留填写顺序且不提交压缩映射', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
+    await wrapper.get('#bulk-edit-model-restriction-enabled').setValue(true)
+    const body = wrapper.get('#bulk-edit-model-restriction-body')
+    const mappingTab = body.findAll('button').find(button => button.text() === 'admin.accounts.modelMapping')!
+    await mappingTab.trigger('click')
+    const addMapping = body.findAll('button').find(button => button.text() === 'admin.accounts.addMapping')!
+    for (const [index, from] of ['z-model', 'a-model'].entries()) {
+      await addMapping.trigger('click')
+      await body.findAll('input[placeholder="admin.accounts.requestModel"]')[index].setValue(from)
+      await body.findAll('input[placeholder="admin.accounts.actualModel"]')[index].setValue(from + '-target')
+    }
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
+      credentials: {
+        model_mapping: { 'z-model': 'z-model-target', 'a-model': 'a-model-target' },
+        model_mapping_order: ['z-model', 'a-model']
+      }
+    })
+  })
+
   it('仅勾选模型限制且白名单留空时，应提交空 model_mapping 以支持所有模型', async () => {
     const wrapper = mountModal({
       selectedPlatforms: ['anthropic'],
@@ -162,7 +186,8 @@ describe('BulkEditAccountModal', () => {
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
       credentials: {
-        model_mapping: {}
+        model_mapping: {},
+        model_mapping_order: []
       }
     })
   })
@@ -871,10 +896,14 @@ describe('BulkEditAccountModal', () => {
     await wrapper.get('#bulk-edit-openai-compact-mode-enabled').setValue(true)
     await wrapper.get('[data-testid="bulk-edit-openai-compact-mode-select"]').setValue('force_on')
     await wrapper.get('#bulk-edit-openai-compact-model-mapping-enabled').setValue(true)
-    await wrapper.get('[data-testid="bulk-edit-openai-compact-model-mapping-add"]').trigger('click')
+    const addCompact = wrapper.get('[data-testid="bulk-edit-openai-compact-model-mapping-add"]')
+    await addCompact.trigger('click')
+    await addCompact.trigger('click')
     const inputs = wrapper.findAll('[data-testid="bulk-edit-openai-compact-model-mapping-input"]')
     await inputs[0].setValue('gpt-5.4')
     await inputs[1].setValue('gpt-5.4-openai-compact')
+    await inputs[2].setValue('gpt-5.3')
+    await inputs[3].setValue('gpt-5.3-openai-compact')
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
 
@@ -886,8 +915,10 @@ describe('BulkEditAccountModal', () => {
       },
       credentials: {
         compact_model_mapping: {
-          'gpt-5.4': 'gpt-5.4-openai-compact'
-        }
+          'gpt-5.4': 'gpt-5.4-openai-compact',
+          'gpt-5.3': 'gpt-5.3-openai-compact'
+        },
+        compact_model_mapping_order: ['gpt-5.4', 'gpt-5.3']
       }
     })
   })
@@ -941,13 +972,16 @@ describe('BulkEditAccountModal', () => {
     await wrapper.get('#bulk-edit-openai-passthrough-model-filter-enabled').setValue(true)
     await wrapper.get('[data-testid="bulk-openai-passthrough-model-filter"]').setValue(true)
     await wrapper.get('#bulk-edit-model-restriction-enabled').setValue(true)
-    wrapper.findComponent({ name: 'ModelWhitelistSelector' }).vm.$emit('update:modelValue', ['qwen3.8-max'])
+    wrapper.findComponent({ name: 'ModelWhitelistSelector' }).vm.$emit('update:modelValue', ['qwen3.8-max', 'gpt-5.4'])
     await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
     await flushPromises()
 
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
       extra: { openai_passthrough: true, openai_passthrough_model_filter: true },
-      credentials: { model_mapping: { 'qwen3.8-max': 'qwen3.8-max' } }
+      credentials: {
+        model_mapping: { 'qwen3.8-max': 'qwen3.8-max', 'gpt-5.4': 'gpt-5.4' },
+        model_mapping_order: ['qwen3.8-max', 'gpt-5.4']
+      }
     })
   })
 
@@ -982,7 +1016,7 @@ describe('BulkEditAccountModal', () => {
 
     expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], {
       extra: { openai_passthrough: true },
-      credentials: { model_mapping: { 'qwen3.8-max': 'qwen3.8-max' } }
+      credentials: { model_mapping: { 'qwen3.8-max': 'qwen3.8-max' }, model_mapping_order: ['qwen3.8-max'] }
     })
     expect(wrapper.text()).not.toContain('admin.accounts.openai.modelRestrictionDisabledByPassthrough')
   })

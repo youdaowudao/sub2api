@@ -10,6 +10,10 @@ export interface VideoTask {
   task_id: string
   user_id: number
   user_email: string
+  user_name: string
+  group_name: string
+  account_name: string
+  account_deleted: boolean
   group_id: number
   account_id: number
   model: string

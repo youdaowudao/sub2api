@@ -648,6 +648,12 @@ func (_c *GroupCreate) SetModelRouting(v map[string][]int64) *GroupCreate {
 	return _c
 }
 
+// SetModelRoutingOrder sets the "model_routing_order" field.
+func (_c *GroupCreate) SetModelRoutingOrder(v []string) *GroupCreate {
+	_c.mutation.SetModelRoutingOrder(v)
+	return _c
+}
+
 // SetModelRoutingEnabled sets the "model_routing_enabled" field.
 func (_c *GroupCreate) SetModelRoutingEnabled(v bool) *GroupCreate {
 	_c.mutation.SetModelRoutingEnabled(v)
@@ -1740,6 +1746,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 		_spec.SetField(group.FieldModelRouting, field.TypeJSON, value)
 		_node.ModelRouting = value
 	}
+	if value, ok := _c.mutation.ModelRoutingOrder(); ok {
+		_spec.SetField(group.FieldModelRoutingOrder, field.TypeJSON, value)
+		_node.ModelRoutingOrder = value
+	}
 	if value, ok := _c.mutation.ModelRoutingEnabled(); ok {
 		_spec.SetField(group.FieldModelRoutingEnabled, field.TypeBool, value)
 		_node.ModelRoutingEnabled = value
@@ -2793,6 +2803,24 @@ func (u *GroupUpsert) UpdateModelRouting() *GroupUpsert {
 // ClearModelRouting clears the value of the "model_routing" field.
 func (u *GroupUpsert) ClearModelRouting() *GroupUpsert {
 	u.SetNull(group.FieldModelRouting)
+	return u
+}
+
+// SetModelRoutingOrder sets the "model_routing_order" field.
+func (u *GroupUpsert) SetModelRoutingOrder(v []string) *GroupUpsert {
+	u.Set(group.FieldModelRoutingOrder, v)
+	return u
+}
+
+// UpdateModelRoutingOrder sets the "model_routing_order" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateModelRoutingOrder() *GroupUpsert {
+	u.SetExcluded(group.FieldModelRoutingOrder)
+	return u
+}
+
+// ClearModelRoutingOrder clears the value of the "model_routing_order" field.
+func (u *GroupUpsert) ClearModelRoutingOrder() *GroupUpsert {
+	u.SetNull(group.FieldModelRoutingOrder)
 	return u
 }
 
@@ -4091,6 +4119,27 @@ func (u *GroupUpsertOne) UpdateModelRouting() *GroupUpsertOne {
 func (u *GroupUpsertOne) ClearModelRouting() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearModelRouting()
+	})
+}
+
+// SetModelRoutingOrder sets the "model_routing_order" field.
+func (u *GroupUpsertOne) SetModelRoutingOrder(v []string) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetModelRoutingOrder(v)
+	})
+}
+
+// UpdateModelRoutingOrder sets the "model_routing_order" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateModelRoutingOrder() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateModelRoutingOrder()
+	})
+}
+
+// ClearModelRoutingOrder clears the value of the "model_routing_order" field.
+func (u *GroupUpsertOne) ClearModelRoutingOrder() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearModelRoutingOrder()
 	})
 }
 
@@ -5607,6 +5656,27 @@ func (u *GroupUpsertBulk) UpdateModelRouting() *GroupUpsertBulk {
 func (u *GroupUpsertBulk) ClearModelRouting() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearModelRouting()
+	})
+}
+
+// SetModelRoutingOrder sets the "model_routing_order" field.
+func (u *GroupUpsertBulk) SetModelRoutingOrder(v []string) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetModelRoutingOrder(v)
+	})
+}
+
+// UpdateModelRoutingOrder sets the "model_routing_order" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateModelRoutingOrder() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateModelRoutingOrder()
+	})
+}
+
+// ClearModelRoutingOrder clears the value of the "model_routing_order" field.
+func (u *GroupUpsertBulk) ClearModelRoutingOrder() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearModelRoutingOrder()
 	})
 }
 

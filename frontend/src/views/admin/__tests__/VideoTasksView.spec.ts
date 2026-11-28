@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PaginatedResponse } from '@/types'
 import type { VideoTask } from '@/api/admin/videoTasks'
@@ -11,9 +11,11 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({ t: (key: string) => key })
 }))
 
+enableAutoUnmount(afterEach)
+
 const refund: VideoTask = {
   task_id: 'video_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-  user_id: 12, user_email: '', group_id: 15, account_id: 17,
+  user_id: 12, user_email: '', user_name: '', group_id: 15, group_name: '', account_id: 17, account_name: '', account_deleted: false,
   model: 'site-video', upstream_model: 'provider-video', seconds: 5, resolution: '480p',
   hold_amount: 2.5, status: 'failed', billing_state: 'refunded',
   failure_reason: 'tracking_expired', upstream_task_id: '',
@@ -47,6 +49,7 @@ function render() {
 describe('VideoTasksView', () => {
   beforeEach(() => {
     list.mockReset()
+    localStorage.clear()
     vi.stubGlobal('matchMedia', () => ({
       matches: true,
       addEventListener: vi.fn(),
@@ -71,6 +74,48 @@ describe('VideoTasksView', () => {
     expect(failedRow.text()).not.toContain('safe-provider-id')
     expect(completedRow.text()).toContain('safe-provider-id')
     expect(completedRow.text()).not.toContain('admin.videoTasks.providerCostBadge')
+  })
+
+  it('shows names rather than IDs and preserves column choices across remounts', async () => {
+    const normal = { ...refund, user_email: 'customer@example.com', user_name: 'Customer', group_name: 'Video group', account_name: 'Video account' }
+    const deleted = { ...normal, task_id: 'video_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', account_name: 'Old account', account_deleted: true }
+    list.mockResolvedValue(page([normal, deleted, refund]))
+    let view = render()
+    await flushPromises()
+    const rows = view.findAll('tbody tr')
+    expect(rows[0].text()).toContain('customer@example.com')
+    expect(rows[0].text()).toContain('Customer')
+    expect(rows[0].text()).toContain('Video account')
+    expect(rows[0].text()).not.toContain('Video group')
+    expect(rows[1].text()).toContain('Old account')
+    expect(rows[1].text()).toContain('admin.videoTasks.deleted')
+    expect(rows[2].text()).toContain('admin.videoTasks.deletedAccount')
+    for (const row of rows) for (const id of ['#12', '#15', '#17']) expect(row.text()).not.toContain(id)
+    async function openColumns() {
+      await view.get('button[title="admin.videoTasks.columnSettings"]').trigger('click')
+    }
+    function option(key: string) {
+      return view.findAll('button[aria-pressed]').find(button => button.text() === 'admin.videoTasks.columns.' + key)!
+    }
+    await openColumns()
+    expect(option('task_id')).toBeUndefined()
+    await option('group_id').trigger('click')
+    await option('account_id').trigger('click')
+    expect(view.text()).toContain('Video group')
+    expect(view.text()).not.toContain('Video account')
+    expect(list).toHaveBeenCalledTimes(1)
+    view.unmount()
+    view = render()
+    await flushPromises()
+    expect(view.text()).toContain('Video group')
+    expect(view.text()).not.toContain('Video account')
+    await openColumns()
+    await option('account_id').trigger('click')
+    view.unmount()
+    view = render()
+    await flushPromises()
+    expect(view.text()).toContain('Video account')
+    expect(view.text()).toContain(normal.task_id)
   })
 
   it('returns to the first page for filters and ignores an older failed response', async () => {

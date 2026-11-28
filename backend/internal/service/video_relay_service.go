@@ -20,11 +20,11 @@ import (
 )
 
 const (
-	videoRelayNotSentMessage     = "The video request was not sent. The frozen amount was returned."
-	videoRelayRejectedMessage    = "The video request was rejected. The frozen amount was returned."
-	videoRelayFailedMessage      = "Video generation failed. The frozen amount was returned."
-	videoRelayUnconfirmedMessage = "The video request could not be confirmed. The frozen amount was returned."
-	videoRelayDownloadMessage    = "Video content is temporarily unavailable. Retry the download later."
+	videoRelayNotSentMessage     = "The video request was not sent. The frozen amount was returned. 本次视频请求未发出，冻结金额已退回。"
+	videoRelayRejectedMessage    = "The video request was rejected. The frozen amount was returned. 视频请求被拒绝，冻结金额已退回。"
+	videoRelayFailedMessage      = "Video generation failed. The frozen amount was returned. 视频生成失败，冻结金额已退回。"
+	videoRelayUnconfirmedMessage = "The video request could not be confirmed. The frozen amount was returned. 无法确认本次提交是否成功，冻结金额已退回。"
+	videoRelayDownloadMessage    = "Video content is temporarily unavailable. Retry the download later. 视频暂时取不到，请稍后重试下载。"
 	videoRelayResponseLimit      = 1024 * 1024
 )
 
@@ -43,9 +43,9 @@ func VideoRelayFailureMessage(reason string) string {
 	case VideoRelayUnconfirmed:
 		return videoRelayUnconfirmedMessage
 	case VideoRelayTrackingExpired:
-		return "Video tracking expired. The frozen amount was returned. Submit a new request if you still need the video."
+		return "Video tracking expired. The frozen amount was returned. Submit a new request if you still need the video. 等待超时，冻结金额已退回；如仍需要，请重新提交。"
 	case VideoRelayAccountDeleted:
-		return "The video route was removed. The frozen amount was returned. Submit a new request if you still need the video."
+		return "The video route was removed. The frozen amount was returned. Submit a new request if you still need the video. 视频线路已移除，冻结金额已退回；如仍需要，请重新提交。"
 	default:
 		return videoRelayFailedMessage
 	}
@@ -57,16 +57,16 @@ func NewVideoRelayService(repo VideoRelayRepository, gateway *OpenAIGatewayServi
 
 func (s *VideoRelayService) CheckSubmitMode(key *APIKey) *VideoRelayError {
 	if key == nil || key.Group == nil || key.Group.IsSubscriptionType() {
-		return &VideoRelayError{Status: http.StatusForbidden, Code: "permission_error", Message: "Video generation requires a balance-billed group."}
+		return &VideoRelayError{Status: http.StatusForbidden, Code: "permission_error", Message: "Video generation requires a balance-billed group. 视频生成只支持按余额计费的分组。"}
 	}
 	if s.gateway.cfg != nil && s.gateway.cfg.RunMode == config.RunModeSimple {
-		return &VideoRelayError{Status: http.StatusForbidden, Code: "permission_error", Message: "Video generation requires standard billing mode."}
+		return &VideoRelayError{Status: http.StatusForbidden, Code: "permission_error", Message: "Video generation requires standard billing mode. 视频生成只支持标准计费模式。"}
 	}
 	return nil
 }
 
 func (s *OpenAIGatewayService) videoRelayPrice(ctx context.Context, key *APIKey, model string, seconds int, resolution string) (*CostBreakdown, float64, *VideoRelayError) {
-	missing := invalidVideoRelayRequest("This model has no video price for the requested resolution.")
+	missing := invalidVideoRelayRequest("This model has no video price for the requested resolution. 这个模型还没有配置该分辨率的视频价格，本次未扣费。")
 	resolved := s.resolveOpenAIChannelPricing(ctx, model, key)
 	if resolved == nil || resolved.Source != PricingSourceGroup || resolved.Mode != BillingModeVideo {
 		return nil, 0, missing
@@ -103,9 +103,9 @@ func (s *VideoRelayService) selectRoute(ctx context.Context, key *APIKey, input 
 			excluded, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityVideos, false, false, false)
 		if err != nil || selection == nil || selection.Account == nil {
 			if specs.mismatch.Load() {
-				return nil, nil, nil, invalidVideoRelayRequest("No available video route supports these seconds and resolution.")
+				return nil, nil, nil, invalidVideoRelayRequest("No available video route supports these seconds and resolution. 没有可用的视频线路支持这个秒数和分辨率，本次未扣费。")
 			}
-			return nil, nil, nil, &VideoRelayError{Status: http.StatusServiceUnavailable, Code: "upstream_error", Message: "No video route is available. Try again later."}
+			return nil, nil, nil, &VideoRelayError{Status: http.StatusServiceUnavailable, Code: "upstream_error", Message: "No video route is available. Try again later. 暂时没有可用的视频线路，请稍后重试。本次未扣费。"}
 		}
 		account := selection.Account
 		excluded[account.ID] = struct{}{}
@@ -188,7 +188,7 @@ func releaseVideoRelaySlot(release func()) {
 }
 
 func videoRelayBillingUnavailable() *VideoRelayError {
-	return &VideoRelayError{Status: http.StatusServiceUnavailable, Code: "billing_error", Message: "Video billing is temporarily unavailable. Check the video status if you have a task ID."}
+	return &VideoRelayError{Status: http.StatusServiceUnavailable, Code: "billing_error", Message: "Video billing is temporarily unavailable. Check the video status if you have a task ID. 计费暂时不可用。如果已经拿到任务号，请查询任务状态，不要重复提交。"}
 }
 
 func (s *VideoRelayService) Submit(c *gin.Context, key *APIKey, input VideoRelayRequest) (*VideoRelayTask, *VideoRelayError) {
@@ -210,7 +210,7 @@ func (s *VideoRelayService) submitSelected(c *gin.Context, input VideoRelayReque
 	defer releaseSlot()
 	if err := s.repo.Reserve(ctx, task); err != nil {
 		if errors.Is(err, ErrBatchImageInsufficientBalance) {
-			return nil, &VideoRelayError{Status: http.StatusPaymentRequired, Code: "insufficient_balance", Message: "Your available balance is too low for this video. The request was not sent."}
+			return nil, &VideoRelayError{Status: http.StatusPaymentRequired, Code: "insufficient_balance", Message: "Your available balance is too low for this video. The request was not sent. 余额不足，本次未提交、未扣费。"}
 		}
 		return nil, videoRelayBillingUnavailable()
 	}
@@ -232,7 +232,7 @@ func (s *VideoRelayService) submitSelected(c *gin.Context, input VideoRelayReque
 			return nil, videoRelayBillingUnavailable()
 		}
 		if errors.Is(err, ErrVideoRelaySendBlocked) {
-			return nil, &VideoRelayError{Status: http.StatusTooManyRequests, Code: "rate_limit_error", Message: "This video route is confirming an earlier submission. This request was not sent. Try again shortly."}
+			return nil, &VideoRelayError{Status: http.StatusTooManyRequests, Code: "rate_limit_error", Message: "This video route is confirming an earlier submission. This request was not sent. Try again shortly. 视频线路正在确认上一笔提交，本次未发出，冻结金额已退回，请稍后重试。"}
 		}
 		return nil, &VideoRelayError{Status: http.StatusServiceUnavailable, Code: "upstream_error", Message: videoRelayNotSentMessage}
 	}
@@ -331,7 +331,7 @@ func (s *VideoRelayService) recordSubmission(ctx context.Context, sent *VideoRel
 }
 
 func (s *VideoRelayService) GetOwned(ctx context.Context, key *APIKey, id string) (*VideoRelayTask, *VideoRelayError) {
-	notFound := &VideoRelayError{Status: http.StatusNotFound, Code: "not_found_error", Message: "Video request not found"}
+	notFound := &VideoRelayError{Status: http.StatusNotFound, Code: "not_found_error", Message: "Video request not found 找不到这个视频任务。"}
 	if key == nil || !ValidVideoRelayTaskID(id) {
 		return nil, notFound
 	}
