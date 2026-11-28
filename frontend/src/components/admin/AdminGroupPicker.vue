@@ -7,7 +7,7 @@
       type="button"
       :disabled="disabled"
       :aria-label="ariaLabel"
-      :aria-describedby="$attrs['aria-describedby'] as string | undefined"
+      :aria-describedby="($attrs['aria-describedby'] as string | undefined)"
       :aria-invalid="error || ($attrs['aria-invalid'] as boolean | undefined)"
       :aria-expanded="isOpen"
       @click="openGroupSelector"
