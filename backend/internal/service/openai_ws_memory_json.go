@@ -96,7 +96,9 @@ func wsJSONDecodeScopeMode(ctx context.Context, data []byte, buffered bool) (fun
 				if err != nil {
 					return nil, err
 				}
-				maxUnquote = max(maxUnquote, peak)
+				if peak > maxUnquote {
+					maxUnquote = peak
+				}
 			}
 			i = end
 			continue
@@ -344,13 +346,17 @@ func wsJSONEncodedSize(v any, html bool) (int64, int64, error) {
 			return add(5)
 		case string:
 			n := wsJSONStringSize(x, html)
-			largest = max(largest, n)
+			if n > largest {
+				largest = n
+			}
 			return add(n)
 		case json.Number:
 			return add(int64(max(len(x), 1)))
 		case json.RawMessage:
 			n := wsJSONRawSize(x, html)
-			largest = max(largest, n)
+			if n > largest {
+				largest = n
+			}
 			return add(n)
 		case []json.RawMessage:
 			if x == nil {
@@ -385,7 +391,9 @@ func wsJSONEncodedSize(v any, html bool) (int64, int64, error) {
 			}
 			for key, item := range x {
 				n := wsJSONStringSize(key, html)
-				largest = max(largest, n)
+				if n > largest {
+					largest = n
+				}
 				if err := add(n + 1); err != nil {
 					return err
 				}
@@ -402,7 +410,9 @@ func wsJSONEncodedSize(v any, html bool) (int64, int64, error) {
 			}
 			for key, item := range x {
 				n := wsJSONStringSize(key, html)
-				largest = max(largest, n)
+				if n > largest {
+					largest = n
+				}
 				if err := add(n + 1); err != nil {
 					return err
 				}
@@ -419,7 +429,9 @@ func wsJSONEncodedSize(v any, html bool) (int64, int64, error) {
 			}
 			for key, item := range x {
 				n := wsJSONStringSize(key, html)
-				largest = max(largest, n)
+				if n > largest {
+					largest = n
+				}
 				if err := add(n + 1); err != nil {
 					return err
 				}
@@ -505,7 +517,9 @@ func wsJSONEncodedSize(v any, html bool) (int64, int64, error) {
 					// Including omitted fields is a safe upper bound: no
 					// synthetic body or duplicate serialization is needed.
 					n := wsJSONStringSize(name, html)
-					largest = max(largest, n)
+					if n > largest {
+						largest = n
+					}
 					if fields > 0 {
 						n++
 					}

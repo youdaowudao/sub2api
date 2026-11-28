@@ -57,7 +57,11 @@ func setWSRawBodyField(ctx context.Context, body []byte, path string, raw []byte
 	if err != nil {
 		return nil, nil, err
 	}
-	scratch, err := wsMemoryAdd(int64(len(raw)), max(int64(512), insertion))
+	arenaSize := insertion
+	if arenaSize < 512 {
+		arenaSize = 512
+	}
+	scratch, err := wsMemoryAdd(int64(len(raw)), arenaSize)
 	if err != nil {
 		return nil, nil, err
 	}
