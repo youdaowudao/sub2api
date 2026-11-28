@@ -106,10 +106,11 @@ func unsupportedVideoRelayFieldMessage(field string) string {
 	if len(field) > 0 && len(field) <= 64 {
 		safe := true
 		for _, c := range field {
-			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.') {
-				safe = false
-				break
+			if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-' || c == '.' {
+				continue
 			}
+			safe = false
+			break
 		}
 		if safe {
 			return fmt.Sprintf("The video endpoint does not support the field %q. 视频接口不支持字段「%s」。", field, field)
