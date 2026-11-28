@@ -3235,6 +3235,24 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 	billingCacheSvc := service.NewBillingCacheService(tc.standardBillingCache, nil, nil, keyRepo, tc.standardRPMCache, nil, cfg, tc.standardQuotaRepo)
 	t.Cleanup(billingCacheSvc.Stop)
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+	}
+	if tc.bridgeConcurrency != nil {
+		cache = tc.bridgeConcurrency
+	}
+	concurrencySvc := service.NewConcurrencyService(cache)
+	var schedulerConcurrency *service.ConcurrencyService
+	if tc.bridgeConcurrency != nil {
+		// The first account slot is acquired by the gateway scheduler, and
+		// follow-up slots by the handler. Observe the real shared dependency.
+		schedulerConcurrency = concurrencySvc
+	}
 	gatewaySvc := service.NewOpenAIGatewayService(
 		accountRepo,
 		usageRepo,
@@ -3245,7 +3263,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil,
 		cfg,
 		nil,
-		nil,
+		schedulerConcurrency,
 		service.NewBillingService(cfg, nil),
 		rateLimitSvc,
 		billingCacheSvc,
@@ -3260,17 +3278,6 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		tc.standardQuotaRepo, // userPlatformQuotaRepo
 	)
 
-	cache := &concurrencyCacheMock{
-		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
-			return true, nil
-		},
-		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
-			return true, nil
-		},
-	}
-	if tc.bridgeConcurrency != nil {
-		cache = tc.bridgeConcurrency
-	}
 	h := &OpenAIGatewayHandler{
 		cfg:                   cfg,
 		usageRecordWorkerPool: tc.standardWorker,
@@ -3279,7 +3286,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		gatewayService:        gatewaySvc,
 		billingCacheService:   billingCacheSvc,
 		apiKeyService:         &service.APIKeyService{},
-		concurrencyHelper:     NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatNone, time.Second),
+		concurrencyHelper:     NewConcurrencyHelper(concurrencySvc, SSEPingFormatNone, time.Second),
 	}
 
 	apiKey := &service.APIKey{
