@@ -50,7 +50,7 @@
             class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto"
           >
             <button
-              @click="loadGroups"
+              @click="refreshGroups"
               :disabled="loading"
               class="btn btn-secondary"
               :title="t('common.refresh')"
@@ -490,11 +490,6 @@
         @submit.prevent="handleCreateGroup"
         class="space-y-5"
       >
-        <p v-if="!authStore.isSimpleMode && formCandidatesLoading" class="text-sm text-gray-500" role="status">{{ t('common.loading') }}</p>
-        <div v-if="!authStore.isSimpleMode && formCandidatesError" class="text-sm text-red-600" role="alert">
-          {{ t('admin.groups.formCandidatesFailed') }}
-          <button type="button" class="btn btn-secondary btn-sm" @click="loadFormCandidates">{{ t('common.tryAgain') }}</button>
-        </div>
         <div>
           <GroupI18nField
             v-model="createForm.name"
@@ -560,7 +555,7 @@
           <p class="input-hint">{{ t('admin.groups.form.displayHint') }}</p>
         </div>
         <!-- 从分组复制账号 -->
-        <div v-if="!authStore.isSimpleMode && copyAccountsGroupOptions.length > 0">
+        <div v-if="!authStore.isSimpleMode">
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.copyAccounts.title") }}
@@ -604,37 +599,16 @@
               </button>
             </span>
           </div>
-          <!-- 分组选择下拉 -->
-          <select
-            class="input"
-            @change="
-              (e) => {
-                const val = Number((e.target as HTMLSelectElement).value);
-                if (
-                  val &&
-                  !createForm.copy_accounts_from_group_ids.includes(val)
-                ) {
-                  createForm.copy_accounts_from_group_ids.push(val);
-                }
-                (e.target as HTMLSelectElement).value = '';
-              }
-            "
-          >
-            <option value="">
-              {{ t("admin.groups.copyAccounts.selectPlaceholder") }}
-            </option>
-            <CategorizedGroupList native :groups="copyAccountsGroupOptions" #default="{ group: opt }">
-              <option
-              :key="opt.value"
-              :value="opt.value"
-              :disabled="
-                createForm.copy_accounts_from_group_ids.includes(opt.value)
-              "
-            >
-              {{ opt.label }}
-            </option>
-            </CategorizedGroupList>
-          </select>
+          <!-- 分组选择下拉（实际打开时才读取候选） -->
+          <Select
+            id="create-copy-source"
+            :model-value="null"
+            :options="copySourceSelectOptions('create')"
+            :placeholder="t('admin.groups.copyAccounts.selectPlaceholder')"
+            :aria-label="t('admin.groups.copyAccounts.title')"
+            @open="loadFormCandidates"
+            @change="addCopySource('create', $event)"
+          />
           <p class="input-hint">{{ t("admin.groups.copyAccounts.hint") }}</p>
         </div>
         <template v-if="!authStore.isSimpleMode">
@@ -1424,10 +1398,17 @@
               t("admin.groups.claudeCode.fallbackGroup")
             }}</label>
             <Select
-              v-model="createForm.fallback_group_id"
-              :options="fallbackGroupOptions"
+              id="create-fallback"
+              :model-value="createForm.fallback_group_id"
+              :options="fallbackSelectOptions('create', 'fallback_group_id')"
               :placeholder="t('admin.groups.claudeCode.noFallback')"
-            />
+              @open="loadFormCandidates"
+              @change="changeFallbackCandidate('create', 'fallback_group_id', $event)"
+            >
+              <template #selected>
+                {{ fallbackSelectedLabel(createForm.fallback_group_id, 'admin.groups.claudeCode.noFallback') }}
+              </template>
+            </Select>
             <p class="input-hint">
               {{ t("admin.groups.claudeCode.fallbackHint") }}
             </p>
@@ -1894,10 +1875,17 @@
             t("admin.groups.invalidRequestFallback.title")
           }}</label>
           <Select
-            v-model="createForm.fallback_group_id_on_invalid_request"
-            :options="invalidRequestFallbackOptions"
+            id="create-invalid-fallback"
+            :model-value="createForm.fallback_group_id_on_invalid_request"
+            :options="fallbackSelectOptions('create', 'fallback_group_id_on_invalid_request')"
             :placeholder="t('admin.groups.invalidRequestFallback.noFallback')"
-          />
+            @open="loadFormCandidates"
+            @change="changeFallbackCandidate('create', 'fallback_group_id_on_invalid_request', $event)"
+          >
+            <template #selected>
+              {{ fallbackSelectedLabel(createForm.fallback_group_id_on_invalid_request, 'admin.groups.invalidRequestFallback.noFallback') }}
+            </template>
+          </Select>
           <p class="input-hint">
             {{ t("admin.groups.invalidRequestFallback.hint") }}
           </p>
@@ -2078,7 +2066,7 @@
           <button
             type="submit"
             form="create-group-form"
-            :disabled="submitting || formCandidatesBlocked"
+            :disabled="submitting"
             class="btn btn-primary"
             data-tour="group-form-submit"
           >
@@ -2121,11 +2109,6 @@
         @submit.prevent="handleUpdateGroup"
         class="space-y-5"
       >
-        <p v-if="!authStore.isSimpleMode && formCandidatesLoading" class="text-sm text-gray-500" role="status">{{ t('common.loading') }}</p>
-        <div v-if="!authStore.isSimpleMode && formCandidatesError" class="text-sm text-red-600" role="alert">
-          {{ t('admin.groups.formCandidatesFailed') }}
-          <button type="button" class="btn btn-secondary btn-sm" @click="loadFormCandidates">{{ t('common.tryAgain') }}</button>
-        </div>
         <div>
           <GroupI18nField
             v-model="editForm.name"
@@ -2190,7 +2173,7 @@
         </div>
         <template v-if="!authStore.isSimpleMode">
         <!-- 从分组复制账号（编辑时） -->
-        <div v-if="copyAccountsGroupOptionsForEdit.length > 0">
+        <div>
           <div class="mb-1.5 flex items-center gap-1">
             <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
               {{ t("admin.groups.copyAccounts.title") }}
@@ -2234,37 +2217,16 @@
               </button>
             </span>
           </div>
-          <!-- 分组选择下拉 -->
-          <select
-            class="input"
-            @change="
-              (e) => {
-                const val = Number((e.target as HTMLSelectElement).value);
-                if (
-                  val &&
-                  !editForm.copy_accounts_from_group_ids.includes(val)
-                ) {
-                  editForm.copy_accounts_from_group_ids.push(val);
-                }
-                (e.target as HTMLSelectElement).value = '';
-              }
-            "
-          >
-            <option value="">
-              {{ t("admin.groups.copyAccounts.selectPlaceholder") }}
-            </option>
-            <CategorizedGroupList native :groups="copyAccountsGroupOptionsForEdit" #default="{ group: opt }">
-              <option
-              :key="opt.value"
-              :value="opt.value"
-              :disabled="
-                editForm.copy_accounts_from_group_ids.includes(opt.value)
-              "
-            >
-              {{ opt.label }}
-            </option>
-            </CategorizedGroupList>
-          </select>
+          <!-- 分组选择下拉（实际打开时才读取候选） -->
+          <Select
+            id="edit-copy-source"
+            :model-value="null"
+            :options="copySourceSelectOptions('edit')"
+            :placeholder="t('admin.groups.copyAccounts.selectPlaceholder')"
+            :aria-label="t('admin.groups.copyAccounts.title')"
+            @open="loadFormCandidates"
+            @change="addCopySource('edit', $event)"
+          />
           <p class="input-hint">
             {{ t("admin.groups.copyAccounts.hintEdit") }}
           </p>
@@ -3056,10 +3018,17 @@
               t("admin.groups.claudeCode.fallbackGroup")
             }}</label>
             <Select
-              v-model="editForm.fallback_group_id"
-              :options="fallbackGroupOptionsForEdit"
+              id="edit-fallback"
+              :model-value="editForm.fallback_group_id"
+              :options="fallbackSelectOptions('edit', 'fallback_group_id')"
               :placeholder="t('admin.groups.claudeCode.noFallback')"
-            />
+              @open="loadFormCandidates"
+              @change="changeFallbackCandidate('edit', 'fallback_group_id', $event)"
+            >
+              <template #selected>
+                {{ fallbackSelectedLabel(editForm.fallback_group_id, 'admin.groups.claudeCode.noFallback') }}
+              </template>
+            </Select>
             <p class="input-hint">
               {{ t("admin.groups.claudeCode.fallbackHint") }}
             </p>
@@ -3535,10 +3504,17 @@
             t("admin.groups.invalidRequestFallback.title")
           }}</label>
           <Select
-            v-model="editForm.fallback_group_id_on_invalid_request"
-            :options="invalidRequestFallbackOptionsForEdit"
+            id="edit-invalid-fallback"
+            :model-value="editForm.fallback_group_id_on_invalid_request"
+            :options="fallbackSelectOptions('edit', 'fallback_group_id_on_invalid_request')"
             :placeholder="t('admin.groups.invalidRequestFallback.noFallback')"
-          />
+            @open="loadFormCandidates"
+            @change="changeFallbackCandidate('edit', 'fallback_group_id_on_invalid_request', $event)"
+          >
+            <template #selected>
+              {{ fallbackSelectedLabel(editForm.fallback_group_id_on_invalid_request, 'admin.groups.invalidRequestFallback.noFallback') }}
+            </template>
+          </Select>
           <p class="input-hint">
             {{ t("admin.groups.invalidRequestFallback.hint") }}
           </p>
@@ -3719,7 +3695,7 @@
           <button
             type="submit"
             form="edit-group-form"
-            :disabled="submitting || formCandidatesBlocked"
+            :disabled="submitting"
             class="btn btn-primary"
             data-tour="group-form-submit"
           >
@@ -4235,7 +4211,6 @@
 </template>
 
 <script setup lang="ts">
-import CategorizedGroupList from '@/components/common/CategorizedGroupList.vue'
 import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 import { groupByPlatformForDisplay, sortGroupsForDisplay, sortGroupIdsForDisplay } from '@/utils/groupDisplayOrder';
 import { GROUP_DISPLAY_CATEGORIES, GROUP_DISPLAY_ICON_PLATFORMS } from "@/utils/groupDisplay";
@@ -4875,35 +4850,155 @@ const formCandidateGroups = ref<AdminGroup[]>([]);
 const formCandidatesLoading = ref(false);
 const formCandidatesReady = ref(false);
 const formCandidatesError = ref(false);
-const formCandidatesBlocked = computed(() => !authStore.isSimpleMode && !formCandidatesReady.value);
+const FORM_CANDIDATE_MAX_AGE = 24 * 60 * 60 * 1000;
 let formCandidateSeq = 0;
 let formCandidateController: AbortController | null = null;
+let candidateGeneration = 0;
+let candidateReadOrder = 0;
+let formStartOrder: number | null = null;
+type CandidateRead = { generation: number; order: number };
+let acceptedCandidateRead: (CandidateRead & { loadedAt: number }) | null = null;
 
-const invalidateFormCandidates = () => {
+const beginCandidateRead = (): CandidateRead => ({ generation: candidateGeneration, order: ++candidateReadOrder });
+const hasFreshFormCandidates = () => formCandidatesReady.value && acceptedCandidateRead !== null &&
+  acceptedCandidateRead.generation === candidateGeneration &&
+  Date.now() - acceptedCandidateRead.loadedAt < FORM_CANDIDATE_MAX_AGE;
+
+const cancelFormCandidateLoad = () => {
   formCandidateSeq++;
   formCandidateController?.abort();
+  formCandidateController = null;
   formCandidatesLoading.value = false;
-};
-const loadFormCandidates = async () => {
-  invalidateFormCandidates();
-  formCandidateGroups.value = [];
   formCandidatesReady.value = false;
   formCandidatesError.value = false;
-  if (authStore.isSimpleMode) return;
+};
+const invalidateFormCandidates = () => {
+  cancelFormCandidateLoad();
+  formStartOrder = null;
+};
+const beginFormCandidates = () => {
+  invalidateFormCandidates();
+  formStartOrder = candidateReadOrder + 1;
+};
+const markFormCandidatesStale = () => {
+  candidateGeneration++;
+  cancelFormCandidateLoad();
+};
+
+// Other complete reads may seed the name cache or this form, but cannot replace
+// a ready selection snapshot or race with its dedicated request.
+const acceptCandidateSnapshot = (rows: AdminGroup[], read: CandidateRead, dedicated = false) => {
+  if (authStore.isSimpleMode || read.generation !== candidateGeneration ||
+      (acceptedCandidateRead !== null && read.order < acceptedCandidateRead.order) ||
+      (!dedicated && (formCandidatesLoading.value || hasFreshFormCandidates()))) return;
+  acceptedCandidateRead = { ...read, loadedAt: Date.now() };
+  formCandidateGroups.value = [...rows];
+  formCandidatesReady.value = formStartOrder !== null && read.order >= formStartOrder;
+  formCandidatesError.value = false;
+};
+const loadFormCandidates = async () => {
+  if (authStore.isSimpleMode || formStartOrder === null || formCandidatesLoading.value || hasFreshFormCandidates()) return;
+  cancelFormCandidateLoad();
   const seq = formCandidateSeq;
-  formCandidateController = new AbortController();
+  const read = beginCandidateRead();
+  const controller = new AbortController();
+  formCandidateController = controller;
   formCandidatesLoading.value = true;
   try {
-    const rows = await adminAPI.groups.listAllForDisplay({ signal: formCandidateController.signal });
-    if (seq !== formCandidateSeq) return;
-    formCandidateGroups.value = rows;
-    formCandidatesReady.value = true;
+    const rows = await adminAPI.groups.listAllForDisplay({ signal: controller.signal });
+    if (seq !== formCandidateSeq || controller.signal.aborted) return;
+    acceptCandidateSnapshot(rows, read, true);
   } catch {
     if (seq === formCandidateSeq) formCandidatesError.value = true;
   } finally {
-    if (seq === formCandidateSeq) formCandidatesLoading.value = false;
+    if (seq === formCandidateSeq) {
+      formCandidatesLoading.value = false;
+      formCandidateController = null;
+    }
   }
 };
+
+type CandidateForm = "create" | "edit";
+type FallbackField = "fallback_group_id" | "fallback_group_id_on_invalid_request";
+const formForCandidates = (mode: CandidateForm) => mode === "create" ? createForm : editForm;
+const initialFallback = (mode: CandidateForm, field: FallbackField) =>
+  mode === "edit" ? editingGroup.value?.[field] ?? null : null;
+const fallbackRawOptions = (mode: CandidateForm, field: FallbackField) => field === "fallback_group_id"
+  ? (mode === "create" ? fallbackGroupOptions.value : fallbackGroupOptionsForEdit.value)
+  : (mode === "create" ? invalidRequestFallbackOptions.value : invalidRequestFallbackOptionsForEdit.value);
+const copyRawOptions = (mode: CandidateForm) => mode === "create" ? copyAccountsGroupOptions.value : copyAccountsGroupOptionsForEdit.value;
+const candidateLabel = (id: number) => {
+  const cached = formCandidateGroups.value.find(g => g.id === id);
+  const listed = groups.value.find(g => g.id === id);
+  return (formCandidatesReady.value ? cached?.name || listed?.name : listed?.name || cached?.name) || `#${id}`;
+};
+const fallbackSelectedLabel = (id: number | null | undefined, emptyKey: string) => id ? candidateLabel(id) : t(emptyKey);
+const candidateStatus = () => ({
+  value: "__group_candidate_status", kind: "status", disabled: true,
+  label: t(formCandidatesLoading.value ? "common.loading" : formCandidatesError.value
+    ? "admin.groups.formCandidatesFailed" : "admin.groups.formCandidatesEmpty"),
+});
+const fallbackSelectOptions = (mode: CandidateForm, field: FallbackField) => {
+  const available = hasFreshFormCandidates() ? fallbackRawOptions(mode, field).slice(1) : [];
+  const original = initialFallback(mode, field);
+  const restoring = original !== null && formForCandidates(mode)[field] !== original;
+  const noFallback = t(field === "fallback_group_id" ? "admin.groups.claudeCode.noFallback" : "admin.groups.invalidRequestFallback.noFallback");
+  const options = [{ value: null, label: noFallback }, ...available.map(option => restoring && option.value === original
+    ? { ...option, label: t("admin.groups.formCandidatesRestore", { name: candidateLabel(original) }) } : option)];
+  if (restoring && !available.some(option => option.value === original)) {
+    options.push({ value: original, label: t("admin.groups.formCandidatesRestore", { name: candidateLabel(original) }) });
+  }
+  if (!available.length) options.push(candidateStatus());
+  return options;
+};
+const copySourceSelectOptions = (mode: CandidateForm) => {
+  const raw = hasFreshFormCandidates() ? copyRawOptions(mode) : [];
+  const selected = formForCandidates(mode).copy_accounts_from_group_ids;
+  return raw.length ? buildAdminGroupSelectOptions(raw, option => ({ ...option, disabled: selected.includes(option.value) }), t)
+    : [candidateStatus()];
+};
+const warnCandidateSelection = () => {
+  if (!hasFreshFormCandidates()) formCandidatesReady.value = false;
+  appStore.showError(t("admin.groups.formCandidatesChanged"));
+  return false;
+};
+const changeFallbackCandidate = (mode: CandidateForm, field: FallbackField, value: unknown) => {
+  if (value === null || value === initialFallback(mode, field)) {
+    formForCandidates(mode)[field] = value as number | null;
+    return;
+  }
+  if (typeof value !== "number" || !hasFreshFormCandidates() ||
+      !fallbackRawOptions(mode, field).some(option => option.value === value)) {
+    warnCandidateSelection();
+    return;
+  }
+  formForCandidates(mode)[field] = value;
+};
+const addCopySource = (mode: CandidateForm, value: unknown) => {
+  if (typeof value !== "number" || !hasFreshFormCandidates() || !copyRawOptions(mode).some(option => option.value === value)) {
+    warnCandidateSelection();
+    return;
+  }
+  const ids = formForCandidates(mode).copy_accounts_from_group_ids;
+  if (!ids.includes(value)) ids.push(value);
+};
+const validateCandidateSelections = (mode: CandidateForm) => {
+  if (authStore.isSimpleMode) return true;
+  const form = formForCandidates(mode);
+  for (const field of ["fallback_group_id", "fallback_group_id_on_invalid_request"] as const) {
+    const value = form[field];
+    if (value != null && value !== initialFallback(mode, field) &&
+        (!hasFreshFormCandidates() || !fallbackRawOptions(mode, field).some(option => option.value === value))) {
+      return warnCandidateSelection();
+    }
+  }
+  if (form.copy_accounts_from_group_ids.length && (!hasFreshFormCandidates() ||
+      !form.copy_accounts_from_group_ids.every(id => copyRawOptions(mode).some(option => option.value === id)))) {
+    return warnCandidateSelection();
+  }
+  return true;
+};
+
 type ConcreteGroupPlatform = Exclude<GroupPlatform, "composite">;
 type CompositeRouteFormState = {
   public_model: string;
@@ -5681,6 +5776,8 @@ const loadGroups = async () => {
   const currentController = new AbortController();
   abortController = currentController;
   const { signal } = currentController;
+  const fullRead = !authStore.isSimpleMode && pagination.page === 1 && !filters.platform &&
+    !filters.status && !filters.is_exclusive && !searchQuery.value.trim() ? beginCandidateRead() : null;
   loading.value = true;
   try {
     const response = await adminAPI.groups.list(
@@ -5700,6 +5797,11 @@ const loadGroups = async () => {
     );
     if (signal.aborted) return;
     groups.value = response.items;
+    if (fullRead && response.page === 1 && (response.pages === 1 || (response.pages === 0 && response.total === 0)) && response.total === response.items.length &&
+        response.items.every(group => Number.isSafeInteger(group.id) && group.id > 0) &&
+        new Set(response.items.map(group => group.id)).size === response.total) {
+      acceptCandidateSnapshot(response.items, fullRead);
+    }
     void loadCacheHitRates();
     pagination.total = response.total;
     pagination.pages = response.pages;
@@ -5811,6 +5913,7 @@ const loadCapacitySummary = async () => {
   }
 };
 
+const refreshGroups = () => { markFormCandidatesStale(); void loadGroups(); };
 const handleGroupFilterChange = () => { pagination.page = 1; void loadGroups(); };
 
 let searchTimeout: ReturnType<typeof setTimeout>;
@@ -5841,7 +5944,7 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 };
 
 const openCreateModal = () => {
-  void loadFormCandidates();
+  beginFormCandidates();
   showCreateModal.value = true;
   loadModelAllowlistCandidates("create", 0, createForm.platform);
 };
@@ -5971,7 +6074,7 @@ const validateGroupReasoningMultipliers = (pricing: PricingFormEntry[]): boolean
 };
 
 const handleCreateGroup = async () => {
-  if (formCandidatesBlocked.value) return;
+  if (!validateCandidateSelections("create")) return;
   if (!createForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
     return;
@@ -6127,6 +6230,7 @@ const handleCreateGroup = async () => {
         }
       : requestData;
     await adminAPI.groups.create(payload);
+    markFormCandidatesStale();
     appStore.showSuccess(t("admin.groups.groupCreated"));
     closeCreateModal();
     loadGroups();
@@ -6146,7 +6250,7 @@ const handleCreateGroup = async () => {
 };
 
 const handleEdit = async (group: AdminGroup) => {
-  void loadFormCandidates();
+  beginFormCandidates();
   editingGroup.value = group;
   editForm.name = group.name;
   editForm.description = group.description || "";
@@ -6325,7 +6429,7 @@ const closeEditModal = () => {
 };
 
 const handleUpdateGroup = async () => {
-  if (formCandidatesBlocked.value) return;
+  if (!validateCandidateSelections("edit")) return;
   if (!editingGroup.value) return;
   if (!editForm.name.trim()) {
     appStore.showError(t("admin.groups.nameRequired"));
@@ -6500,6 +6604,7 @@ const handleUpdateGroup = async () => {
         }
       : payload;
     await adminAPI.groups.update(editingGroup.value.id, requestData);
+    markFormCandidatesStale();
     appStore.showSuccess(t("admin.groups.groupUpdated"));
     closeEditModal();
     loadGroups();
@@ -6553,6 +6658,7 @@ const handleDuplicate = async (group: AdminGroup) => {
   duplicatingGroupIds.add(group.id);
   try {
     const duplicate = await adminAPI.groups.duplicate(group.id);
+    markFormCandidatesStale();
     appStore.showSuccess(
       t("admin.groups.duplicateSuccess", { name: duplicate.name }),
     );
@@ -6758,6 +6864,7 @@ const confirmDelete = async () => {
 
   try {
     await adminAPI.groups.delete(deletingGroup.value.id);
+    markFormCandidatesStale();
     appStore.showSuccess(t("admin.groups.groupDeleted"));
     showDeleteDialog.value = false;
     deletingGroup.value = null;
@@ -6950,6 +7057,7 @@ const loadSortableGroups = async () => {
   sortLoadController?.abort();
   const seq = ++sortLoadSeq;
   sortLoadController = new AbortController();
+  const read = beginCandidateRead();
   sortLoading.value = true;
   sortLoadError.value = "";
   sortSaveError.value = false;
@@ -6957,6 +7065,7 @@ const loadSortableGroups = async () => {
   try {
     const rows = await adminAPI.groups.listAllForDisplay({ signal: sortLoadController.signal });
     if (seq !== sortLoadSeq || !showSortModal.value) return;
+    acceptCandidateSnapshot(rows, read);
     sortableGroups.value = groupByPlatformForDisplay(rows, t('common.unknownPlatform'));
   } catch (error) {
     if (seq === sortLoadSeq && showSortModal.value) sortLoadError.value = t(error instanceof GroupListChangedError ? 'admin.groups.sortOrderListChanged' : 'admin.groups.sortOrderLoadFailed');
@@ -6988,6 +7097,7 @@ const saveSortOrder = async () => {
   try {
     const updates = sortableGroups.value.flatMap(section => section.groups).map((g, index) => ({ id: g.id, sort_order: index * 10 }));
     await adminAPI.groups.updateSortOrder(updates);
+    markFormCandidatesStale();
     appStore.showSuccess(t('admin.groups.sortOrderUpdated'));
     sortSubmitting.value = false;
     closeSortModal();

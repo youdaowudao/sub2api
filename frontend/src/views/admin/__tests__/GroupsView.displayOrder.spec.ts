@@ -179,13 +179,15 @@ const DataTableStub = {
 
 const SelectStub = {
   props: ['modelValue', 'options', 'placeholder'],
-  emits: ['update:modelValue', 'change'],
+  emits: ['update:modelValue', 'change', 'open'],
+  methods: { select(event: Event) { const value = (event.target as HTMLSelectElement).value; const option = (this as any).options.find((o: any) => String(o.value ?? '') === value); if (option && !option.disabled) { (this as any).$emit('update:modelValue', option.value); (this as any).$emit('change', option.value, option) } } },
   template: `
     <select
       :value="modelValue"
-      @change="$emit('update:modelValue', $event.target.value); $emit('change')"
+      @click="$emit('open')"
+      @change="select($event)"
     >
-      <option v-for="option in options" :key="String(option.value)" :value="option.value">
+      <option v-for="option in options" :key="String(option.value)" :value="option.value" :disabled="option.disabled">
         {{ option.label }}
       </option>
     </select>
@@ -303,22 +305,73 @@ describe('group order editor and isolated candidates', () => {
     await clickText('common.refresh'); await wrapper.get('[data-confirm-yes]').trigger('click'); await flushPromises()
     expect(listAllForDisplay).toHaveBeenCalledTimes(3)
   })
-  it('retains form values on candidate failure and offers exclusive candidates independently of the public table', async () => {
+  it('loads only on demand, retains values on failure and offers exclusive sources independently of the public table', async () => {
     listAllForDisplay.mockRejectedValueOnce(new Error('offline'))
     wrapper = await mountView()
     await wrapper.get('[data-tour="groups-create-btn"]').trigger('click'); await flushPromises()
     const form = wrapper.get('#create-group-form')
     const name = form.findAll('input').find(n => n.attributes('required') !== undefined)!
     await name.setValue('My group')
-    expect(wrapper.get('button[form="create-group-form"]').attributes('disabled')).toBeDefined()
-    expect(form.text()).toContain('admin.groups.formCandidatesFailed')
+    expect(listAllForDisplay).not.toHaveBeenCalled()
+    expect(wrapper.get('button[form="create-group-form"]').attributes('disabled')).toBeUndefined()
+    const select = form.get('#create-copy-source')
+    await select.trigger('click'); await flushPromises()
+    expect(listAllForDisplay).toHaveBeenCalledTimes(1)
+    expect(select.text()).toContain('admin.groups.formCandidatesFailed')
+    expect(wrapper.get('button[form="create-group-form"]').attributes('disabled')).toBeUndefined()
     const exclusive = createGroup({ id: 99, name: 'Exclusive source', is_exclusive: true })
     listAllForDisplay.mockResolvedValueOnce([exclusive])
-    await form.findAll('button').find(b => b.text() === 'common.tryAgain')!.trigger('click'); await flushPromises()
+    await select.trigger('click'); await flushPromises()
     expect(name.element.value).toBe('My group')
-    expect(form.text()).toContain('Exclusive source')
-    expect(wrapper.get('button[form="create-group-form"]').attributes('disabled')).toBeUndefined()
+    expect(select.text()).toContain('Exclusive source')
+    await form.get('#create-invalid-fallback').trigger('click'); await flushPromises()
+    expect(listAllForDisplay).toHaveBeenCalledTimes(2)
     expect(listGroups.mock.calls[0]![2].is_exclusive).toBe(false)
+  })
+  it('shares a pending candidate request and allows an unrelated create to save after failure', async () => {
+    const pending = deferred<AdminGroup[]>()
+    listAllForDisplay.mockReturnValueOnce(pending.promise)
+    const group = createGroup({ id: 99, name: 'Created' })
+    vi.mocked(adminAPI.groups.create).mockResolvedValueOnce(group)
+    wrapper = await mountView()
+    await wrapper.get('[data-tour="groups-create-btn"]').trigger('click')
+    const form = wrapper.get('#create-group-form')
+    await form.findAll('input').find(n => n.attributes('required') !== undefined)!.setValue('Created')
+    ;(wrapper.vm as any).createForm.claude_code_only = true
+    await flushPromises()
+    await form.get('#create-copy-source').trigger('click')
+    await form.get('#create-fallback').trigger('click')
+    await form.get('#create-invalid-fallback').trigger('click')
+    expect(listAllForDisplay).toHaveBeenCalledTimes(1)
+    expect(form.get('#create-fallback').text()).toContain('common.loading')
+    expect(form.get('#create-invalid-fallback').text()).toContain('common.loading')
+    pending.resolve([]); await flushPromises()
+    expect(form.get('#create-fallback').text()).toContain('admin.groups.formCandidatesEmpty')
+    expect(form.get('#create-invalid-fallback').text()).toContain('admin.groups.formCandidatesEmpty')
+    ;(wrapper.vm as any).refreshGroups(); await flushPromises()
+    expect(listAllForDisplay).toHaveBeenCalledTimes(1)
+    listAllForDisplay.mockRejectedValueOnce(new Error('offline'))
+    await form.get('#create-fallback').trigger('click'); await flushPromises()
+    expect(form.get('#create-fallback').text()).toContain('admin.groups.formCandidatesFailed')
+    expect(form.get('#create-invalid-fallback').text()).toContain('admin.groups.formCandidatesFailed')
+    await form.trigger('submit'); await flushPromises()
+    expect(adminAPI.groups.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Created' }))
+    await (wrapper.vm as any).handleEdit(rows[2]); await flushPromises()
+    expect(listAllForDisplay).toHaveBeenCalledTimes(2)
+    listAllForDisplay.mockResolvedValueOnce([group]); await wrapper.get('#edit-copy-source').trigger('click'); await flushPromises()
+    expect(listAllForDisplay).toHaveBeenCalledTimes(3)
+    expect(wrapper.get('#edit-copy-source').text()).toContain('Created')
+  })
+  it('saves a normal edit without loading candidates and preserves saved fallback IDs', async () => {
+    const original = createGroup({ id: 8, fallback_group_id: 92, fallback_group_id_on_invalid_request: 93, claude_code_only: true })
+    vi.mocked(adminAPI.groups.update).mockResolvedValueOnce(original)
+    wrapper = await mountView()
+    await (wrapper.vm as any).handleEdit(original); await flushPromises()
+    expect(listAllForDisplay).not.toHaveBeenCalled()
+    expect(wrapper.get('button[form="edit-group-form"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('#edit-group-form').trigger('submit'); await flushPromises()
+    expect(adminAPI.groups.update).toHaveBeenCalledWith(8, expect.objectContaining({ fallback_group_id: 92, fallback_group_id_on_invalid_request: 93, copy_accounts_from_group_ids: [] }))
+    expect(listAllForDisplay).not.toHaveBeenCalled()
   })
   it('sorts selected copy-source labels while sending the original click order', async () => {
     const first = createGroup({ id: 1, name: 'First', sort_order: 0 }), later = createGroup({ id: 2, name: 'Later', sort_order: 10 })
@@ -328,7 +381,8 @@ describe('group order editor and isolated candidates', () => {
     await wrapper.get('[data-tour="groups-create-btn"]').trigger('click'); await flushPromises()
     const form = wrapper.get('#create-group-form')
     await form.findAll('input').find(n => n.attributes('required') !== undefined)!.setValue('Copied group')
-    const select = form.findAll('select').find(n => n.text().includes('admin.groups.copyAccounts.selectPlaceholder'))!
+    const select = form.get('#create-copy-source')
+    await select.trigger('click'); await flushPromises()
     await select.setValue('2'); await select.setValue('1')
     const labels = form.findAll('span.bg-primary-100').filter(n => /^(First|Later)/.test(n.text()))
     expect(labels.map(n => n.text().split(' - ')[0])).toEqual(['First', 'Later'])
@@ -342,15 +396,69 @@ describe('group order editor and isolated candidates', () => {
     listAllForDisplay.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
     wrapper = await mountView()
     await wrapper.get('[data-tour="groups-create-btn"]').trigger('click')
+    await wrapper.get('#create-copy-source').trigger('click')
     ;(wrapper.vm as any).closeCreateModal()
-    await (wrapper.vm as any).handleEdit(rows[2])
+    await (wrapper.vm as any).handleEdit(rows[2]); await flushPromises()
+    await wrapper.get('#edit-copy-source').trigger('click')
     old.resolve(rows); await flushPromises()
-    expect(wrapper.get('button[form="edit-group-form"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('button[form="edit-group-form"]').attributes('disabled')).toBeUndefined()
     expect((wrapper.vm as any).formCandidateGroups).toEqual([])
     current.resolve([createGroup({ id: 99, name: 'Current exclusive candidate', is_exclusive: true })]); await flushPromises()
     expect(wrapper.get('#edit-group-form').text()).toContain('Current exclusive candidate')
     expect((wrapper.vm as any).formCandidateGroups.map((g: { id: number }) => g.id)).toEqual([99])
-    expect(wrapper.get('button[form="edit-group-form"]').attributes('disabled')).toBeUndefined()
+    ;(wrapper.vm as any).closeEditModal()
+    await (wrapper.vm as any).handleEdit(rows[2]); await flushPromises()
+    expect((wrapper.vm as any).formCandidateGroups.map((g: { id: number }) => g.id)).toEqual([99])
+    expect(listAllForDisplay).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let a late complete main response overwrite a newer candidate snapshot', async () => {
+    wrapper = await mountView()
+    await (wrapper.vm as any).handleEdit(rows[2]); await flushPromises()
+    const main = deferred<{ items: AdminGroup[]; total: number; pages: number; page: number }>()
+    listGroups.mockReturnValueOnce(main.promise)
+    ;(wrapper.vm as any).filters.is_exclusive = ''
+    void (wrapper.vm as any).loadGroups()
+    const fresh = createGroup({ id: 99, name: 'Fresh source' })
+    listAllForDisplay.mockResolvedValueOnce([fresh])
+    await wrapper.get('#edit-copy-source').trigger('click'); await flushPromises()
+    main.resolve({ items: rows, total: rows.length, pages: 1, page: 1 }); await flushPromises()
+    expect((wrapper.vm as any).formCandidateGroups.map((g: AdminGroup) => g.id)).toEqual([99])
+    expect(wrapper.get('#edit-copy-source').text()).toContain('Fresh source')
+  })
+
+  it('reuses a complete unfiltered result obtained during the form without another request', async () => {
+    wrapper = await mountView(); await (wrapper.vm as any).handleEdit(rows[2]); await flushPromises()
+    ;(wrapper.vm as any).filters.is_exclusive = ''
+    await (wrapper.vm as any).loadGroups(); await flushPromises()
+    await wrapper.get('#edit-copy-source').trigger('click'); await flushPromises()
+    expect(listAllForDisplay).not.toHaveBeenCalled()
+    expect(wrapper.get('#edit-copy-source').text()).toContain('Later')
+  })
+
+  it('requires valid selected sources after expiry and restores the original fallback on re-read failure', async () => {
+    const original = createGroup({ id: 10, claude_code_only: true, fallback_group_id: 1 })
+    const fallback = createGroup({ id: 9, name: 'New fallback' })
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1000)
+    try {
+      wrapper = await mountView(); await (wrapper.vm as any).handleEdit(original); await flushPromises()
+      listAllForDisplay.mockResolvedValueOnce([rows[2]!, fallback])
+      const select = wrapper.get('#edit-fallback')
+      await select.trigger('click'); await flushPromises(); await select.setValue('9')
+      expect((wrapper.vm as any).editForm.fallback_group_id).toBe(9)
+      clock.mockReturnValue(1000 + 24 * 60 * 60 * 1000 + 1)
+      await wrapper.get('#edit-group-form').trigger('submit'); await flushPromises()
+      expect(adminAPI.groups.update).not.toHaveBeenCalled()
+      expect(listAllForDisplay).toHaveBeenCalledTimes(1)
+      listAllForDisplay.mockRejectedValueOnce(new Error('offline'))
+      await select.trigger('click'); await flushPromises()
+      expect(select.text()).toContain('admin.groups.formCandidatesFailed')
+      await select.setValue('1')
+      expect((wrapper.vm as any).editForm.fallback_group_id).toBe(1)
+      vi.mocked(adminAPI.groups.update).mockResolvedValueOnce(original)
+      await wrapper.get('#edit-group-form').trigger('submit'); await flushPromises()
+      expect(adminAPI.groups.update).toHaveBeenCalledWith(10, expect.objectContaining({ fallback_group_id: 1 }))
+    } finally { clock.mockRestore() }
   })
 
   it('keeps all/public/exclusive requests distinct and resets pagination when changing the type filter', async () => {

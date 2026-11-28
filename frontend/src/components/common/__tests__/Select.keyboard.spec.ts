@@ -27,6 +27,17 @@ async function open(searchable: boolean | 'auto' = 'auto') {
 }
 
 describe('Select keyboard focus', () => {
+  it('emits one open event per keyboard or pointer opening, never on close', async () => {
+    await open(false)
+    expect(wrapper.emitted('open')).toEqual([[]])
+    await press('Escape')
+    expect(wrapper.emitted('open')).toHaveLength(1)
+    await wrapper.get('button').trigger('click'); await nextTick()
+    expect(wrapper.emitted('open')).toHaveLength(2)
+    await wrapper.setProps({ disabled: true }); await nextTick()
+    expect(wrapper.emitted('open')).toHaveLength(2)
+  })
+
   it.each([false, 'auto'] as const)('selects an enabled option without a search input (%s)', async (searchable) => {
     await open(searchable)
     expect(document.activeElement).toBe(document.querySelector('[role="listbox"]'))

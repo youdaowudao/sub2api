@@ -100,7 +100,7 @@
                   size="sm"
                   class="flex-shrink-0 text-gray-400"
                 />
-                <span class="select-option-label" :class="option._creatable && 'italic text-gray-500 dark:text-dark-300'">{{ getOptionLabel(option) }}</span>
+                <span :class="[option.kind === 'status' ? 'select-option-status-label' : 'select-option-label', option._creatable && 'italic text-gray-500 dark:text-dark-300']">{{ getOptionLabel(option) }}</span>
                 <Icon
                   v-if="isSelected(option)"
                   name="check"
@@ -166,6 +166,7 @@ interface Emits {
   (e: 'update:modelValue', value: string | number | boolean | null): void
   (e: 'change', value: string | number | boolean | null, option: SelectOption | null): void
   (e: 'search', query: string): void
+  (e: 'open'): void
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -343,8 +344,11 @@ const findPrevEnabledIndex = (startIndex: number): number => {
   return -1
 }
 
-watch(filteredOptions, () => {
+watch(filteredOptions, (options, previous) => {
   if (!isOpen.value) return
+  if (options.some(option => option.kind === 'status') || previous.some(option => option.kind === 'status')) {
+    calculateDropdownPosition()
+  }
   focusedIndex.value = findNextEnabledIndex(0)
   if (focusedIndex.value >= 0) scrollToFocused()
 })
@@ -390,6 +394,7 @@ watch(() => props.disabled, (disabled) => {
 
 watch(isOpen, (open) => {
   if (open) {
+    emit('open')
     calculateDropdownPosition()
     // Reset focused index to current selection or first item
     if (filteredOptions.value.length === 0) {
@@ -629,6 +634,10 @@ onUnmounted(() => {
 
 .select-dropdown-portal .select-option-label {
   @apply flex-1 min-w-0 truncate text-left;
+}
+
+.select-dropdown-portal .select-option-status-label {
+  @apply flex-1 min-w-0 whitespace-normal break-words text-left;
 }
 
 .select-dropdown-portal .select-empty {
