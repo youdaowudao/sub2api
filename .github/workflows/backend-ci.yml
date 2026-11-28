@@ -50,7 +50,9 @@ jobs:
         run: |
           go version | grep -q 'go1.27.4'
       - name: RED check
-        run: python3 tools/red_check.py
+        run: |
+          python3 -B -m unittest discover -s tools -p 'test_red_check.py'
+          python3 tools/red_check.py
 
   frontend:
     runs-on: ubuntu-latest

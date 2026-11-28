@@ -45,7 +45,7 @@ func (s *userCacheRateRepo) GetCacheHitRateStats(ctx context.Context, f usagesta
 func TestUserCacheHitRate(t *testing.T) {
 	settings := &cacheRateSettingRepo{}
 	repo := &userCacheRateRepo{}
-	h := NewUsageHandler(service.NewUsageService(repo, nil, nil, nil), nil, nil, service.NewSettingService(settings, &config.Config{}))
+	h := NewUsageHandler(service.NewUsageService(repo, nil, nil, nil), nil, nil, service.NewSettingService(settings, &config.Config{}), nil)
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) { c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 42}) })

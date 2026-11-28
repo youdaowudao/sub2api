@@ -5,6 +5,7 @@
   RED: <包路径> <测试名> [<测试名> ...]   例：RED: ./internal/handler TestFoo TestBar/case_a
   RED: 无 <理由>                           该修复不适合 RED 时写明理由，由代码 Review 核对
   RED: 撤回 <包路径> <测试名> [...]        撤回之前写错的 RED 目标（不能改写历史，只能追加撤回）
+  RED-TEST-SOURCE: <合并第一父提交>       经授权同步上游时限定旧侧测试集合；内容仍须与 HEAD 一致。
   - 包路径必须是单个包，如 ./internal/handler，不接受 ./... 这类多包写法。
   - 每个改动 backend Go 代码的“修复:”或“fix:”提交，本身或之后的提交里必须有仍然有效的 RED 目标或豁免。
   - 格式写错的 RED 行只警告、不计入，在新提交里写正确的行即可；撤回后可以重新声明。
@@ -88,6 +89,52 @@ def changed_go(sha: str) -> bool:
     return any(f.startswith(f"{MODULE}/") and f.endswith(".go") for f in files)
 
 
+def is_ancestor(ancestor: str, descendant: str) -> bool:
+    proc = subprocess.run(["git", "merge-base", "--is-ancestor", ancestor, descendant], capture_output=True)
+    if proc.returncode not in (0, 1):
+        raise ValueError("无法核对 RED 测试快照的祖先关系")
+    return proc.returncode == 0
+
+
+def resolve_test_source(base: str, head: str, commits: list[str], targets: dict,
+                        declarations: list[tuple[str, str]]) -> str:
+    if not declarations:
+        return head
+    if len(declarations) != 1:
+        raise ValueError("本批只能有一条 RED-TEST-SOURCE 声明")
+    declaring_commit, source = declarations[0]
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", source):
+        raise ValueError("RED-TEST-SOURCE 必须是完整的 40 位提交 ID")
+    source = source.lower()
+    parents = git("rev-list", "--parents", "-n", "1", declaring_commit).split()
+    if len(parents) != 3 or parents[1] != source:
+        raise ValueError("RED-TEST-SOURCE 必须声明在双亲合并提交中，并指向其第一父提交")
+    if not is_ancestor(base, source) or not is_ancestor(source, declaring_commit) or not is_ancestor(source, head):
+        raise ValueError("RED 测试快照必须位于旧基线与当前合并历史之间")
+    for index in set(targets.values()):
+        if not is_ancestor(commits[index], source):
+            raise ValueError("存在测试快照之后声明的 RED 目标，不能使用该快照遗漏新回归测试")
+    return source
+
+
+def test_changes(base: str, head: str, source: str, packages: set[str]) -> tuple[list[str], list[str]]:
+    raw = git_z("diff", "--name-status", "--no-renames", "-z", base, source)
+    changed = [(raw[i], raw[i + 1]) for i in range(0, len(raw) - 1, 2)]
+    removed, restored = [], []
+    for pkg in sorted(packages):
+        pkg_prefix = f"{MODULE}/{pkg[2:].rstrip('/')}/"
+        for status, path in changed:
+            rel = path[len(pkg_prefix):] if path.startswith(pkg_prefix) else None
+            if rel is None or not ((rel.endswith("_test.go") and "/" not in rel) or rel == "testdata" or rel.startswith("testdata/")):
+                continue
+            (removed if status == "D" else restored).append(path)
+    if source != head and (removed or restored):
+        proc = subprocess.run(["git", "--literal-pathspecs", "diff", "--quiet", source, head, "--", *removed, *restored])
+        if proc.returncode != 0:
+            raise ValueError("RED 快照中的选中测试/fixture 已被修改，必须与 HEAD 逐文件一致")
+    return removed, restored
+
+
 def main() -> int:
     base = git("merge-base", "origin/main", "HEAD").strip()
     head = git("rev-parse", "HEAD").strip()
@@ -98,9 +145,13 @@ def main() -> int:
     # 格式错误的行只警告、不计入；最后统一核对每个修复提交是否被有效目标或豁免覆盖。
     targets: dict[tuple[str, str], int] = {}
     waivers: list[int] = []
+    test_sources: list[tuple[str, str]] = []
     for i in reversed(range(len(commits))):
         sha = commits[i]
-        for entry in red_lines(git("log", "-1", "--format=%B", sha)):
+        message = git("log", "-1", "--format=%B", sha)
+        test_sources.extend((sha, line[len("RED-TEST-SOURCE:"):].strip())
+                            for line in message.splitlines() if line.startswith("RED-TEST-SOURCE:"))
+        for entry in red_lines(message):
             parts = entry.split()
             if parts[:1] == ["无"]:
                 if len(parts) < 2:
@@ -125,6 +176,15 @@ def main() -> int:
                 else:
                     targets[key] = i
 
+    try:
+        test_source = resolve_test_source(base, head, commits, targets, test_sources)
+        removed, restored = test_changes(base, head, test_source, {p for p, _ in targets})
+    except (ValueError, subprocess.CalledProcessError) as exc:
+        print(f"::error::{exc}")
+        return 1
+    if test_source != head:
+        print(f"旧侧测试范围快照: {test_source}（选中文件已逐一核对与 HEAD 一致，旧生产基线不变）")
+
     # 每个改动 Go 代码的修复提交，本身或之后（更新）的提交里必须有仍然有效的 RED 目标或豁免。
     for i, sha in enumerate(commits):
         subject = git("log", "-1", "--format=%s", sha).strip()
@@ -139,23 +199,11 @@ def main() -> int:
         print("不适用：本批没有需要核对的 RED 测试。")
         return 0
 
-    raw = git_z("diff", "--name-status", "--no-renames", "-z", base, head)
-    changed = [(raw[i], raw[i + 1]) for i in range(0, len(raw) - 1, 2)]  # (状态, 路径)，改名按删除+新增
-    changed.sort(key=lambda c: c[0] != "D")  # 先处理删除，再写入新增和修改
     root = pathlib.Path(git("rev-parse", "--show-toplevel").strip())
     old_dir = pathlib.Path(tempfile.mkdtemp(prefix="red-old-"))
     failures = []
     try:
         git("worktree", "add", "--detach", str(old_dir), base)
-        removed, restored = [], []
-        for pkg in sorted({p for p, _ in targets}):
-            pkg_prefix = f"{MODULE}/{pkg[2:].rstrip('/')}/"
-            for status, path in changed:
-                rel = path[len(pkg_prefix):] if path.startswith(pkg_prefix) else None
-                # 只换目标包自己的测试文件（不含子包）和该包 testdata/
-                if rel is None or not ((rel.endswith("_test.go") and "/" not in rel) or rel == "testdata" or rel.startswith("testdata/")):
-                    continue
-                (removed if status == "D" else restored).append(path)
         # 用 git 自己删除和恢复，文件类型、权限、符号链接、目录与文件互换都与新版本一致
         # --literal-pathspecs：路径按字面处理，避免 [ ] * 之类字符被当成通配符
         if removed:
