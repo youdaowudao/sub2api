@@ -9,6 +9,8 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import { adminAPI } from '@/api'
+import type { AdminGroup } from '@/types'
+import AdminGroupPicker from '@/components/admin/AdminGroupPicker.vue'
 import { opsAPI } from '@/api/admin/ops'
 import type { AlertRule, MetricType, Operator } from '../types'
 import type { OpsSeverity } from '@/api/admin/ops'
@@ -76,13 +78,16 @@ function parsePositiveInt(value: unknown): number | null {
 }
 
 const groupOptionsBase = ref<SelectOption[]>([])
+const groups = ref<AdminGroup[]>([])
 
 async function loadGroups() {
   try {
     const list = await adminAPI.groups.getAll()
+    groups.value = list
     groupOptionsBase.value = buildAdminGroupSelectOptions(list, (g) => ({ value: g.id, label: g.name }), t)
   } catch (err) {
     console.error('[OpsAlertRulesCard] Failed to load groups', err)
+    groups.value = []
     groupOptionsBase.value = []
   }
 }
@@ -561,12 +566,13 @@ function cancelDelete() {
               {{ t('admin.ops.alertRules.form.groupId') }}
               <span v-if="isGroupMetricSelected" class="ml-1 text-red-500">*</span>
             </label>
-            <Select
-              v-model="draftGroupId"
+            <AdminGroupPicker
+              :model-value="draftGroupId"
+              :groups="groups"
               :options="groupOptions"
-              searchable
-              :placeholder="t('admin.ops.alertRules.form.groupPlaceholder')"
-              :error="isGroupMetricSelected && !draftGroupId"
+              :special-options="isGroupMetricSelected ? [] : [{ value: null, label: t('admin.ops.alertRules.form.allGroups') }]"
+              :aria-invalid="isGroupMetricSelected && !draftGroupId"
+              @update:model-value="draftGroupId = $event as number | null"
             />
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ isGroupMetricSelected ? t('admin.ops.alertRules.hints.groupRequired') : t('admin.ops.alertRules.hints.groupOptional') }}

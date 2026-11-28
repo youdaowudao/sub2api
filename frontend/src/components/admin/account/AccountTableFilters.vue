@@ -11,7 +11,7 @@
     <Select :disabled="disabled" :model-value="filters.type" class="min-w-0 sm:w-40" :options="tOpts" @update:model-value="updateType" @change="$emit('change')" />
     <Select :disabled="disabled" :model-value="filters.status" class="min-w-0 sm:w-40" :options="sOpts" @update:model-value="updateStatus" @change="$emit('change')" />
     <Select :disabled="disabled" :model-value="filters.privacy_mode" class="min-w-0 sm:w-48" :options="privacyOpts" @update:model-value="updatePrivacyMode" @change="$emit('change')" />
-    <Select :disabled="disabled" :model-value="filters.group" class="col-span-2 min-w-0 sm:w-40" searchable :options="gOpts" @update:model-value="updateGroup" @change="$emit('change')" />
+    <AdminGroupPicker :disabled="disabled" :model-value="filters.group" class="col-span-2 min-w-0 sm:w-40" :groups="groups ?? []" :special-options="specialGroupOptions" :options="gOpts" @update:model-value="updateGroup" @change="$emit('change')" />
     <button v-if="!located" type="button" class="btn btn-secondary text-xs" data-testid="account-default-group" :disabled="disabled" @click="$emit('set-default-group', filters.group)">
       {{ filters.group === defaultGroup && defaultGroup !== '' ? t('admin.accounts.cancelDefaultGroup') : t('admin.accounts.setDefaultGroup') }}
     </button>
@@ -24,6 +24,7 @@ import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 
 import { computed } from 'vue'; import { useI18n } from 'vue-i18n'; import Select from '@/components/common/Select.vue'; import SearchInput from '@/components/common/SearchInput.vue'
 import type { AdminGroup } from '@/types'
+import AdminGroupPicker from '@/components/admin/AdminGroupPicker.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 const props = defineProps<{ searchQuery: string; filters: Record<string, any>; groups?: AdminGroup[]; defaultGroup?: string; located?: boolean; disabled?: boolean }>()
 const emit = defineEmits(['update:searchQuery', 'update:filters', 'change', 'set-default-group']); const { t } = useI18n()
@@ -42,9 +43,12 @@ const privacyOpts = computed(() => [
   { value: 'training_set_cf_blocked', label: 'CF' },
   { value: 'training_set_failed', label: 'Fail' }
 ])
-const gOpts = computed(() => [
+const specialGroupOptions = computed(() => [
   { value: '', label: t('admin.accounts.allGroups') },
   { value: 'ungrouped', label: t('admin.accounts.ungroupedGroup') },
+])
+const gOpts = computed(() => [
+  ...specialGroupOptions.value,
   ...buildAdminGroupSelectOptions(props.groups || [], g => ({ value: String(g.id), label: g.name }), t)
 ])
 const defaultGroupLabel = computed(() => props.defaultGroup === 'ungrouped' ? t('admin.accounts.ungroupedGroup') : props.groups?.find(g => String(g.id) === props.defaultGroup)?.name || '#' + props.defaultGroup)

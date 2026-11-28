@@ -43,7 +43,7 @@
         </div>
 
         <!-- API Key Search -->
-        <div v-show="advancedVisible" ref="apiKeySearchRef" @focusout="onChoiceFocusOut($event, apiKeySearchRef, closeKeyChoices)" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
+        <div ref="apiKeySearchRef" @focusout="onChoiceFocusOut($event, apiKeySearchRef, closeKeyChoices)" class="usage-filter-dropdown relative w-full sm:w-auto sm:min-w-[240px]">
           <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
           <input
             v-model="apiKeyKeyword"
@@ -80,10 +80,10 @@
         </div>
 
         <!-- Model Filter -->
-        <div class="w-full sm:w-auto sm:min-w-[220px]">
+        <div class="relative w-full sm:w-auto sm:min-w-[220px]">
           <label class="input-label">{{ t('usage.model') }}</label>
           <Select v-model="filters.model" :options="modelOptions" searchable :creatable="showActions" @change="emitChange" />
-          <p v-if="showActions && modelRankingAvailable !== undefined" class="text-xs text-gray-500">{{ t(modelRankingAvailable ? 'admin.usage.modelRankingBasis' : 'admin.usage.noModelRanking') }}</p>
+          <p v-if="showActions && modelRankingAvailable !== undefined" class="absolute left-0 top-full mt-1 whitespace-nowrap text-xs text-gray-500">{{ t(modelRankingAvailable ? 'admin.usage.modelRankingBasis' : 'admin.usage.noModelRanking') }}</p>
         </div>
 
         <!-- Account Filter -->
@@ -127,48 +127,48 @@
         </div>
 
         <!-- Request Type Filter (usage only) -->
-        <div v-if="mode !== 'errors'" v-show="advancedVisible" class="w-full sm:w-auto sm:min-w-[180px]">
+        <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label">{{ t('usage.type') }}</label>
           <Select v-model="filters.request_type" :options="requestTypeOptions" @change="emitChange" />
         </div>
 
         <!-- Native compaction is independent of the transport request type. -->
-        <div v-if="mode !== 'errors'" v-show="advancedVisible" class="w-full sm:w-auto sm:min-w-[180px]">
+        <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label">{{ t('usage.compactionFilter') }}</label>
           <Select v-model="filters.native_compaction_v2" :options="compactionOptions" @change="emitChange" />
         </div>
 
         <!-- Billing Type Filter (usage only) -->
-        <div v-if="mode !== 'errors'" v-show="advancedVisible" class="w-full sm:w-auto sm:min-w-[200px]">
+        <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[200px]">
           <label class="input-label">{{ t('admin.usage.billingType') }}</label>
           <Select v-model="filters.billing_type" :options="billingTypeOptions" @change="emitChange" />
         </div>
 
         <!-- Billing Mode Filter (usage only；用户排行的 user-breakdown 接口不支持该维度) -->
-        <div v-if="mode === 'usage'" v-show="advancedVisible" class="w-full sm:w-auto sm:min-w-[200px]">
+        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[200px]">
           <label class="input-label">{{ t('admin.usage.billingMode') }}</label>
           <Select v-model="filters.billing_mode" :options="billingModeOptions" @change="emitChange" />
         </div>
 
-        <div v-if="mode === 'usage'" v-show="advancedVisible" class="w-full sm:w-auto sm:min-w-[220px]">
+        <div v-if="mode === 'usage'" class="w-full sm:w-auto sm:min-w-[220px]">
           <label class="input-label">{{ t('admin.usage.upstreamModelAudit') }}</label>
           <Select v-model="filters.upstream_model_mismatch" :options="upstreamModelMismatchOptions" @change="emitChange" />
         </div>
 
         <!-- Error Phase Filter (errors only) -->
-        <div v-if="mode === 'errors'" v-show="advancedVisible" class="w-full sm:w-auto sm:min-w-[180px]">
+        <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label">{{ t('admin.ops.errorLog.type') }}</label>
           <Select v-model="filters.error_phase" :options="errorPhaseOptions" @change="emitChange" />
         </div>
 
         <!-- Error Category Filter (errors only) -->
-        <div v-if="mode === 'errors'" v-show="advancedVisible" class="w-full sm:w-auto sm:min-w-[180px]">
+        <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label">{{ t('usage.errors.category') }}</label>
           <Select v-model="filters.error_category" :options="errorCategoryOptions" @change="emitChange" />
         </div>
 
         <!-- Status Code Filter (errors only) -->
-        <div v-if="mode === 'errors'" v-show="advancedVisible" class="w-full sm:w-auto sm:min-w-[180px]">
+        <div v-if="mode === 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label">{{ t('admin.ops.errorLog.status') }}</label>
           <Select v-model="filters.status_code" :options="statusCodeOptions" @change="emitChange" />
         </div>
@@ -176,14 +176,13 @@
         <!-- Group Filter -->
         <div class="w-full sm:w-auto sm:min-w-[200px]">
           <label class="input-label">{{ t('admin.usage.group') }}</label>
-          <Select v-model="filters.group_id" :options="groupOptions" searchable @change="emitChange" />
+          <AdminGroupPicker :model-value="filters.group_id ?? null" :groups="fetchedGroups" :special-options="[{ value: null, label: t('admin.usage.allGroups') }]" :options="groupOptions" @update:model-value="filters.group_id = $event" @change="emitChange" />
         </div>
 
       </div>
 
       <!-- Right: actions -->
       <div v-if="showActions" class="flex w-full flex-wrap items-center justify-end gap-3 sm:w-auto">
-        <button v-if="flat" type="button" class="btn btn-secondary" :aria-expanded="showMore" @click="showMore = !showMore">{{ t('admin.ops.records.more') }}</button>
         <button v-if="flat" type="button" class="btn btn-secondary" @click="$emit('clear-preserve-time')">{{ t('admin.usage.clearKeepTime') }}</button>
         <button type="button" @click="$emit('refresh')" class="btn btn-secondary">
           {{ t('common.refresh') }}
@@ -219,6 +218,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI } from '@/api/admin'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import AdminUserHistoryList from './AdminUserHistoryList.vue'
+import AdminGroupPicker from '@/components/admin/AdminGroupPicker.vue'
 import { useAdminUserHistory } from '@/composables/useAdminUserHistory'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 import type { SimpleApiKey, SimpleUser } from '@/api/admin/usage'
@@ -302,8 +302,6 @@ let accountSearchTimeout: ReturnType<typeof setTimeout> | null = null
 let accountSearchSequence = 0
 const accountSearching = ref(false)
 const visibleAccountChoices = computed(() => accountSearching.value ? accountResults.value : (props.accountCandidates ?? []))
-const showMore = ref(false)
-const advancedVisible = computed(() => !props.flat || !props.showActions || showMore.value)
 const userNavigation = useFilterChoiceNavigation(userSearchRef, showUserDropdown, () => closeUserChoices())
 const keyNavigation = useFilterChoiceNavigation(apiKeySearchRef, showApiKeyDropdown, () => closeKeyChoices())
 const accountNavigation = useFilterChoiceNavigation(accountSearchRef, showAccountDropdown, () => closeAccountChoices())
@@ -645,15 +643,23 @@ watch(
   }
 )
 
-onMounted(async () => {
-  document.addEventListener('click', onDocumentClick)
+let groupsLoading: Promise<void> | undefined
+const loadGroups = async () => {
   try {
     const gs = await adminAPI.groups.list(1, 1000)
     fetchedGroups.value = gs.items
   } catch {
     // Ignore filter option loading errors (page still usable)
   }
+}
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+  groupsLoading = loadGroups()
 })
+const waitForGroups = async () => {
+  await groupsLoading
+  return fetchedGroups.value
+}
 
 onUnmounted(() => {
   clearPendingUserSearch()
@@ -706,7 +712,7 @@ const clearChip = (key: string) => {
 }
 const setGroupLabel = (name: string) => { selectedGroupLabel.value = name }
 watch(() => filters.value.group_id, id => { if (!id) setGroupLabel('') })
-defineExpose({ getUserSearchRevision, setUserKeyword, setAccountKeyword, setApiKeyKeyword, setGroupLabel })
+defineExpose({ getUserSearchRevision, setUserKeyword, setAccountKeyword, setApiKeyKeyword, setGroupLabel, waitForGroups })
 </script>
 
 <style scoped>

@@ -36,13 +36,14 @@
         <OpsErrorIdentityFilter kind="account" v-model:id="filters.account_id" :label="t('admin.ops.errorLog.account')" @update:id="changeFilters" />
         <div>
           <label class="input-label" for="ops-error-group">{{ t('admin.usage.group') }}</label>
-          <Select
+          <AdminGroupPicker
             id="ops-error-group"
             :model-value="groupId"
+            :groups="groups ?? []"
+            :special-options="specialGroupOptions"
             :options="groupOptions ?? []"
             :aria-label="t('admin.usage.group')"
             aria-describedby="ops-error-group-sync"
-            searchable
             @update:model-value="emit('update:group', $event)"
           />
           <p id="ops-error-group-sync" class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.records.groupSync') }}</p>
@@ -85,6 +86,7 @@ import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import type { AdminUser } from '@/types'
 import Select from '@/components/common/Select.vue'
+import AdminGroupPicker from '@/components/admin/AdminGroupPicker.vue'
 import OpsErrorRecordMembersDialog from './OpsErrorRecordMembersDialog.vue'
 import { errorRecordColumnOrder, errorRecordDefaultVisible, errorRecordAlwaysVisible } from '../errorRecordPresentation'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
@@ -101,6 +103,7 @@ const props = withDefaults(defineProps<{
   platform?: string
   groupId?: number | null
   groupOptions?: Array<{ value: number | string | null; label: string; kind?: string; disabled?: boolean }>
+  groups?: Array<{ id: number; name: string; platform: string; display_category?: string; sort_order?: number }>
   groupOptionsFailed?: boolean
   refreshToken?: number
 }>(), { platform: '', groupId: null, refreshToken: 0 })
@@ -109,6 +112,9 @@ const emit = defineEmits<{
   'retry-groups': []
 }>()
 const { t } = useI18n(); const auth = useAuthStore(); const app = useAppStore()
+const specialGroupOptions = computed(() => (props.groupOptions ?? [])
+  .filter(option => option.value === null)
+  .map(option => ({ value: null, label: option.label })))
 const userHistory = useAdminUserHistory()
 const prefix = computed(() => auth.user?.id ? `admin-ops-error-records:${auth.user.id}:` : undefined)
 const { members, filters, page, pageSize, sortBy, sortOrder, items, total, totalRecords, loading, error, updatedAt, windowRange, changeFilters, reset, refresh, sort, group, showGroup, memberItems, openGroup } = useOpsErrorRecords(props, () => prefix.value, t)

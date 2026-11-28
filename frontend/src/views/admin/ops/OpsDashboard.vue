@@ -16,6 +16,7 @@
         :platform="platform"
         :group-id="groupId"
         :group-options="groupOptions"
+        :groups="availableGroups"
         :time-range="timeRange"
         :query-mode="queryMode"
         :loading="loading"
@@ -75,7 +76,7 @@
         ref="errorRecordsPanel"
         :time-range="timeRange" :custom-start-time="customStartTime" :custom-end-time="customEndTime"
         :platform="platform" :group-id="groupId" :refresh-token="errorListRefreshToken"
-        :group-options="groupOptions" :group-options-failed="groupOptionsFailed"
+        :group-options="groupOptions" :group-options-failed="groupOptionsFailed" :groups="availableGroups"
         @update:group="onGroupChange" @retry-groups="loadGroupOptions"
       />
 
@@ -204,8 +205,9 @@ const platform = ref<string>('')
 const groupId = ref<number | null>(null)
 const groups = ref<Array<{ id: number; name: string; platform: string; display_category?: string; sort_order?: number }>>([])
 const groupOptionsFailed = ref(false)
+const availableGroups = computed(() => groups.value.filter(group => !platform.value || group.platform === platform.value))
 const groupOptions = computed(() => {
-  const available = groups.value.filter(group => !platform.value || group.platform === platform.value)
+  const available = availableGroups.value
   const options: Array<{ value: number | string | null; label: string; kind?: string; disabled?: boolean }> = [
     { value: null, label: t('common.all') },
     ...buildAdminGroupSelectOptions(available, group => ({ value: group.id, label: group.name }), t),

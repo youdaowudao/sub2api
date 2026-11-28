@@ -1107,12 +1107,37 @@ const handleColumnClickOutside = (event: MouseEvent) => {
   }
 }
 
-onMounted(() => {
+const initializeDefaultGroup = () => {
+  if (route.query.group_id !== undefined) return
+  let groupId: number
+  try {
+    const value = JSON.parse(localStorage.getItem('account-filter-values') ?? 'null')?.default_group
+    if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return
+    groupId = Number(value)
+  } catch {
+    return
+  }
+  const initialFilters = filters.value
+  const initialGroup = initialFilters.group_id
+  const initialUsageFilters = usageFiltersRef.value
+  return initialUsageFilters?.waitForGroups?.().then(groups => {
+    if (usageFiltersRef.value === initialUsageFilters && filters.value === initialFilters && filters.value.group_id === initialGroup && groups.some(group => group.id === groupId)) {
+      filters.value.group_id = groupId
+    }
+  })
+}
+
+onMounted(async () => {
   applyRouteQueryFilters()
   void loadRouteUserFilterLabel()
   loadSavedColumns()
   if (!errorVisibleColumnKeys.value.includes(errorSortBy.value === 'status_code' ? 'status' : errorSortBy.value)) { errorSortBy.value = 'created_at'; errorSortOrder.value = 'desc'; saveRecordPreference('admin-usage-', 'errors-sort', {sort_by: 'created_at',sort_order: 'desc'}) }
   if (!visibleColumns.value.some(col => col.key === sortState.sort_by)) { sortState.sort_by = 'created_at'; sortState.sort_order = 'desc'; saveRecordPreference('admin-usage-', 'usage-sort', {...sortState}) }
+  const defaultGroupInitialization = initializeDefaultGroup()
+  if (defaultGroupInitialization) {
+    await defaultGroupInitialization
+    if (!usageFiltersRef.value) return
+  }
   loadLogs()
   loadStats()
   loadModelStats(modelDistributionSource.value, true)

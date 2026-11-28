@@ -2,6 +2,9 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
 import UsageFilters from '../UsageFilters.vue'
+import AdminGroupPicker from '@/components/admin/AdminGroupPicker.vue'
+import UsageView from '@/views/admin/UsageView.vue'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { createPinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 import type { User } from '@/types'
@@ -61,17 +64,24 @@ vi.mock('vue-i18n', async () => {
 const mockSearchUsers = vi.fn()
 const mockSearchApiKeys = vi.fn().mockResolvedValue([])
 const mockGroupsList = vi.fn().mockResolvedValue({ items: [] })
+const mockUsageList = vi.fn().mockResolvedValue({ items: [], total: 0 })
+const mockGetStats = vi.fn().mockResolvedValue({})
+const mockGetCacheHitRate = vi.fn().mockResolvedValue({ items: [] })
+const mockGetSnapshot = vi.fn().mockResolvedValue({ trend: [], groups: [] })
 const mockGetModelStats = vi.fn().mockResolvedValue({ models: [] })
 const mockAccountsList = vi.fn().mockResolvedValue({ items: [] })
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     usage: {
+      list: (...args: any[]) => mockUsageList(...args),
+      getStats: (...args: any[]) => mockGetStats(...args),
+      getCacheHitRate: (...args: any[]) => mockGetCacheHitRate(...args),
       searchUsers: (...args: any[]) => mockSearchUsers(...args),
       searchApiKeys: (...args: any[]) => mockSearchApiKeys(...args),
     },
     groups: { list: (...args: any[]) => mockGroupsList(...args) },
-    dashboard: { getModelStats: (...args: any[]) => mockGetModelStats(...args) },
+    dashboard: { getModelStats: (...args: any[]) => mockGetModelStats(...args), getSnapshotV2: (...args: any[]) => mockGetSnapshot(...args) },
     accounts: { list: (...args: any[]) => mockAccountsList(...args) },
   },
 }))
@@ -466,5 +476,152 @@ describe('UsageFilters — native compaction filter', () => {
 
     expect(filters.native_compaction_v2).toBe(true)
     expect(wrapper.emitted('change')).toBeTruthy()
+  })
+})
+
+
+describe('UsageFilters — all applicable filters are visible', () => {
+  it.each([
+    ['usage', ['API Key', 'Type', 'Request Kind', 'Billing Type', 'Billing Mode', 'Upstream model audit']],
+    ['ranking', ['API Key', 'Type', 'Request Kind', 'Billing Type']],
+    ['errors', ['API Key', 'admin.ops.errorLog.type', 'usage.errors.category', 'admin.ops.errorLog.status']],
+  ] as const)('shows all %s fields without a more-filters toggle', async (mode, labels) => {
+    const wrapper = mount(UsageFilters, {
+      props: { modelValue: defaultFilters(), exporting: false, startDate: '2026-05-01', endDate: '2026-05-28', showActions: true, flat: true, mode },
+      global: { stubs: { Select: true, Teleport: true } },
+    })
+    try {
+      await flushPromises()
+      for (const label of labels) {
+        const field = wrapper.findAll('label').find(element => element.text() === label)
+        expect(field?.isVisible()).toBe(true)
+      }
+      expect(wrapper.text()).not.toContain('admin.ops.records.more')
+      expect(wrapper.findComponent(AdminGroupPicker).exists()).toBe(true)
+      expect(wrapper.findComponent(AdminGroupPicker).props('specialOptions')).toEqual([{ value: null, label: 'All Groups' }])
+    } finally { wrapper.unmount() }
+  })
+})
+
+describe('UsageView — account default group on initial entry', () => {
+  const storageKey = 'account-filter-values'
+  const group = { id: 42, name: 'Default group', platform: 'openai', rate_multiplier: 1 }
+  beforeEach(() => {
+    vi.useFakeTimers()
+    mockGroupsList.mockReset().mockResolvedValue({ items: [group] })
+    mockUsageList.mockReset().mockResolvedValue({ items: [], total: 0 })
+    mockGetStats.mockReset().mockResolvedValue({})
+    mockGetCacheHitRate.mockReset().mockResolvedValue({ items: [] })
+    mockGetSnapshot.mockReset().mockResolvedValue({ trend: [], groups: [] })
+    mockGetModelStats.mockReset().mockResolvedValue({ models: [] })
+    localStorage.removeItem(storageKey)
+  })
+  afterEach(() => {
+    mockGroupsList.mockReset().mockResolvedValue({ items: [] })
+    localStorage.removeItem(storageKey)
+    vi.mocked(Storage.prototype.setItem).mockRestore?.()
+    vi.useRealTimers()
+  })
+
+  async function mountUsage(query: Record<string, string> = {}) {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/', component: { template: '<div />' } }],
+    })
+    await router.push({ path: '/', query })
+    return mount(UsageView, {
+      global: {
+        plugins: [createPinia(), router],
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          UsageStatsCards: true, UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true, Pagination: true, Select: true, DateRangePicker: true,
+          Icon: true, TokenUsageTrend: true, ModelDistributionChart: true, GroupDistributionChart: true,
+          EndpointDistributionChart: true, UserTokenRanking: true, AccountPerformanceTable: true,
+        },
+      },
+    })
+  }
+
+  it('preserves the route group even when a valid account default exists', async () => {
+    localStorage.setItem(storageKey, JSON.stringify({ default_group: '42' }))
+    const wrapper = await mountUsage({ group_id: '9' })
+    try {
+      await flushPromises()
+      expect(wrapper.findComponent(UsageFilters).props('modelValue').group_id).toBe(9)
+      expect(mockUsageList).toHaveBeenCalledWith(expect.objectContaining({ group_id: 9 }), expect.anything())
+    } finally { wrapper.unmount() }
+  })
+
+  it('waits for the existing group fetch and applies the default exactly once; reset and clear still clear it', async () => {
+    const pending = deferred<{ items: typeof group[] }>()
+    mockGroupsList.mockReturnValueOnce(pending.promise)
+    localStorage.setItem(storageKey, JSON.stringify({ default_group: '42' }))
+    const storageWrite = vi.spyOn(Storage.prototype, 'setItem')
+    const wrapper = await mountUsage()
+    try {
+      const filters = wrapper.findComponent(UsageFilters)
+      expect(filters.props('modelValue').group_id).toBeUndefined()
+      expect(mockUsageList).not.toHaveBeenCalled()
+      pending.resolve({ items: [group] })
+      await flushPromises()
+      expect(filters.props('modelValue').group_id).toBe(42)
+      expect(mockGroupsList).toHaveBeenCalledTimes(1)
+      expect(mockUsageList).toHaveBeenCalledTimes(1)
+      expect(mockUsageList).toHaveBeenCalledWith(expect.objectContaining({ group_id: 42 }), expect.anything())
+      const reset = filters.findAll('button').find(button => button.text() === 'Reset')!
+      await reset.trigger('click')
+      await flushPromises()
+      expect(filters.props('modelValue').group_id).toBeUndefined()
+      const picker = filters.findComponent(AdminGroupPicker)
+      picker.vm.$emit('update:modelValue', 42)
+      picker.vm.$emit('change', 42, { value: 42, label: 'Default group' })
+      await flushPromises()
+      await filters.findAll('button').find(button => button.text() === 'admin.usage.clearKeepTime')!.trigger('click')
+      await flushPromises()
+      expect(filters.props('modelValue').group_id).toBeUndefined()
+      expect(storageWrite.mock.calls.some(([key]) => key === storageKey)).toBe(false)
+    } finally { wrapper.unmount() }
+  })
+
+  it('does not reapply the default after a reset while groups are still loading', async () => {
+    const pending = deferred<{ items: typeof group[] }>()
+    mockGroupsList.mockReturnValueOnce(pending.promise)
+    localStorage.setItem(storageKey, JSON.stringify({ default_group: '42' }))
+    const wrapper = await mountUsage()
+    try {
+      const filters = wrapper.findComponent(UsageFilters)
+      await filters.findAll('button').find(button => button.text() === 'Reset')!.trigger('click')
+      pending.resolve({ items: [group] })
+      await flushPromises()
+      expect(filters.props('modelValue').group_id).toBeUndefined()
+      expect(mockUsageList).not.toHaveBeenCalledWith(expect.objectContaining({ group_id: 42 }), expect.anything())
+    } finally { wrapper.unmount() }
+  })
+
+  it.each(['', 'ungrouped', '0', '01', '-1', '999', 42, null])('ignores invalid or missing default %s without a write', async value => {
+    const raw = JSON.stringify({ default_group: value })
+    localStorage.setItem(storageKey, raw)
+    const storageWrite = vi.spyOn(Storage.prototype, 'setItem')
+    const wrapper = await mountUsage()
+    try {
+      await flushPromises()
+      expect(wrapper.findComponent(UsageFilters).props('modelValue').group_id).toBeUndefined()
+      expect(mockUsageList).toHaveBeenCalledWith(expect.not.objectContaining({ group_id: expect.any(Number) }), expect.anything())
+      expect(localStorage.getItem(storageKey)).toBe(raw)
+      expect(storageWrite.mock.calls.some(([key]) => key === storageKey)).toBe(false)
+    } finally { wrapper.unmount() }
+  })
+
+  it('ignores malformed JSON without a write', async () => {
+    localStorage.setItem(storageKey, '{invalid')
+    const storageWrite = vi.spyOn(Storage.prototype, 'setItem')
+    const wrapper = await mountUsage()
+    try {
+      await flushPromises()
+      expect(wrapper.findComponent(UsageFilters).props('modelValue').group_id).toBeUndefined()
+      expect(localStorage.getItem(storageKey)).toBe('{invalid')
+      expect(storageWrite.mock.calls.some(([key]) => key === storageKey)).toBe(false)
+    } finally { wrapper.unmount() }
   })
 })

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Select from '@/components/common/Select.vue'
+import AdminGroupPicker from '@/components/admin/AdminGroupPicker.vue'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -19,6 +20,7 @@ interface Props {
   platform: string
   groupId: number | null
   groupOptions?: Array<{ value: number | string | null; label: string; kind?: string; disabled?: boolean }>
+  groups?: Array<{ id: number; name: string; platform: string; display_category?: string; sort_order?: number }>
   timeRange: string
   queryMode: string
   loading: boolean
@@ -48,6 +50,9 @@ interface Emits {
 
 const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
+const specialGroupOptions = computed(() => (props.groupOptions ?? [])
+  .filter(option => option.value === null)
+  .map(option => ({ value: null, label: option.label })))
 
 const { t } = useI18n()
 const adminSettingsStore = useAdminSettingsStore()
@@ -878,8 +883,10 @@ function handleToolbarRefresh() {
             @update:model-value="handlePlatformChange"
           />
 
-          <Select
+          <AdminGroupPicker
             :model-value="groupId"
+            :groups="props.groups ?? []"
+            :special-options="specialGroupOptions"
             :options="props.groupOptions ?? []"
             class="w-full sm:w-[160px]"
             @update:model-value="handleGroupChange"
