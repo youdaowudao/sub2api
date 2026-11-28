@@ -146,7 +146,7 @@ def registry_info(version, expected_labels):
     require(image.get('os') == 'linux' and image.get('architecture') == 'amd64', '镜像架构不符')
     labels = image.get('config', {}).get('Labels') or {}
     require(all(labels.get(k) == v for k, v in expected_labels.items()), '镜像版本/提交/运行 ID/迁移清单标签不符')
-    return {'registry_ref': ref, 'image_id': config_id}
+    return {'registry_ref': ref, 'config_digest': config_id}
 
 
 def _registry_token(actor, token):
@@ -217,6 +217,34 @@ def local_image(image):
     return obj
 
 
+def registry_digests(receipt):
+    ref = receipt['registry_ref']
+    require(isinstance(ref, str) and ref.startswith(PACKAGE+'@'), '固定 GHCR 镜像引用不符')
+    return validate_digest(ref.split('@', 1)[1]), validate_digest(receipt['config_digest'])
+
+
+def matches_registry_id(local_id, receipt):
+    # Classic Docker uses the config ID; containerd uses the target manifest ID.
+    # Both are exact digests from the same verified single-platform registry manifest.
+    return local_id in registry_digests(receipt)
+
+
+def verify_local_image_identity(image, receipt, *, require_repo_digest=False):
+    manifest_digest, config_digest = registry_digests(receipt)
+    local_id = validate_digest(image.get('Id'))
+    require(image.get('Os') == 'linux' and image.get('Architecture') == 'amd64', '镜像架构不符')
+    require(local_id in (manifest_digest, config_digest),
+            f'镜像 ID {local_id} 不等于已核对的 manifest {manifest_digest} 或 config {config_digest}')
+    descriptor = image.get('Descriptor')
+    if descriptor:
+        require(isinstance(descriptor, dict) and descriptor.get('mediaType') in SINGLE_MANIFEST_TYPES and
+                descriptor.get('digest') == manifest_digest and local_id == manifest_digest,
+                '本地镜像描述符与固定单平台 GHCR manifest 不符')
+    if require_repo_digest:
+        require(receipt['registry_ref'] in (image.get('RepoDigests') or []), '本地镜像缺少已锁定的 GHCR RepoDigest')
+    return local_id
+
+
 def image_smoke_metadata(image, version, commit):
     local_image(image)
     output = command(['docker', 'run', '--rm', '--network', 'none', '--read-only', '--entrypoint',
@@ -245,7 +273,7 @@ def publish(repo, commit, run_id, actor, token):
         receipt = registry_info(version, labels)
         image = receipt['registry_ref']
         run(['docker', 'pull', '--platform', 'linux/amd64', image])
-        require(local_image(image)['Id'] == receipt['image_id'], '已发布镜像 ID 不符')
+        verify_local_image_identity(local_image(image), receipt, require_repo_digest=True)
     else:
         api = command(['docker', 'version', '--format', '{{.Server.APIVersion}}']).decode().strip()
         require(re.fullmatch(r'[0-9]+\.[0-9]+', api) and tuple(map(int, api.split('.'))) >= (1, 46),
@@ -272,7 +300,8 @@ def publish(repo, commit, run_id, actor, token):
         require(local_image(target)['Id'] == tested_id, '发布标签不是已试运行镜像')
         run(['docker', 'image', 'push', '--platform', 'linux/amd64', target])
         receipt = registry_info(version, labels)
-    require(receipt['image_id'] == tested_id, 'GHCR 配置摘要不等于已试运行镜像 ID')
+    verify_local_image_identity(tested, receipt, require_repo_digest=existing)
+    print(f'PASS 核对本地镜像 ID {tested_id}、GHCR manifest {registry_digests(receipt)[0]}、config {receipt["config_digest"]}')
     print(f'PASS {version} {commit} {receipt["registry_ref"]} {SOURCE}/actions/runs/{run_id}')
 
 
