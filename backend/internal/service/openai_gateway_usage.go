@@ -185,7 +185,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result == nil {
 		return errors.New("openai usage result is nil")
 	}
-	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
+	if result.WSBridgeMeteredError && s.usageBillingRepo == nil {
+		// A partial bill must not enter the legacy non-deduplicated fallback.
+		return ErrBillingServiceUnavailable
+	}
+	if !result.WSBridgeMeteredError && s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}
 

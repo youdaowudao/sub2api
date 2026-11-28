@@ -276,6 +276,9 @@ type OpenAIForwardResult struct {
 	RequestedReasoningEffort *string
 	Stream                   bool
 	OpenAIWSMode             bool
+	// WSBridgeMeteredError marks an interrupted bridge turn with explicit usage
+	// and a confirmed upstream response ID, eligible for the normal deduplicated bill.
+	WSBridgeMeteredError bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
 	UpstreamTerminalEvent string

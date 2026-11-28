@@ -3369,8 +3369,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					cyberMarked && !h.cyberPolicyLogOnly(c, turnKey),
 					turnErr,
 				)
+				meteredError := turnErr != nil && result != nil && result.WSBridgeMeteredError
 				if turnErr != nil {
-					if result == nil || result.ImageCount <= 0 {
+					if result == nil || (!meteredError && result.ImageCount <= 0) {
 						return
 					}
 					// cyber 命中时该 turn 的用量已由 recordCyberPolicyIfMarked(forwardErrored=true)
@@ -3378,11 +3379,13 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					if service.GetOpsCyberPolicy(c) != nil {
 						return
 					}
-					reqLog.Warn("openai.websocket_partial_error_with_image_result",
-						zap.Int64("account_id", account.ID),
-						zap.Int("image_count", result.ImageCount),
-						zap.Error(turnErr),
-					)
+					if !meteredError {
+						reqLog.Warn("openai.websocket_partial_error_with_image_result",
+							zap.Int64("account_id", account.ID),
+							zap.Int("image_count", result.ImageCount),
+							zap.Error(turnErr),
+						)
+					}
 				}
 				if result == nil {
 					return
@@ -3394,15 +3397,17 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					zap.String("turn_upstream_model", turnUpstreamModel),
 					zap.String("billing_model", result.BillingModel),
 				)
-				// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
-				if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
-					h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, result.ResponseHeaders)
+				if !meteredError {
+					// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
+					if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
+						h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, result.ResponseHeaders)
+					}
+					scheduleModel := turnUpstreamModel
+					if scheduleModel == "" {
+						scheduleModel = turnRequestedModel
+					}
+					h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
 				}
-				scheduleModel := turnUpstreamModel
-				if scheduleModel == "" {
-					scheduleModel = turnRequestedModel
-				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
 				quotaPlatform := turnQuotaPlatform
@@ -3414,7 +3419,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					turnRecordPricingAt = wsTurn.pricingAt
 				}
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
-				h.submitOpenAIUsageRecordTask(turnTaskCtx, result, func(taskCtx context.Context) {
+				task := func(taskCtx context.Context) {
 					if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
 						Result:             result,
 						APIKey:             turnBillingAPIKey,
@@ -3439,7 +3444,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 							zap.Error(err),
 						)
 					}
-				})
+				}
+				if meteredError {
+					h.submitMandatoryUsageRecordTask(turnTaskCtx, task)
+				} else {
+					h.submitOpenAIUsageRecordTask(turnTaskCtx, result, task)
+				}
 			},
 		}
 

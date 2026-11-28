@@ -745,12 +745,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				turn,
 				writeClientMessage,
 			)
-			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
-				return errOpenAIWSSessionPreempted
-			}
 			if result != nil {
 				// The HTTP payload can contain a policy rewrite or replayed configuration from an earlier turn.
 				result.RequestedReasoningEffort = currentBridgePayload.requestedReasoningEffort
+			}
+			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
+				if result != nil && result.WSBridgeMeteredError && hooks != nil && hooks.AfterTurn != nil {
+					hooks.AfterTurn(turn, result, bridgeErr)
+				}
+				return errOpenAIWSSessionPreempted
 			}
 			if hooks != nil && hooks.AfterTurn != nil {
 				hooks.AfterTurn(turn, result, bridgeErr)

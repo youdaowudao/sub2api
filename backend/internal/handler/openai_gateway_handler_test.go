@@ -1952,6 +1952,7 @@ type openAIResponsesWSUsageLogCase struct {
 	standardBillingRepo       service.UsageBillingRepository
 	standardSubscriptionSvc   *service.SubscriptionService
 	standardQuotaRepo         service.UserPlatformQuotaRepository
+	standard403Counter        service.OpenAI403CounterCache
 	standardWorker            *service.UsageRecordWorkerPool
 	standardBridgeRetryAt     int
 	standardBridgeSameAccount bool
@@ -1982,6 +1983,9 @@ type openAIResponsesWSUsageLogCase struct {
 	// firstFrameCloseExpected：首帧即被拒（连接被 1008 关闭），不期待任何响应帧。
 	firstFrameCloseExpected    bool
 	bridgeReferenceProbe       bool // Test-only: capture the response and close before assertions.
+	bridgeStream               string
+	bridgeErrorProbe           bool
+	bridgeExpectedLogs         int
 	directBridgeReferenceProbe bool
 	// secondTurnCloseExpected：第二个 turn 被拒（连接被 1008 关闭）。
 	secondTurnCloseExpected bool
@@ -3056,6 +3060,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 				}
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
+			if tc.bridgeStream != "" {
+				_, _ = io.WriteString(w, tc.bridgeStream)
+				return
+			}
 			responseID := "resp_grok_test"
 			if tc.standardMode {
 				responseID = fmt.Sprintf("resp_usage_e2e_%d", attempt)
@@ -3176,6 +3184,12 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		accountRepo = &openAIWSFailoverHandlerAccountRepoStub{accounts: []service.Account{account, replacement}}
 		cfg.Gateway.MaxAccountSwitches = 3
 		rateLimitSvc = service.NewRateLimitService(accountRepo, nil, cfg, nil, nil)
+	}
+	if tc.standard403Counter != nil {
+		if rateLimitSvc == nil {
+			rateLimitSvc = service.NewRateLimitService(accountRepo, nil, cfg, nil, nil)
+		}
+		rateLimitSvc.SetOpenAI403CounterCache(tc.standard403Counter)
 	}
 	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, turnCount)}
 
@@ -3336,6 +3350,43 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	cancelWrite()
 	require.NoError(t, err)
 
+	if tc.bridgeErrorProbe {
+		// A synthetic upstream ended after delivering part of a legitimate generation.
+		// Collect the actual close and all available settlement evidence, including zero.
+		probe := openAIResponsesWSUsageLogResult{}
+		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelRead()
+		for {
+			_, event, readErr := clientConn.Read(readCtx)
+			if readErr != nil {
+				var closeErr coderws.CloseError
+				require.ErrorAs(t, readErr, &closeErr, "expected a real client failure rather than a read timeout")
+				probe.closeStatus, probe.closeReason = closeErr.Code, closeErr.Reason
+				break
+			}
+			probe.clientEvents = append(probe.clientEvents, append([]byte(nil), event...))
+		}
+		select {
+		case <-handlerDone:
+		case <-time.After(3 * time.Second):
+			t.Fatal("bridge handler did not finish after the upstream error")
+		}
+		for len(upstreamPayloadCh) > 0 {
+			probe.upstreamPayloads = append(probe.upstreamPayloads, <-upstreamPayloadCh)
+		}
+		for len(probe.logs) < tc.bridgeExpectedLogs {
+			select {
+			case usageLog := <-usageRepo.created:
+				probe.logs = append(probe.logs, usageLog)
+			case <-time.After(3 * time.Second):
+				t.Fatal("expected bridge settlement did not complete")
+			}
+		}
+		for len(usageRepo.created) > 0 {
+			probe.logs = append(probe.logs, <-usageRepo.created)
+		}
+		return probe
+	}
 	if tc.bridgeReferenceProbe {
 		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
 		_, event, readErr := clientConn.Read(readCtx)

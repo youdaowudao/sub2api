@@ -653,6 +653,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 
 	responseID := ""
 	completedResponseID := ""
+	meteredResponseID := ""
+	meteredResponseIDConflict := false
 	usage := OpenAIUsage{}
 	imageCounter := newOpenAIImageOutputCounter()
 	var firstTokenMs *int
@@ -686,7 +688,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 	}
 
-	resultWithUsage := func() *OpenAIForwardResult {
+	resultWithUsage := func(isError bool) *OpenAIForwardResult {
 		imageCount := imageCounter.Count()
 		result := &OpenAIForwardResult{
 			RequestID:                     responseID,
@@ -716,6 +718,17 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			result.ImageInputSize = imageInputSize
 			result.ImageOutputSizes = imageCounter.Sizes()
 			result.BillingModel = imageBillingModel
+		}
+		if isError && imageCount == 0 && GetOpsCyberPolicy(c) == nil {
+			switch {
+			case !openAIUsageHasTokens(&result.Usage):
+				logOpenAIWSModeInfo("ingress_ws_http_bridge_error_usage_unavailable account_id=%d turn=%d reason=no_metered_usage", account.ID, turn)
+			case meteredResponseID == "" || meteredResponseIDConflict:
+				logOpenAIWSModeInfo("ingress_ws_http_bridge_error_usage_unavailable account_id=%d turn=%d reason=unconfirmed_response_id", account.ID, turn)
+			default:
+				result.RequestID = meteredResponseID
+				result.WSBridgeMeteredError = true
+			}
 		}
 		return result
 	}
@@ -792,7 +805,27 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if normalized, changed := normalizeCompletedImageGenerationStatus(upstreamMessage); changed {
 			upstreamMessage = normalized
 		}
-		eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
+		eventType, eventResponseID, response := parseOpenAIWSEventEnvelope(upstreamMessage)
+		// Event IDs are not billing identities. Observe only an explicitly
+		// identified response and reject conflicting IDs within this turn.
+		if eventResponseID != "" && !meteredResponseIDConflict {
+			confirmedID := ""
+			if id := response.Get("id"); id.Type == gjson.String {
+				confirmedID = strings.TrimSpace(id.String())
+			}
+			if confirmedID == "" && gjson.GetBytes(upstreamMessage, "object").String() == "response" {
+				if id := gjson.GetBytes(upstreamMessage, "id"); id.Type == gjson.String {
+					confirmedID = strings.TrimSpace(id.String())
+				}
+			}
+			if confirmedID != "" {
+				if meteredResponseID == "" {
+					meteredResponseID = confirmedID
+				} else if meteredResponseID != confirmedID {
+					meteredResponseIDConflict = true
+				}
+			}
+		}
 		responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
 		if responseID == "" && eventResponseID != "" {
 			responseID = eventResponseID
@@ -974,7 +1007,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 
 		if upstreamEventErr != nil {
-			return resultWithUsage(), upstreamEventErr
+			return resultWithUsage(true), upstreamEventErr
 		}
 		if isOpenAIWSTerminalEvent(eventType) && !bareErrorPending {
 			if eventType == "response.failed" {
@@ -1008,24 +1041,24 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				firstTokenMsValue,
 				clientDisconnected,
 			)
-			return resultWithUsage(), nil
+			return resultWithUsage(false), nil
 		}
 	}
 	if bareErrorPending {
 		if finalizeErr := finalizeBareError(); finalizeErr != nil {
-			return resultWithUsage(), finalizeErr
+			return resultWithUsage(true), finalizeErr
 		}
 		if scanErr := scanner.Err(); scanErr != nil {
-			return resultWithUsage(), fmt.Errorf("read upstream http bridge stream after error event: %w", scanErr)
+			return resultWithUsage(true), fmt.Errorf("read upstream http bridge stream after error event: %w", scanErr)
 		}
-		return resultWithUsage(), errors.New(bareErrorMessage)
+		return resultWithUsage(true), errors.New(bareErrorMessage)
 	}
 	if err := scanner.Err(); err != nil {
 		streamErr := fmt.Errorf("read upstream http bridge stream: %w", err)
 		if turn == 1 && !clientDisconnected && !wroteDownstream {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, streamErr, true)
 		}
-		return resultWithUsage(), streamErr
+		return resultWithUsage(true), streamErr
 	}
 	terminalErr := errors.New("upstream http bridge stream ended before terminal event")
 	if sawDone {
@@ -1034,7 +1067,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if turn == 1 && !clientDisconnected && !wroteDownstream {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, terminalErr, true)
 	}
-	return resultWithUsage(), terminalErr
+	return resultWithUsage(true), terminalErr
 }
 
 func resolveGrokWSCacheIdentity(c *gin.Context, account *Account, seedPayload, currentPayload []byte, originalModel string) (string, error) {
