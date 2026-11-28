@@ -93,14 +93,16 @@
 
         <div class="card p-4">
           <div class="flex flex-wrap items-center gap-4">
-            <button type="button" :class="['btn', rangeMode === 'lastHour' ? 'btn-primary' : 'btn-secondary']" :aria-pressed="rangeMode === 'lastHour'" @click="selectLastHour">
-              {{ t('admin.dashboard.lastHour') }}
+            <button v-for="minutes in recentMinutes" :key="minutes" type="button" :class="['btn', recentMode === minutes ? 'btn-primary' : 'btn-secondary']" :aria-pressed="recentMode === minutes" @click="selectRecent(minutes)">
+              {{ minutes === 60 ? t('admin.dashboard.lastHour') : t('admin.usage.recentRange.' + minutes) }}
             </button>
+            <button type="button" :class="['btn', recentMode === null && isToday ? 'btn-primary' : 'btn-secondary']" @click="selectToday">{{ t('dates.today') }}</button>
+            <span v-if="preciseWindow && recentMode !== null" class="text-xs text-gray-500">{{ displayAdminWindow(preciseWindow.start_time, preciseWindow.end_time) }}</span>
             <div class="flex items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
               <DateRangePicker v-model:start-date="startDate" v-model:end-date="endDate" @change="onDateRangeChange" />
             </div>
-            <div v-if="rangeMode === 'dates'" class="flex items-center gap-2">
+            <div v-if="recentMode === null" class="flex items-center gap-2">
               <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
               <div class="w-28">
                 <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
@@ -117,8 +119,8 @@
             :model-stats="modelStats"
             :enable-ranking-view="false"
             :loading="chartsLoading"
-            :start-date="rangeMode === 'dates' ? startDate : undefined"
-            :end-date="rangeMode === 'dates' ? endDate : undefined"
+            :start-date="recentMode === null ? startDate : undefined"
+            :end-date="recentMode === null ? endDate : undefined"
             :filters="modelFilters"
           />
         </div>
@@ -132,13 +134,14 @@
             :total-tokens="rankingTotalTokens"
             :total-users="rankingTotalUsers"
             :compare="compare"
-            :show-compare="rangeMode === 'lastHour'"
+            :show-compare="recentMode !== null"
             :loading="rankingLoading"
             :error="rankingError"
             @row-click="goToUserUsage"
           />
           <AdminDashboardGroupCacheRate :groups="groupStats" :loading="chartsLoading" />
         </div>
+        <AccountPerformancePanel :range="performanceRange" :refresh-token="performanceRefresh" />
       </template>
     </div>
   </AppLayout>
@@ -152,7 +155,6 @@ import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import type { DashboardStats, GroupStat, ModelStat, TrendDataPoint, UserSpendingRankingItem } from '@/types'
 import { getGranularityForDateRange, getTodayRangeDates } from '@/utils/dateRange'
-import { formatDateLocalInput } from '@/utils/format'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -161,6 +163,8 @@ import Select from '@/components/common/Select.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import AdminDashboardUserRanking from '@/components/admin/dashboard/AdminDashboardUserRanking.vue'
+import AccountPerformancePanel from '@/components/admin/usage/AccountPerformancePanel.vue'
+import { recentMinutes, makeRecentRange, displayAdminWindow, type RecentMinutes } from '@/utils/adminRecentRange'
 import AdminDashboardGroupCacheRate from '@/components/admin/dashboard/AdminDashboardGroupCacheRate.vue'
 
 const { t } = useI18n()
@@ -179,12 +183,13 @@ const rankingTotalActualCost = ref(0)
 const rankingTotalRequests = ref(0)
 const rankingTotalTokens = ref(0)
 const rankingTotalUsers = ref(0)
-const compare = ref<{ items: UserSpendingRankingItem[]; totalUsers: number } | null>(null)
+const compare = ref<{ items: UserSpendingRankingItem[]; totalUsers: number; window?: string } | null>(null)
 let chartLoadSeq = 0
 let rankingLoadSeq = 0
 let compareLoadSeq = 0
 
-const rangeMode = ref<'lastHour' | 'dates'>('lastHour')
+const recentMode = ref<RecentMinutes | null>(60)
+const performanceRefresh = ref(0)
 const granularity = ref<'day' | 'hour'>('hour')
 const defaultRange = getTodayRangeDates()
 const startDate = ref(defaultRange.start)
@@ -197,8 +202,10 @@ const granularityOptions = computed(() => [
   { value: 'day', label: t('admin.dashboard.day') },
   { value: 'hour', label: t('admin.dashboard.hour') }
 ])
-const modelFilters = computed(() => rangeMode.value === 'lastHour' ? (preciseWindow.value ?? {}) : {})
-const rangeKey = computed(() => rangeMode.value === 'lastHour'
+const modelFilters = computed(() => recentMode.value !== null ? (preciseWindow.value ?? {}) : {})
+const isToday = computed(() => { const today = getTodayRangeDates(); return startDate.value === today.start && endDate.value === today.end })
+const performanceRange = computed(() => recentMode.value !== null ? preciseWindow.value : isToday.value ? { start_date: startDate.value, end_date: endDate.value } : null)
+const rangeKey = computed(() => recentMode.value !== null
   ? `lastHour:${preciseWindow.value?.start_time}:${preciseWindow.value?.end_time}`
   : `dates:${startDate.value}:${endDate.value}`)
 
@@ -229,13 +236,12 @@ const totalCostTitle = computed(() => [
 ].join(' / '))
 
 const goToUserUsage = (item: UserSpendingRankingItem) => {
-  const precise = rangeMode.value === 'lastHour' ? preciseWindow.value : null
+  const precise = recentMode.value !== null ? preciseWindow.value : null
   void router.push({
     path: '/admin/usage',
     query: {
       user_id: String(item.user_id),
-      start_date: precise ? formatDateLocalInput(new Date(precise.start_time)) : startDate.value,
-      end_date: precise ? formatDateLocalInput(new Date(new Date(precise.end_time).getTime() - 1)) : endDate.value
+      ...(precise ?? { start_date: startDate.value, end_date: endDate.value })
     }
   })
 }
@@ -313,14 +319,15 @@ const loadYesterdayRanking = async (range: DashboardRange) => {
   compare.value = null
   if (!('start_time' in range)) return
   const yesterday = (value: string) => new Date(new Date(value).getTime() - 24 * 60 * 60 * 1000).toISOString()
+  const previousStart = yesterday(range.start_time), previousEnd = yesterday(range.end_time)
   try {
     const response = await adminAPI.dashboard.getUserSpendingRanking({
-      start_time: yesterday(range.start_time),
-      end_time: yesterday(range.end_time),
+      start_time: previousStart,
+      end_time: previousEnd,
       limit: 50
     })
     if (currentSeq !== compareLoadSeq) return
-    compare.value = { items: response.ranking || [], totalUsers: response.total_users }
+    compare.value = { items: response.ranking || [], totalUsers: response.total_users, window: displayAdminWindow(previousStart, previousEnd) }
   } catch (error) {
     if (currentSeq !== compareLoadSeq) return
     console.error('Error loading yesterday ranking:', error)
@@ -329,29 +336,28 @@ const loadYesterdayRanking = async (range: DashboardRange) => {
 
 const load = async (includeStats: boolean) => {
   let range: DashboardRange
-  if (rangeMode.value === 'lastHour') {
-    const end = Math.floor(Date.now() / 60000) * 60000
-    const start = end - 60 * 60000
-    preciseWindow.value = { start_time: new Date(start).toISOString(), end_time: new Date(end).toISOString() }
+  if (recentMode.value !== null) {
+    preciseWindow.value = makeRecentRange(recentMode.value)
     range = preciseWindow.value
   } else {
     range = { start_date: startDate.value, end_date: endDate.value }
   }
   await Promise.all([loadDashboardSnapshot(range, includeStats), loadUserSpendingRanking(range), loadYesterdayRanking(range)])
 }
-const loadDashboardStats = () => load(true)
+const loadDashboardStats = () => { performanceRefresh.value++; return load(true) }
 const loadChartData = () => load(false)
-const selectLastHour = () => {
-  rangeMode.value = 'lastHour'
+const selectRecent = (minutes: RecentMinutes) => {
+  recentMode.value = minutes
   return loadChartData()
 }
 const onDateRangeChange = (range: { startDate: string; endDate: string; preset: string | null }) => {
   startDate.value = range.startDate
   endDate.value = range.endDate
-  rangeMode.value = 'dates'
+  recentMode.value = null
   granularity.value = getGranularityForDateRange(startDate.value, endDate.value)
   return loadChartData()
 }
 
+const selectToday = () => { const today = getTodayRangeDates(); return onDateRangeChange({ startDate: today.start, endDate: today.end, preset: 'today' }) }
 onMounted(loadDashboardStats)
 </script>

@@ -70,12 +70,8 @@
     </div>
     <div v-if="error" role="alert" class="m-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-900/20 dark:text-rose-300"><div v-if="updatedAt">{{ t('admin.ops.records.refreshFailed', { time: formatDateTime(updatedAt) }) }}</div>{{ error }} <button type="button" class="ml-2 underline" @click="refresh">{{ t('admin.ops.records.retry') }}</button></div>
     <div v-if="loading" role="status" class="px-4 pt-2 text-xs text-gray-500">{{ t('admin.ops.records.loading') }}</div>
-    <OpsErrorLogTable v-if="!error || rows.length" :key="tableRevision" class="ops-records-table" flat :rows="rows" :record-meta="meta" :sort-by="sortBy" :sort-order="sortOrder" :loading="loading" :total="total" :page="page" :page-size="pageSize" :page-size-options="[10, 20, 50]" :visible-column-keys="visibleColumns" :column-order="preferredOrder" :column-width-storage-key="prefix ? prefix + 'column-widths' : undefined" :empty-message="t('admin.ops.records.empty')" user-clickable @openErrorDetail="openRecord" @userClick="openUser" @sort="sort" @update:page="page = $event" @update:pageSize="pageSize = $event" />
-    <BaseDialog :key="group?.representative_id || 0" keep-mounted prevent-scroll-on-focus :show="showGroup" :title="t('admin.ops.records.members')" width="full" @close="closeGroup">
-      <div v-if="group && !memberLoading && !memberError && memberTotal !== group.count" class="mb-2 text-sm text-amber-700">{{ t('admin.ops.records.membersUpdated', { count: memberTotal }) }}</div>
-      <div v-if="memberError" role="alert" class="mb-3 text-sm text-rose-600">{{ memberError }} <button class="ml-2 underline" @click="loadMembers(true)">{{ t('admin.ops.records.retry') }}</button></div>
-      <OpsErrorLogTable v-if="!memberError" flat :rows="memberRows" :record-meta="memberMeta" :sort-by="memberSortBy" :sort-order="memberSortOrder" :loading="memberLoading" :total="memberTotal" :page="memberPage" :page-size="memberPageSize" :page-size-options="[10, 20, 50]" :column-width-storage-key="prefix ? prefix + 'members-column-widths' : undefined" user-clickable @openErrorDetail="id => openRecord(id, true)" @userClick="openUser" @sort="sortMembers" @update:page="memberPage = $event" @update:pageSize="memberPageSize = $event" />
-    </BaseDialog>
+    <OpsErrorLogTable v-if="!error || rows.length" :key="tableRevision" flat :rows="rows" :record-meta="meta" :sort-by="sortBy" :sort-order="sortOrder" :loading="loading" :total="total" :page="page" :page-size="pageSize" :page-size-options="[10, 20, 50]" :visible-column-keys="visibleColumns" :column-order="preferredOrder" :column-width-storage-key="prefix ? prefix + 'column-widths' : undefined" :empty-message="t('admin.ops.records.empty')" user-clickable @openErrorDetail="openRecord" @userClick="openUser" @sort="sort" @update:page="page = $event" @update:pageSize="pageSize = $event" />
+    <OpsErrorRecordMembersDialog :members="members" :column-width-storage-key="prefix ? prefix + 'members-column-widths' : undefined" @openErrorDetail="id => openRecord(id, true)" @userClick="openUser" />
     <OpsErrorDetailModal prevent-scroll-on-focus v-model:show="showDetail" :error-id="detailId" :error-type="detailType" back-to-list @back="backFromDetail" />
     <UserBalanceHistoryModal :show="!!balanceUser" :user="balanceUser" hide-actions @close="balanceUser = null" />
   </section>
@@ -83,12 +79,14 @@
 <script setup lang="ts">
 import { computed, ref, watch, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAdminUserHistory } from '@/composables/useAdminUserHistory'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import type { AdminUser } from '@/types'
 import Select from '@/components/common/Select.vue'
-import BaseDialog from '@/components/common/BaseDialog.vue'
+import OpsErrorRecordMembersDialog from './OpsErrorRecordMembersDialog.vue'
+import { errorRecordColumnOrder, errorRecordDefaultVisible, errorRecordAlwaysVisible } from '../errorRecordPresentation'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import OpsErrorLogTable from './OpsErrorLogTable.vue'
 import OpsErrorDetailModal from './OpsErrorDetailModal.vue'
@@ -102,7 +100,7 @@ const props = withDefaults(defineProps<{
   customEndTime?: string | null
   platform?: string
   groupId?: number | null
-  groupOptions?: Array<{ value: number | null; label: string }>
+  groupOptions?: Array<{ value: number | string | null; label: string; kind?: string; disabled?: boolean }>
   groupOptionsFailed?: boolean
   refreshToken?: number
 }>(), { platform: '', groupId: null, refreshToken: 0 })
@@ -111,10 +109,11 @@ const emit = defineEmits<{
   'retry-groups': []
 }>()
 const { t } = useI18n(); const auth = useAuthStore(); const app = useAppStore()
+const userHistory = useAdminUserHistory()
 const prefix = computed(() => auth.user?.id ? `admin-ops-error-records:${auth.user.id}:` : undefined)
-const { filters, page, pageSize, sortBy, sortOrder, items, total, totalRecords, loading, error, updatedAt, windowRange, changeFilters, reset, refresh, sort, group, showGroup, memberItems, memberTotal, memberPage, memberPageSize, memberSortBy, memberSortOrder, memberLoading, memberError, closeGroup, openGroup, loadMembers, sortMembers } = useOpsErrorRecords(props, () => prefix.value, t)
+const { members, filters, page, pageSize, sortBy, sortOrder, items, total, totalRecords, loading, error, updatedAt, windowRange, changeFilters, reset, refresh, sort, group, showGroup, memberItems, openGroup } = useOpsErrorRecords(props, () => prefix.value, t)
 const rows = computed(() => errorRecordRows(items.value)); const meta = computed(() => errorRecordMeta(items.value))
-const memberRows = computed(() => errorRecordRows(memberItems.value)); const memberMeta = computed(() => errorRecordMeta(memberItems.value))
+const memberMeta = computed(() => errorRecordMeta(memberItems.value))
 const panel = ref<HTMLElement | null>(null); const showMore = ref(false); const tableRevision = ref(0)
 const scopes = computed(() => (['all', 'request', 'upstream'] as const).map(value => ({ value, label: t(`admin.ops.records.${value}`) })))
 const financeOptions = computed(() => ['hide', 'include', 'only'].map(value => ({ value, label: t(`admin.ops.records.${value}`) })))
@@ -123,10 +122,10 @@ const ownerOptions = computed(() => [{ value: '', label: t('admin.ops.records.ow
 const phaseOptions = computed(() => [{ value: '', label: t('common.all') }, { value: 'network', label: t('admin.ops.records.network') }, ...Object.entries({ request: 'typeRequest', auth: 'typeAuth', account_auth: 'typeAccountAuth', routing: 'typeRouting', upstream: 'typeUpstream', internal: 'typeInternal' }).map(([value, key]) => ({ value, label: t(`admin.ops.errorLog.${key}`) }))])
 const categoryOptions = computed(() => [{ value: '', label: t('common.all') }, ...['auth', 'rate_limit', 'quota', 'invalid_request', 'service_unavailable', 'upstream', 'internal', 'cyber'].map(value => ({ value, label: t(`usage.errors.categories.${value}`) }))])
 const statusOptions = computed(() => [{ value: '', label: t('common.all') }, { value: '0', label: '0' }, ...COMMON_ERROR_STATUS_CODES.map(code => ({ value: String(code), label: String(code) })), { value: 'other', label: t('admin.ops.records.otherStatus') }])
-const preferredOrder = ['message', 'account', 'model', 'user', 'created_at', 'actions', 'api_key', 'platform', 'endpoint', 'group', 'type', 'category', 'status', 'user_agent', 'client_ip']
+const preferredOrder = errorRecordColumnOrder
 const allColumns = computed(() => preferredOrder.map(key => ({ key, label: key === 'category' ? t('usage.errors.category') : key === 'user_agent' ? t('usage.userAgent') : t(`admin.ops.errorLog.${({ api_key: 'apiKey', created_at: 'time', actions: 'action', client_ip: 'ip' } as Record<string, string>)[key] || key}`) })))
-const hidden = ref<string[]>(readRecordPreference(prefix.value, 'hidden-columns', preferredOrder.filter(key => !['message', 'account', 'model', 'user', 'created_at', 'actions'].includes(key)), (v): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string')))
-const visibleColumns = computed(() => preferredOrder.filter(key => ['message', 'created_at', 'actions'].includes(key) || !hidden.value.includes(key)))
+const hidden = ref<string[]>(readRecordPreference(prefix.value, 'hidden-columns', preferredOrder.filter(key => !errorRecordDefaultVisible.includes(key)), (v): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string')))
+const visibleColumns = computed(() => preferredOrder.filter(key => errorRecordAlwaysVisible.includes(key) || !hidden.value.includes(key)))
 function toggleColumn(key: string) {
   const willHide = !hidden.value.includes(key)
   hidden.value = willHide ? [...hidden.value, key] : hidden.value.filter(x => x !== key)
@@ -162,14 +161,7 @@ function openRecord(id: number, fromGroup = false) {
 }
 function backFromDetail() { showDetail.value = false; if (detailFromGroup && group.value) showGroup.value = true }
 const balanceUser = ref<AdminUser | null>(null)
-async function openUser(id: number) { try { balanceUser.value = await adminAPI.users.getById(id, true) } catch { app.showError(t('admin.usage.failedToLoadUser')) } }
+async function openUser(id: number) { const actor = userHistory.adminId.value; try { const user = await adminAPI.users.getById(id, true); userHistory.record(user.id, user.email, actor); balanceUser.value = user } catch { app.showError(t('admin.usage.failedToLoadUser')) } }
 async function focus() { await nextTick(); panel.value?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }) }
 defineExpose({ focus, refresh })
 </script>
-
-<style scoped>
-.ops-records-table :deep(th), .ops-records-table :deep(td) {
-  padding-left: 0.75rem;
-  padding-right: 0.75rem;
-}
-</style>

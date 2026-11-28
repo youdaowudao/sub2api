@@ -14,10 +14,31 @@ type CacheHitRateItem struct {
 	CacheHitRate        *float64 `json:"cache_hit_rate"`
 }
 
+type AccountPerformanceItem struct {
+	CacheHitRateItem
+	AverageDurationMs  *float64 `json:"average_duration_ms"`
+	UpstreamErrorCount *int64   `json:"upstream_error_count"`
+	RateLimitCount     *int64   `json:"rate_limit_count"`
+	Schedulable        *bool    `json:"schedulable"`
+	AccountExists      bool     `json:"account_exists"`
+}
+
+type AccountPerformanceResult struct {
+	StartDate   string                   `json:"start_date"`
+	EndDate     string                   `json:"end_date"`
+	WindowStart string                   `json:"window_start"`
+	WindowEnd   string                   `json:"window_end"`
+	GeneratedAt string                   `json:"generated_at"`
+	ErrorState  string                   `json:"error_state"`
+	Items       []AccountPerformanceItem `json:"items"`
+}
+
 type CacheHitRateResult struct {
-	StartDate string             `json:"start_date"`
-	EndDate   string             `json:"end_date"`
-	Items     []CacheHitRateItem `json:"items"`
+	StartDate   string             `json:"start_date"`
+	EndDate     string             `json:"end_date"`
+	Items       []CacheHitRateItem `json:"items"`
+	WindowStart string             `json:"window_start,omitempty"`
+	WindowEnd   string             `json:"window_end,omitempty"`
 }
 
 // CalculateCacheHitRate preserves the recorded totals, including negative values.

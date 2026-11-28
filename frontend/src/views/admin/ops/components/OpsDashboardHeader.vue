@@ -18,7 +18,7 @@ interface Props {
   overview?: OpsDashboardOverview | null
   platform: string
   groupId: number | null
-  groupOptions?: Array<{ value: number | null; label: string }>
+  groupOptions?: Array<{ value: number | string | null; label: string; kind?: string; disabled?: boolean }>
   timeRange: string
   queryMode: string
   loading: boolean
@@ -68,12 +68,13 @@ const TOOLBAR_RANGE_MINUTES: Record<string, number> = {
   '5m': 5,
   '30m': 30,
   '1h': 60,
+  '3h': 180,
   '6h': 6 * 60,
   '24h': 24 * 60
 }
 
 const availableRealtimeWindows = computed(() => {
-  const toolbarMinutes = TOOLBAR_RANGE_MINUTES[props.timeRange] ?? 60
+  const toolbarMinutes = props.timeRange === 'today' && overview.value ? Math.max(1, (Date.parse(overview.value.end_time)-Date.parse(overview.value.start_time))/60000) : TOOLBAR_RANGE_MINUTES[props.timeRange] ?? 60
   return (['1min', '5min', '30min', '1h'] as const).filter((w) => REALTIME_WINDOW_MINUTES[w] <= toolbarMinutes)
 })
 
@@ -116,6 +117,8 @@ const timeRangeOptions = computed(() => [
   { value: '5m', label: t('admin.ops.timeRange.5m') },
   { value: '30m', label: t('admin.ops.timeRange.30m') },
   { value: '1h', label: t('admin.ops.timeRange.1h') },
+  { value: '3h', label: t('admin.ops.timeRange.3h') },
+  { value: 'today', label: t('dates.today') },
   { value: '6h', label: t('admin.ops.timeRange.6h') },
   { value: '24h', label: t('admin.ops.timeRange.24h') },
   {

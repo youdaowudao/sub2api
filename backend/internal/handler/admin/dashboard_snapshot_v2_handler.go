@@ -73,7 +73,7 @@ type dashboardSnapshotV2CacheKey struct {
 
 func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 	startTime, endTime, precise, err := parseDashboardRange(c)
-	if err != nil || (precise && endTime.Sub(startTime) > 2*time.Hour) {
+	if err != nil || (precise && endTime.Sub(startTime) > maxAdminRecentRange) {
 		response.BadRequest(c, "invalid start_time/end_time")
 		return
 	}

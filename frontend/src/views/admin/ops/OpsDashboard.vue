@@ -68,6 +68,8 @@
         </div>
       </div>
 
+      <AccountPerformancePanel v-if="!isFullscreen && opsEnabled && hasLoadedOnce" :range="performanceRange" :current-range="latestPerformanceRange" :refresh-token="performanceRefreshToken" />
+
       <OpsErrorRecordsPanel
         v-if="!isFullscreen && opsEnabled && !(loading && !hasLoadedOnce)"
         ref="errorRecordsPanel"
@@ -127,6 +129,7 @@
           v-model="showRequestDetails"
           :time-range="timeRange"
           :preset="requestDetailsPreset"
+          :exact-range="requestDetailsRange"
           :platform="platform"
           :group-id="groupId"
           :resume-state="resumeListState"
@@ -138,7 +141,10 @@
 </template>
 
 <script setup lang="ts">
+import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch, nextTick } from 'vue'
+import AccountPerformancePanel from '@/components/admin/usage/AccountPerformancePanel.vue'
+import { makeTodayOpsRange, type PreciseAdminRange } from '@/utils/adminRecentRange'
 import { useDebounceFn, useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
@@ -182,8 +188,8 @@ const { t } = useI18n()
 
 const opsEnabled = computed(() => adminSettingsStore.opsMonitoringEnabled)
 
-type TimeRange = '5m' | '30m' | '1h' | '6h' | '24h' | 'custom'
-const allowedTimeRanges = new Set<TimeRange>(['5m', '30m', '1h', '6h', '24h', 'custom'])
+type TimeRange = '5m' | '30m' | '1h' | '3h' | 'today' | '6h' | '24h' | 'custom'
+const allowedTimeRanges = new Set<TimeRange>(['5m', '30m', '1h', '3h', 'today', '6h', '24h', 'custom'])
 
 type QueryMode = 'auto' | 'raw' | 'preagg'
 const allowedQueryModes = new Set<QueryMode>(['auto', 'raw', 'preagg'])
@@ -196,13 +202,13 @@ const lastUpdated = ref<Date | null>(new Date())
 const timeRange = ref<TimeRange>('1h')
 const platform = ref<string>('')
 const groupId = ref<number | null>(null)
-const groups = ref<Array<{ id: number; name: string; platform: string }>>([])
+const groups = ref<Array<{ id: number; name: string; platform: string; display_category?: string; sort_order?: number }>>([])
 const groupOptionsFailed = ref(false)
 const groupOptions = computed(() => {
   const available = groups.value.filter(group => !platform.value || group.platform === platform.value)
-  const options: Array<{ value: number | null; label: string }> = [
+  const options: Array<{ value: number | string | null; label: string; kind?: string; disabled?: boolean }> = [
     { value: null, label: t('common.all') },
-    ...available.map(group => ({ value: group.id, label: group.name })),
+    ...buildAdminGroupSelectOptions(available, group => ({ value: group.id, label: group.name }), t),
   ]
   const selected = groupId.value
   if (selected !== null && !options.some(option => option.value === selected)) {
@@ -382,6 +388,18 @@ const syncQueryToRoute = useDebounceFn(async () => {
 }, 250)
 
 const overview = ref<OpsDashboardOverview | null>(null)
+const coreTodayRange = ref<PreciseAdminRange | null>(null)
+const performanceRange = ref<(PreciseAdminRange & { platform?: string; group_id?: number }) | null>(null)
+const performanceRefreshToken = ref(0)
+const performanceSelection = () => JSON.stringify([timeRange.value, platform.value, groupId.value, customStartTime.value, customEndTime.value])
+let performanceSelectionKey = ''
+const latestOverviewSelectionKey = ref('')
+const latestPerformanceRange = computed(() => {
+  if (!['5m','30m','1h','3h','today'].includes(timeRange.value) || latestOverviewSelectionKey.value !== performanceSelection() || !overview.value?.start_time || !overview.value.end_time) return null
+  return { start_time: overview.value.start_time, end_time: overview.value.end_time, platform: platform.value || undefined, group_id: groupId.value ?? undefined }
+})
+const requestDetailsRange = ref<PreciseAdminRange | null>(null)
+const currentOverviewWindow = () => latestOverviewSelectionKey.value === performanceSelection() && overview.value?.start_time && overview.value?.end_time ? { start_time: overview.value.start_time, end_time: overview.value.end_time } : null
 const metricThresholds = ref<OpsMetricThresholds | null>(null)
 
 const throughputTrend = ref<OpsThroughputTrendResponse | null>(null)
@@ -494,6 +512,7 @@ function handleOpenRequestDetails(preset?: OpsRequestDetailsPreset) {
   requestDetailsPreset.value = { ...basePreset, ...(preset ?? {}) }
   if (!requestDetailsPreset.value.title) requestDetailsPreset.value.title = basePreset.title
   // Ensure only one modal visible at a time.
+  requestDetailsRange.value = timeRange.value === 'today' || timeRange.value === '3h' ? currentOverviewWindow() : null
   showErrorModal.value = false
   showRequestDetails.value = true
 }
@@ -507,7 +526,7 @@ async function openErrorDetails(kind: 'request' | 'upstream') {
 
 function refreshDashboardAndErrors() {
   errorListRefreshToken.value++
-  void fetchData()
+  void fetchData(true)
 }
 watch(errorRecordsPanel, panel => { if (panel && route.query.errors_focus === '1') void nextTick(() => panel.focus()) })
 
@@ -596,7 +615,9 @@ function buildApiParams() {
     mode: queryMode.value
   }
 
-  if (timeRange.value === 'custom') {
+  if (timeRange.value === 'today') {
+    Object.assign(params, coreTodayRange.value ?? makeTodayOpsRange())
+  } else if (timeRange.value === 'custom') {
     if (customStartTime.value && customEndTime.value) {
       params.start_time = customStartTime.value
       params.end_time = customEndTime.value
@@ -771,8 +792,20 @@ function isOpsDisabledError(err: unknown): boolean {
   )
 }
 
-async function fetchData() {
+async function fetchData(refreshPerformance = false) {
   if (!opsEnabled.value) return
+  if (timeRange.value === 'today') coreTodayRange.value = makeTodayOpsRange()
+  const selection = performanceSelection()
+  const selectionChanged = selection !== performanceSelectionKey
+  if (selectionChanged) {
+    performanceRange.value = null
+    if (showRequestDetails.value) requestDetailsRange.value = null
+  }
+  if (timeRange.value === 'today' && coreTodayRange.value?.start_time === coreTodayRange.value?.end_time) {
+    abortDashboardFetch(); dashboardFetchSeq++
+    overview.value = null; throughputTrend.value = null; errorTrend.value = null
+    loading.value = false; hasLoadedOnce.value = true; return
+  }
   dashboardRequestParamsKey = JSON.stringify(buildApiParams())
 
   abortDashboardFetch()
@@ -789,6 +822,13 @@ async function fetchData() {
     ])
     if (fetchSeq !== dashboardFetchSeq) return
 
+    latestOverviewSelectionKey.value = selection
+    if (selectionChanged || refreshPerformance || (!performanceRange.value && latestPerformanceRange.value)) {
+      performanceSelectionKey = selection
+      performanceRange.value = latestPerformanceRange.value
+      if (refreshPerformance) performanceRefreshToken.value++
+    }
+    if (showRequestDetails.value && (timeRange.value === 'today' || timeRange.value === '3h') && !requestDetailsRange.value) requestDetailsRange.value = currentOverviewWindow()
     lastUpdated.value = new Date()
 
     // Trigger child component refreshes using the same cadence as the header.

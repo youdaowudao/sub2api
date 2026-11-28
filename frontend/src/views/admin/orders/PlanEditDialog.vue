@@ -91,7 +91,7 @@
 </template>
 
 <script setup lang="ts">
-import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -134,13 +134,12 @@ const validityUnitOptions = computed(() => [
 ])
 
 const groupOptions = computed(() =>
-  sortGroupsForDisplay(props.groups
-    .filter(g => g.subscription_type === 'subscription'))
-    .map(g => ({
+  buildAdminGroupSelectOptions(props.groups
+    .filter(g => g.subscription_type === 'subscription'), g => ({
       value: g.id,
       label: `${g.name} — ${g.platform} (${g.rate_multiplier}x)`,
       platform: g.platform,
-    })),
+    }), t),
 )
 
 const selectedGroupInfo = computed(() => {

@@ -19,6 +19,7 @@ export interface OpsRequestDetailsPreset {
 }
 
 interface Props {
+  exactRange?: { start_time: string; end_time: string } | null
   modelValue: boolean
   timeRange: string
   preset: OpsRequestDetailsPreset
@@ -58,12 +59,14 @@ function formatLatency(row: OpsRequestDetail): string {
 }
 
 const rangeLabel = computed(() => {
+  if (props.exactRange) return new Date(props.exactRange.start_time).toLocaleString() + ' – ' + new Date(props.exactRange.end_time).toLocaleString()
   const minutes = parseTimeRangeMinutes(props.timeRange)
   if (minutes >= 60) return t('admin.ops.requestDetails.rangeHours', { n: Math.round(minutes / 60) })
   return t('admin.ops.requestDetails.rangeMinutes', { n: minutes })
 })
 
 function buildTimeParams(): Pick<OpsRequestDetailsParams, 'start_time' | 'end_time'> {
+  if (props.exactRange) return props.exactRange
   const minutes = parseTimeRangeMinutes(props.timeRange)
   const endTime = new Date()
   const startTime = new Date(endTime.getTime() - minutes * 60 * 1000)
@@ -73,8 +76,11 @@ function buildTimeParams(): Pick<OpsRequestDetailsParams, 'start_time' | 'end_ti
   }
 }
 
+let requestSeq = 0
 const fetchData = async () => {
   if (!props.modelValue) return
+  if ((props.timeRange === 'today' || props.timeRange === '3h') && !props.exactRange) { items.value = []; total.value = 0; loading.value = false; return }
+  const seq = ++requestSeq
   loading.value = true
   try {
     const params: OpsRequestDetailsParams = {
@@ -93,45 +99,32 @@ const fetchData = async () => {
     if (typeof props.preset.max_duration_ms === 'number') params.max_duration_ms = props.preset.max_duration_ms
 
     const res = await opsAPI.listRequestDetails(params)
+    if (seq !== requestSeq) return
     items.value = res.items || []
     total.value = res.total || 0
     refreshAccountNames()
   } catch (e: any) {
+    if (seq !== requestSeq) return
     console.error('[OpsRequestDetailsModal] Failed to fetch request details', e)
     appStore.showError(e?.message || t('admin.ops.requestDetails.failedToLoad'))
     items.value = []
     total.value = 0
   } finally {
-    loading.value = false
+    if (seq === requestSeq) loading.value = false
   }
 }
 
 watch(
-  () => props.modelValue,
-  (open) => {
-    if (open) {
-      if (props.resumeState) return
-      page.value = 1
-      pageSize.value = 10
-      fetchData()
-    }
-  }
-)
-
-watch(
-  () => [
-    props.timeRange,
-    props.platform,
-    props.groupId,
-    props.preset.kind,
-    props.preset.sort,
-    props.preset.min_duration_ms,
-    props.preset.max_duration_ms
-  ],
-  () => {
-    if (!props.modelValue) return
+  () => [props.modelValue, props.timeRange, props.platform, props.groupId,
+    props.preset.kind, props.preset.sort, props.preset.min_duration_ms, props.preset.max_duration_ms,
+    props.exactRange?.start_time, props.exactRange?.end_time] as const,
+  (next, prev) => {
+    requestSeq++
+    if (!next[0]) return
+    if (!prev?.[0] && props.resumeState) return
     page.value = 1
-    fetchData()
+    if (!prev?.[0]) pageSize.value = 10
+    void fetchData()
   }
 )
 

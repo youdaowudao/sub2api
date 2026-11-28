@@ -27,7 +27,7 @@
             <th class="pb-2 pl-3 text-right">{{ t('admin.dashboard.spendingRankingTokens') }}</th>
             <th class="pb-2 pl-3 text-right">{{ t('admin.dashboard.spendingRankingSpend') }}</th>
             <th class="pb-2 pl-3 text-right">{{ t('admin.dashboard.share') }}</th>
-            <th v-if="showCompare" class="pb-2 pl-3 text-right">{{ t('admin.dashboard.vsYesterday') }}</th>
+            <th v-if="showCompare" class="pb-2 pl-3 text-right">{{ t('admin.dashboard.vsYesterday') }}<span v-if="compare?.window" class="block text-xs font-normal">{{ compare.window }}</span></th>
           </tr>
         </thead>
         <tbody>
@@ -85,6 +85,7 @@ import type { UserSpendingRankingItem } from '@/types'
 interface RankingComparison {
   items: UserSpendingRankingItem[]
   totalUsers: number
+  window?: string
 }
 
 type ComparisonValue = number | 'new' | null

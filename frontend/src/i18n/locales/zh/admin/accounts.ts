@@ -1,5 +1,14 @@
 export default {
     accounts: {
+      setDefaultGroup: "设为默认分组",
+      cancelDefaultGroup: "取消默认分组",
+      currentDefaultGroup: "默认：{name}",
+      defaultGroupUnavailable: "默认分组不可选，已显示全部分组",
+      todaySortMetric: "排序指标",
+      reverseSort: "反向排序",
+      metricSortFailedPrevious: "排序数据更新失败，当前显示同一条件的上次结果。请重试或改用其他排序。",
+      metricSortFailed: "排序数据更新失败，请重试或改用其他排序。",
+      cacheSortRangePending: "缓存率区间已变更，刷新列表后生效（当前排序区间：{range}）",
       title: '账号管理',
       description: '管理 AI 平台账号和 Cookie',
       createAccount: '添加账号',
@@ -93,7 +102,11 @@ export default {
       schedulableHint: '开启后账号参与API请求调度',
       schedulableEnabled: '调度已开启',
       schedulableDisabled: '调度已关闭',
+      locatedAccount: '定位账号 #{id}',
+      locateMissing: '未找到该账号，可能已删除',
       scheduleTimer: {
+        busyAccounts: '有选中的账号正在更新调度，请等待完成后重试',
+        switchUnknown: '可能已保存，请刷新核对调度和计时状态',
         button: '定时暂停',
         hours: '暂停 {hours} 小时',
         alreadyClosed: '账号已关闭调度',

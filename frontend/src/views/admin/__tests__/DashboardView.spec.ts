@@ -380,7 +380,7 @@ describe('admin DashboardView', () => {
     try {
       await flushPromises()
       const comparisonCell = () => ranking(wrapper).get('tbody tr').findAll('td').at(-1)!.text()
-      expect(ranking(wrapper).props('compare')).toEqual({ items: [initialYesterday], totalUsers: 1 })
+      expect(ranking(wrapper).props('compare')).toEqual({ items: [initialYesterday], totalUsers: 1, window: expect.any(String) })
       expect(comparisonCell()).toBe('↑ 100.0%')
       expect(getSnapshotV2.mock.lastCall?.[0]).toMatchObject({ start_time: windowStart, end_time: windowEnd })
 
@@ -421,11 +421,11 @@ describe('admin DashboardView', () => {
       await button(wrapper, 'common.refresh').trigger('click')
       await flushPromises()
       expect(getSnapshotV2.mock.lastCall?.[0]).toMatchObject({ start_time: '2026-11-27T00:41:00.000Z', end_time: '2026-11-27T01:41:00.000Z' })
-      expect(ranking(wrapper).props('compare')).toEqual({ items: [currentYesterday], totalUsers: 1 })
+      expect(ranking(wrapper).props('compare')).toEqual({ items: [currentYesterday], totalUsers: 1, window: expect.any(String) })
       expect(comparisonCell()).toBe('↓ 50.0%')
       staleYesterday.resolve(rankingResponse(initialYesterday))
       await flushPromises()
-      expect(ranking(wrapper).props('compare')).toEqual({ items: [currentYesterday], totalUsers: 1 })
+      expect(ranking(wrapper).props('compare')).toEqual({ items: [currentYesterday], totalUsers: 1, window: expect.any(String) })
       expect(comparisonCell()).toBe('↓ 50.0%')
     } finally { wrapper.unmount() }
   })
@@ -441,7 +441,7 @@ describe('admin DashboardView', () => {
     } finally { wrapper.unmount() }
   })
 
-  it('V11 passes precise model filters, remounts on range change and uses local cross-midnight dates for row click', async () => {
+  it('V11 passes precise model filters and preserves the cross-midnight window when drilling down', async () => {
     vi.setSystemTime(new Date(2026, 10, 27, 0, 20, 25))
     const item = rankingItem(9, 'midnight')
     getUserSpendingRanking.mockResolvedValue(rankingResponse(item))
@@ -455,7 +455,7 @@ describe('admin DashboardView', () => {
       expect(model.props('filters')).toEqual({ start_time: start, end_time: end })
       expect(model.props('enableRankingView')).toBe(false)
       ranking(wrapper).vm.$emit('row-click', item)
-      expect(push).toHaveBeenLastCalledWith({ path: '/admin/usage', query: { user_id: '9', start_date: '2026-11-26', end_date: '2026-11-27' } })
+      expect(push).toHaveBeenLastCalledWith({ path: '/admin/usage', query: { user_id: '9', start_time: start, end_time: end } })
       await applyRange(wrapper, '2026-11-21', '2026-11-27')
       expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).vm.$.uid).not.toBe(oldInstance)
       expect(wrapper.findComponent({ name: 'ModelDistributionChart' }).props('filters')).toEqual({})
@@ -503,7 +503,7 @@ describe('admin DashboardView', () => {
       })
       await ranking(wrapper).get('tbody tr').trigger('click')
       expect(push).toHaveBeenCalledTimes(1)
-      expect(push).toHaveBeenLastCalledWith({ path: '/admin/usage', query: { user_id: '9', start_date: '2026-11-26', end_date: '2026-11-26' } })
+      expect(push).toHaveBeenLastCalledWith({ path: '/admin/usage', query: { user_id: '9', start_time: new Date(2026, 10, 26, 23, 0).toISOString(), end_time: new Date(2026, 10, 27, 0, 0).toISOString() } })
     } finally { wrapper.unmount() }
   })
 })

@@ -1,5 +1,6 @@
 export default {
   common: {
+    horizontalScrollHint: "滚轮左右移动",
     unknownPlatform: '未识别平台',
     loading: '加载中...',
     submitting: '提交中...',

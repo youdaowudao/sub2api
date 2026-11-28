@@ -840,7 +840,7 @@
 </template>
 
 <script setup lang="ts">
-import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -1108,7 +1108,7 @@ const extendForm = reactive({
 // Group options for filter (all groups)
 const groupOptions = computed(() => [
   { value: '', label: t('admin.subscriptions.allGroups') },
-  ...sortGroupsForDisplay(groups.value).map((g) => ({ value: g.id.toString(), label: g.name }))
+  ...buildAdminGroupSelectOptions(groups.value, (g) => ({ value: g.id.toString(), label: g.name }), t)
 ])
 
 const platformFilterOptions = computed(() => [
@@ -1118,16 +1118,15 @@ const platformFilterOptions = computed(() => [
 
 // Group options for assign (only subscription type groups)
 const subscriptionGroupOptions = computed(() =>
-  sortGroupsForDisplay(groups.value
-    .filter((g) => g.subscription_type === 'subscription' && g.status === 'active'))
-    .map((g) => ({
+  buildAdminGroupSelectOptions(groups.value
+    .filter((g) => g.subscription_type === 'subscription' && g.status === 'active'), (g) => ({
       value: g.id,
       label: g.name,
       description: g.description,
       platform: g.platform,
       subscriptionType: g.subscription_type,
       rate: g.rate_multiplier
-    }))
+    }), t)
 )
 
 const applyFilters = () => {

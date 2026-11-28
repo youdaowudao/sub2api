@@ -144,7 +144,7 @@ export interface OpsRequestDetail {
 }
 
 export interface OpsRequestDetailsParams {
-  time_range?: '5m' | '30m' | '1h' | '6h' | '24h'
+  time_range?: '5m' | '30m' | '1h' | '3h' | '6h' | '24h'
   start_time?: string
   end_time?: string
 
@@ -860,7 +860,7 @@ export type OpsSystemLogListResponse = PaginatedResponse<OpsSystemLog>
 export interface OpsSystemLogQuery {
   page?: number
   page_size?: number
-  time_range?: '5m' | '30m' | '1h' | '6h' | '24h' | '7d' | '30d'
+  time_range?: '5m' | '30m' | '1h' | '3h' | '6h' | '24h' | '7d' | '30d'
   start_time?: string
   end_time?: string
   host?: string
@@ -1024,7 +1024,7 @@ export type OpsErrorLogsResponse = PaginatedResponse<OpsErrorLog>
 
 export async function getDashboardOverview(
   params: {
-  time_range?: '5m' | '30m' | '1h' | '6h' | '24h'
+  time_range?: '5m' | '30m' | '1h' | '3h' | '6h' | '24h'
   start_time?: string
   end_time?: string
   platform?: string
@@ -1042,7 +1042,7 @@ export async function getDashboardOverview(
 
 export async function getDashboardSnapshotV2(
   params: {
-  time_range?: '5m' | '30m' | '1h' | '6h' | '24h'
+  time_range?: '5m' | '30m' | '1h' | '3h' | '6h' | '24h'
   start_time?: string
   end_time?: string
   platform?: string
@@ -1060,7 +1060,7 @@ export async function getDashboardSnapshotV2(
 
 export async function getThroughputTrend(
   params: {
-  time_range?: '5m' | '30m' | '1h' | '6h' | '24h'
+  time_range?: '5m' | '30m' | '1h' | '3h' | '6h' | '24h'
   start_time?: string
   end_time?: string
   platform?: string
@@ -1078,7 +1078,7 @@ export async function getThroughputTrend(
 
 export async function getLatencyHistogram(
   params: {
-  time_range?: '5m' | '30m' | '1h' | '6h' | '24h'
+  time_range?: '5m' | '30m' | '1h' | '3h' | '6h' | '24h'
   start_time?: string
   end_time?: string
   platform?: string
@@ -1096,7 +1096,7 @@ export async function getLatencyHistogram(
 
 export async function getErrorTrend(
   params: {
-  time_range?: '5m' | '30m' | '1h' | '6h' | '24h'
+  time_range?: '5m' | '30m' | '1h' | '3h' | '6h' | '24h'
   start_time?: string
   end_time?: string
   platform?: string
@@ -1114,7 +1114,7 @@ export async function getErrorTrend(
 
 export async function getErrorDistribution(
   params: {
-  time_range?: '5m' | '30m' | '1h' | '6h' | '24h'
+  time_range?: '5m' | '30m' | '1h' | '3h' | '6h' | '24h'
   start_time?: string
   end_time?: string
   platform?: string

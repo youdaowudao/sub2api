@@ -45,7 +45,7 @@ func lockScheduleTimer(ctx context.Context, tx *dbent.Tx, id int64) (lockedSched
 }
 
 func (r *accountRepository) StartAccountScheduleTimer(ctx context.Context, id int64, hours int) (*service.AccountScheduleTimerResult, error) {
-	if hours != 6 && hours != 12 && hours != 24 {
+	if hours != 1 && hours != 2 && hours != 3 && hours != 6 && hours != 12 && hours != 24 {
 		return nil, service.ErrScheduleTimerDuration
 	}
 	tx, err := r.client.Tx(ctx)
@@ -143,9 +143,6 @@ func (r *accountRepository) resumeScheduleTimer(ctx context.Context, id int64) (
 		return false, nil
 	}
 	if err := r.SetSchedulable(dbent.NewTxContext(ctx, tx), id, true); err != nil {
-		return false, err
-	}
-	if _, err := tx.Client().ExecContext(ctx, "UPDATE accounts SET schedule_resume_at = NULL WHERE id = $1", id); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {

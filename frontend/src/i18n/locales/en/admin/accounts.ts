@@ -1,5 +1,14 @@
 export default {
     accounts: {
+      setDefaultGroup: "Set default group",
+      cancelDefaultGroup: "Clear default group",
+      currentDefaultGroup: "Default: {name}",
+      defaultGroupUnavailable: "Default group unavailable; showing all groups",
+      todaySortMetric: "Sort by metric",
+      reverseSort: "Reverse order",
+      metricSortFailedPrevious: "Could not update sorted data; showing the last result for these filters. Retry or choose another sort.",
+      metricSortFailed: "Failed to update sorted data. Retry or select another sort.",
+      cacheSortRangePending: "Cache rate period changed. Refresh to apply (current sort: {range})",
       title: 'Account Management',
       description: 'Manage AI platform accounts and credentials',
       createAccount: 'Create Account',
@@ -95,7 +104,11 @@ export default {
       schedulableHint: 'Enable to include this account in API request scheduling',
       schedulableEnabled: 'Scheduling enabled',
       schedulableDisabled: 'Scheduling disabled',
+      locatedAccount: 'Account #{id}',
+      locateMissing: 'Account not found; it may have been deleted',
       scheduleTimer: {
+        busyAccounts: 'Some selected accounts are updating scheduling. Wait for them to finish and retry.',
+        switchUnknown: 'The change may have been saved. Refresh to check scheduling and the timer.',
         button: 'Pause for…',
         hours: 'Pause for {hours} hours',
         alreadyClosed: 'Scheduling is already disabled',

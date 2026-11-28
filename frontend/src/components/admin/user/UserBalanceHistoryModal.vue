@@ -55,6 +55,7 @@
           class="w-56"
           @change="loadHistory(1)"
         />
+        <slot name="query-actions" />
         <!-- Deposit button - matches menu style -->
         <button
           v-if="!hideActions"

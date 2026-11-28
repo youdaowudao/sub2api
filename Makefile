@@ -52,6 +52,16 @@ FRONTEND_CRITICAL_VITEST := \
 	src/components/user/profile/__tests__/ProfileIdentityBindingsSection.spec.ts \
 	src/views/admin/__tests__/SettingsView.spec.ts \
 	src/views/admin/__tests__/DashboardView.spec.ts \
+	src/views/admin/__tests__/UsageView.spec.ts \
+	src/views/admin/__tests__/AccountsView.lite.spec.ts \
+	src/components/account/__tests__/AccountScheduleTimer.spec.ts \
+	src/api/__tests__/accounts.scheduleTimer.spec.ts \
+	src/components/admin/usage/__tests__/UsageFilters.spec.ts \
+	src/components/admin/usage/__tests__/AccountPerformancePanel.spec.ts \
+	src/composables/__tests__/useAdminUserHistory.spec.ts \
+	src/views/admin/ops/__tests__/OpsDashboard.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsErrorRecordsPanel.interactions.spec.ts \
+	src/views/admin/ops/components/__tests__/OpsRequestDetailsModal.spec.ts \
 	src/components/admin/dashboard/__tests__/AdminDashboardUserRanking.spec.ts \
 	src/components/admin/dashboard/__tests__/AdminDashboardGroupCacheRate.spec.ts \
 	src/components/charts/__tests__/TokenUsageTrend.spec.ts \

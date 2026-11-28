@@ -31,7 +31,11 @@ func expectScheduleTimerLock(mock sqlmock.Sqlmock, id int64, enabled bool, until
 }
 
 func expectScheduleTimerSwitch(mock sqlmock.Sqlmock, enabled bool, id int64) {
-	mock.ExpectExec(`UPDATE "accounts" SET .*"schedulable" = .*`).
+	query := `UPDATE "accounts" SET .*"schedulable" = .*`
+	if enabled {
+		query = `UPDATE "accounts" SET (.*"schedulable" = .*"schedule_resume_at"\s*=\s*NULL|.*"schedule_resume_at"\s*=\s*NULL.*"schedulable" = .*)`
+	}
+	mock.ExpectExec(query).
 		WithArgs(sqlmock.AnyArg(), enabled, id).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`INSERT INTO scheduler_outbox`).
 		WithArgs(service.SchedulerOutboxEventAccountChanged, id, nil, nil, sqlmock.AnyArg()).
@@ -39,7 +43,7 @@ func expectScheduleTimerSwitch(mock sqlmock.Sqlmock, enabled bool, id int64) {
 }
 
 func TestStartAccountScheduleTimer(t *testing.T) {
-	for _, hours := range []int{6, 12, 24} {
+	for _, hours := range []int{1, 2, 3, 6, 12, 24} {
 		t.Run(strconv.Itoa(hours)+" hours", func(t *testing.T) {
 			repo, mock := newScheduleTimerTestRepo(t)
 			now := time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC)
@@ -82,7 +86,7 @@ func TestStartAccountScheduleTimerPreservesExistingState(t *testing.T) {
 			require.NoError(t, mock.ExpectationsWereMet(), "conflicts must not write the switch or deadline")
 		})
 	}
-	for _, hours := range []int{0, 1, 30} {
+	for _, hours := range []int{0, 4, 30} {
 		repo, mock := newScheduleTimerTestRepo(t)
 		_, err := repo.StartAccountScheduleTimer(context.Background(), 17, hours)
 		require.ErrorIs(t, err, service.ErrScheduleTimerDuration)
@@ -170,8 +174,7 @@ func TestResumeDueScheduleTimersRollsBackWhenClearingDeadlineFails(t *testing.T)
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(17)))
 	mock.ExpectBegin()
 	expectScheduleTimerLock(mock, 17, false, now.Add(-time.Minute), now)
-	expectScheduleTimerSwitch(mock, true, 17)
-	mock.ExpectExec(`UPDATE accounts SET schedule_resume_at = NULL`).WillReturnError(errors.New("clear deadline failed"))
+	mock.ExpectExec(`UPDATE "accounts" SET (.*"schedulable" = .*"schedule_resume_at"\s*=\s*NULL|.*"schedule_resume_at"\s*=\s*NULL.*"schedulable" = .*)`).WillReturnError(errors.New("enable and clear deadline failed"))
 	mock.ExpectRollback()
 	completed, err := repo.ResumeDueScheduleTimers(context.Background())
 	require.Error(t, err)
@@ -187,8 +190,6 @@ func TestResumeDueScheduleTimersUsesOriginalEnable(t *testing.T) {
 	mock.ExpectBegin()
 	expectScheduleTimerLock(mock, 17, false, now.Add(-time.Minute), now)
 	expectScheduleTimerSwitch(mock, true, 17)
-	mock.ExpectExec(`UPDATE accounts SET schedule_resume_at = NULL WHERE id = \$1`).
-		WithArgs(int64(17)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	completed, err := repo.ResumeDueScheduleTimers(context.Background())
 	require.NoError(t, err)
@@ -224,7 +225,6 @@ func TestResumeDueScheduleTimersContinuesAfterFailedAccount(t *testing.T) {
 	mock.ExpectBegin()
 	expectScheduleTimerLock(mock, 18, false, now.Add(-time.Minute), now)
 	expectScheduleTimerSwitch(mock, true, 18)
-	mock.ExpectExec(`UPDATE accounts SET schedule_resume_at = NULL`).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	completed, err := repo.ResumeDueScheduleTimers(context.Background())
 	require.Error(t, err)

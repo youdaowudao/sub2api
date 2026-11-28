@@ -337,6 +337,10 @@ func (r *usageLogRepository) GetAccountWindowStats(ctx context.Context, accountI
 // GetAccountWindowStatsBatch 批量获取同一窗口起点下多个账号的统计数据。
 // 返回 map[accountID]*AccountStats，未命中的账号会返回零值统计，便于上层直接复用。
 func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, accountIDs []int64, startTime time.Time) (map[int64]*usagestats.AccountStats, error) {
+	return readAccountWindowStatsBatch(ctx, r.sql, accountIDs, startTime)
+}
+
+func readAccountWindowStatsBatch(ctx context.Context, sqlq sqlExecutor, accountIDs []int64, startTime time.Time) (map[int64]*usagestats.AccountStats, error) {
 	result := make(map[int64]*usagestats.AccountStats, len(accountIDs))
 	if len(accountIDs) == 0 {
 		return result, nil
@@ -354,7 +358,7 @@ func (r *usageLogRepository) GetAccountWindowStatsBatch(ctx context.Context, acc
 		WHERE account_id = ANY($1) AND created_at >= $2
 		GROUP BY account_id
 	`
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(accountIDs), startTime)
+	rows, err := sqlq.QueryContext(ctx, query, pq.Array(accountIDs), startTime)
 	if err != nil {
 		return nil, err
 	}
@@ -1098,6 +1102,10 @@ func buildUsageLogStatsConditions(filters UsageLogFilters) ([]string, []any) {
 
 // GetCacheHitRateStats aggregates the usage table before joining display names.
 func (r *usageLogRepository) GetCacheHitRateStats(ctx context.Context, filters UsageLogFilters, dimension string, accountIDs []int64) ([]usagestats.CacheHitRateItem, error) {
+	return readCacheHitRateStats(ctx, r.sql, filters, dimension, accountIDs)
+}
+
+func readCacheHitRateStats(ctx context.Context, sqlq sqlExecutor, filters UsageLogFilters, dimension string, accountIDs []int64) ([]usagestats.CacheHitRateItem, error) {
 	conditions, args := buildUsageLogStatsConditions(filters)
 	idExpr, groupBy, display, join, order := "0::bigint", "", "'' AS name, '' AS platform", "", "s.id ASC"
 	switch dimension {
@@ -1123,7 +1131,7 @@ func (r *usageLogRepository) GetCacheHitRateStats(ctx context.Context, filters U
         FROM usage_logs %s %s
     ) SELECT s.id, %s, s.requests, s.input_tokens, s.cache_creation_tokens, s.cache_read_tokens
       FROM scoped s %s ORDER BY %s`, idExpr, buildWhere(conditions), groupBy, display, join, order)
-	rows, err := r.sql.QueryContext(ctx, query, args...)
+	rows, err := sqlq.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

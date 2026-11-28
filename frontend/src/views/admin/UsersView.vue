@@ -792,6 +792,7 @@
 </template>
 
 <script setup lang="ts">
+import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
@@ -1109,10 +1110,7 @@ const groupFilterOptions = computed(() => {
   const options: { value: string; label: string }[] = [
     { value: '', label: t('admin.users.allAuthorizedGroups') }
   ]
-  for (const g of displayAllGroups.value) {
-    if (g.status !== 'active' || !g.is_exclusive || g.subscription_type !== 'standard') continue
-    options.push({ value: g.name, label: g.name })
-  }
+  options.push(...buildAdminGroupSelectOptions(displayAllGroups.value.filter(g => g.status === 'active' && g.is_exclusive && g.subscription_type === 'standard'), g => ({ value: g.name, label: g.name }), t))
   return options
 })
 
@@ -1125,6 +1123,7 @@ const apiKeyGroupFilterOptions = computed(() =>
     public: t('admin.users.apiKeyGroupPublic'),
     subscription: t('admin.users.apiKeyGroupSubscription'),
     disabled: t('admin.users.apiKeyGroupDisabled'),
+    categoryLabel: t,
   }) as SelectOption[]
 )
 

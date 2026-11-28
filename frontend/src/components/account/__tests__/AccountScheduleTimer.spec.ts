@@ -40,7 +40,7 @@ afterEach(() => {
 })
 
 describe('AccountScheduleTimer', () => {
-  it.each([6, 12, 24])('asks the page to pause for %s hours without changing the switch itself', async hours => {
+  it.each([1, 2, 3, 6, 12, 24])('asks the page to pause for %s hours without changing the switch itself', async hours => {
     const wrapper = mountTimer()
     await choose(wrapper, hours)
     expect(wrapper.emitted('start')).toEqual([[hours]])
@@ -61,11 +61,11 @@ describe('AccountScheduleTimer', () => {
     expect(wrapper.emitted('start')).toBeUndefined()
   })
 
-  it('offers exactly the three approved durations', async () => {
+  it('offers exactly the six approved durations', async () => {
     const wrapper = mountTimer()
     await wrapper.get('button').trigger('click')
     expect([...document.querySelectorAll('[role="option"]')].map(el => el.textContent?.trim()))
-      .toEqual(['暂停 6 小时', '暂停 12 小时', '暂停 24 小时'])
+      .toEqual(['暂停 1 小时', '暂停 2 小时', '暂停 3 小时', '暂停 6 小时', '暂停 12 小时', '暂停 24 小时'])
   })
 
   it.each([{ busy: true }, { disabled: true }])('uses the page-owned pending and disabled state: %j', async state => {

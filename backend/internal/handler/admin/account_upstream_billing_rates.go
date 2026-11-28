@@ -61,10 +61,50 @@ func (h *AccountHandler) GetUpstreamBillingRates(c *gin.Context) {
 		}
 	}
 
-	accounts, total, err := h.adminService.ListAccounts(
-		c.Request.Context(), page, pageSize, platform, accountType, status,
-		search, groupID, privacyMode, sortBy, sortOrder,
-	)
+	var accounts []service.Account
+	var total int64
+	var err error
+	if raw, present := c.Request.URL.Query()["account_ids"]; present {
+		if len(raw) != 1 || platform != "" || accountType != "" || status != "" || search != "" || groupID != 0 || privacyMode != "" || c.Query("sort_by") != "" || c.Query("sort_order") != "" {
+			response.BadRequest(c, "account_ids cannot be combined with list filters or sorting")
+			return
+		}
+		parts := strings.Split(raw[0], ",")
+		if len(parts) > 1000 {
+			response.BadRequest(c, "too many account_ids")
+			return
+		}
+		ids := make([]int64, 0, len(parts))
+		seen := make(map[int64]bool, len(parts))
+		for _, part := range parts {
+			id, parseErr := strconv.ParseInt(part, 10, 64)
+			if parseErr != nil || id <= 0 || seen[id] {
+				response.BadRequest(c, "invalid account_ids")
+				return
+			}
+			seen[id] = true
+			ids = append(ids, id)
+		}
+		var rows []*service.Account
+		rows, err = h.adminService.GetAccountsByIDs(c.Request.Context(), ids)
+		byID := make(map[int64]*service.Account, len(rows))
+		for _, row := range rows {
+			if row != nil {
+				byID[row.ID] = row
+			}
+		}
+		for _, id := range ids {
+			if row := byID[id]; row != nil {
+				accounts = append(accounts, *row)
+			}
+		}
+		total = int64(len(accounts))
+	} else {
+		accounts, total, err = h.adminService.ListAccounts(
+			c.Request.Context(), page, pageSize, platform, accountType, status,
+			search, groupID, privacyMode, sortBy, sortOrder,
+		)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

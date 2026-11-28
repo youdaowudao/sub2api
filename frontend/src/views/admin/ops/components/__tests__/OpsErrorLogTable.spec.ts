@@ -142,3 +142,12 @@ it('renders aggregate identities and unknown values instead of a representative 
   expect(wrapper.find('button[title="admin.usage.clickToViewBalance"]').exists()).toBe(false)
   wrapper.unmount()
 })
+
+it('does not expose a known user/key as unique when unknown members also exist', async () => {
+  const wrapper = mountTable({ user_id: 9, user_email: 'known@example.test', api_key_id: 8, api_key_name: 'known-key', account_id: 5 })
+  await wrapper.setProps({userClickable:true,quickFilters:true,recordMeta:{1:{representative_id:1,count:2,representative:{id:1},user_count:1,has_unknown_user:true,single_user:{id:9,email:'known@example.test'},api_key_count:1,has_unknown_api_key:true,single_api_key:{id:8,name:'known-key'}}}} as never)
+  expect(wrapper.text()).not.toContain('known@example.test')
+  expect(wrapper.find('button[title="admin.usage.clickToViewBalance"]').exists()).toBe(false)
+  expect(wrapper.find('button[title="admin.usage.filterThisKey"]').exists()).toBe(false)
+  wrapper.unmount()
+})

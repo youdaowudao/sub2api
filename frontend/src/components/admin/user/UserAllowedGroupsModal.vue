@@ -29,8 +29,8 @@
             <span class="text-xs text-gray-400">({{ exclusiveGroupConfigs.filter(c => c.isSelected).length }}/{{ exclusiveGroupConfigs.length }})</span>
           </div>
           <div class="grid gap-3">
-            <div
-              v-for="config in exclusiveGroupConfigs"
+            <CategorizedGroupList :groups="exclusiveGroupConfigs" #default="{ group: config }">
+              <div
               :key="config.groupId"
               class="group relative overflow-hidden rounded-xl border-2 p-4 transition-all duration-200"
               :class="config.isSelected
@@ -90,6 +90,7 @@
                 </div>
               </div>
             </div>
+            </CategorizedGroupList>
           </div>
         </div>
 
@@ -113,8 +114,8 @@
           </div>
           <p class="mb-3 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.users.restrictPublicGroupsHint') }}</p>
           <div class="grid gap-3">
-            <div
-              v-for="config in publicGroupConfigs"
+            <CategorizedGroupList :groups="publicGroupConfigs" #default="{ group: config }">
+              <div
               :key="config.groupId"
               class="relative overflow-hidden rounded-xl border-2 border-green-200 bg-green-50/50 p-4 dark:border-green-800/50 dark:bg-green-900/10"
             >
@@ -170,6 +171,7 @@
                 </div>
               </div>
             </div>
+            </CategorizedGroupList>
           </div>
         </div>
 
@@ -201,6 +203,7 @@
 </template>
 
 <script setup lang="ts">
+import CategorizedGroupList from '@/components/common/CategorizedGroupList.vue'
 import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 
 import { ref, watch, computed } from 'vue'
@@ -240,7 +243,7 @@ const publicGroups = computed(() => groups.value.filter((g) => !g.is_exclusive))
 
 const displayGroupConfigs = computed(() => {
   const byID = new Map(groupConfigs.value.map(c => [c.groupId, c]))
-  return sortGroupsForDisplay(groups.value).map(g => byID.get(g.id)!).filter(Boolean)
+  return sortGroupsForDisplay(groups.value).flatMap(g => { const config = byID.get(g.id); return config ? [{ ...config, id: g.id, display_category: g.display_category, sort_order: g.sort_order }] : [] })
 })
 const exclusiveGroupConfigs = computed(() => displayGroupConfigs.value.filter((c) => c.isExclusive))
 const publicGroupConfigs = computed(() => displayGroupConfigs.value.filter((c) => !c.isExclusive))

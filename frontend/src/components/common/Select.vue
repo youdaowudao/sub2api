@@ -92,7 +92,8 @@
                 focusedIndex === index && !isGroupHeaderOption(option) && 'select-option-focused'
               ]"
             >
-              <slot name="option" :option="option" :selected="isSelected(option)">
+              <span v-if="isGroupHeaderOption(option)" class="select-option-label">{{ getOptionLabel(option) }}</span>
+              <slot v-else name="option" :option="option" :selected="isSelected(option)">
                 <Icon
                   v-if="option._creatable"
                   name="search"

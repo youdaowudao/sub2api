@@ -6,24 +6,27 @@
       :placeholder="t('admin.accounts.searchAccounts')"
       class="col-span-2 sm:w-52"
       @update:model-value="$emit('update:searchQuery', $event)"
-      @search="$emit('change')"
     />
-    <Select :model-value="filters.platform" class="min-w-0 sm:w-40" :options="pOpts" @update:model-value="updatePlatform" @change="$emit('change')" />
-    <Select :model-value="filters.type" class="min-w-0 sm:w-40" :options="tOpts" @update:model-value="updateType" @change="$emit('change')" />
-    <Select :model-value="filters.status" class="min-w-0 sm:w-40" :options="sOpts" @update:model-value="updateStatus" @change="$emit('change')" />
-    <Select :model-value="filters.privacy_mode" class="min-w-0 sm:w-48" :options="privacyOpts" @update:model-value="updatePrivacyMode" @change="$emit('change')" />
-    <Select :model-value="filters.group" class="col-span-2 min-w-0 sm:w-40" :options="gOpts" @update:model-value="updateGroup" @change="$emit('change')" />
+    <Select :disabled="disabled" :model-value="filters.platform" class="min-w-0 sm:w-40" :options="pOpts" @update:model-value="updatePlatform" @change="$emit('change')" />
+    <Select :disabled="disabled" :model-value="filters.type" class="min-w-0 sm:w-40" :options="tOpts" @update:model-value="updateType" @change="$emit('change')" />
+    <Select :disabled="disabled" :model-value="filters.status" class="min-w-0 sm:w-40" :options="sOpts" @update:model-value="updateStatus" @change="$emit('change')" />
+    <Select :disabled="disabled" :model-value="filters.privacy_mode" class="min-w-0 sm:w-48" :options="privacyOpts" @update:model-value="updatePrivacyMode" @change="$emit('change')" />
+    <Select :disabled="disabled" :model-value="filters.group" class="col-span-2 min-w-0 sm:w-40" searchable :options="gOpts" @update:model-value="updateGroup" @change="$emit('change')" />
+    <button v-if="!located" type="button" class="btn btn-secondary text-xs" data-testid="account-default-group" :disabled="disabled" @click="$emit('set-default-group', filters.group)">
+      {{ filters.group === defaultGroup && defaultGroup !== '' ? t('admin.accounts.cancelDefaultGroup') : t('admin.accounts.setDefaultGroup') }}
+    </button>
+    <span v-if="defaultGroup" class="text-xs text-gray-500">{{ t('admin.accounts.currentDefaultGroup', { name: defaultGroupLabel }) }}</span>
   </div>
 </template>
 
 <script setup lang="ts">
-import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 
 import { computed } from 'vue'; import { useI18n } from 'vue-i18n'; import Select from '@/components/common/Select.vue'; import SearchInput from '@/components/common/SearchInput.vue'
 import type { AdminGroup } from '@/types'
 import { CONCRETE_PLATFORM_OPTIONS } from '@/constants/platforms'
-const props = defineProps<{ searchQuery: string; filters: Record<string, any>; groups?: AdminGroup[] }>()
-const emit = defineEmits(['update:searchQuery', 'update:filters', 'change']); const { t } = useI18n()
+const props = defineProps<{ searchQuery: string; filters: Record<string, any>; groups?: AdminGroup[]; defaultGroup?: string; located?: boolean; disabled?: boolean }>()
+const emit = defineEmits(['update:searchQuery', 'update:filters', 'change', 'set-default-group']); const { t } = useI18n()
 const updatePlatform = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, platform: value }) }
 const updateType = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, type: value }) }
 const updateStatus = (value: string | number | boolean | null) => { emit('update:filters', { ...props.filters, status: value }) }
@@ -42,6 +45,7 @@ const privacyOpts = computed(() => [
 const gOpts = computed(() => [
   { value: '', label: t('admin.accounts.allGroups') },
   { value: 'ungrouped', label: t('admin.accounts.ungroupedGroup') },
-  ...sortGroupsForDisplay(props.groups || []).map(g => ({ value: String(g.id), label: g.name }))
+  ...buildAdminGroupSelectOptions(props.groups || [], g => ({ value: String(g.id), label: g.name }), t)
 ])
+const defaultGroupLabel = computed(() => props.defaultGroup === 'ungrouped' ? t('admin.accounts.ungroupedGroup') : props.groups?.find(g => String(g.id) === props.defaultGroup)?.name || '#' + props.defaultGroup)
 </script>

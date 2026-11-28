@@ -80,6 +80,8 @@ export async function getUsageTrend(params?: TrendParams): Promise<TrendResponse
 }
 
 export interface ModelStatsParams {
+  start_time?: string
+  end_time?: string
   start_date?: string
   end_date?: string
   user_id?: number

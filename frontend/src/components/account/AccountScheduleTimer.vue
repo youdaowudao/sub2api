@@ -26,7 +26,7 @@ import Select from '@/components/common/Select.vue'
 const props = defineProps<{ account: Account; disabled?: boolean; busy?: boolean }>()
 const emit = defineEmits<{ start: [hours: number] }>()
 const { t } = useI18n()
-const options = computed(() => [6, 12, 24].map(hours => ({
+const options = computed(() => [1, 2, 3, 6, 12, 24].map(hours => ({
   value: hours,
   label: t('admin.accounts.scheduleTimer.hours', { hours })
 })))
@@ -36,7 +36,7 @@ const disabledReason = computed(() => props.account.schedule_resume_at
 
 function start(hours: string | number | boolean | null) {
   if (props.busy || props.disabled || !props.account.schedulable || props.account.schedule_resume_at ||
-      typeof hours !== 'number' || ![6, 12, 24].includes(hours)) return
+      typeof hours !== 'number' || ![1, 2, 3, 6, 12, 24].includes(hours)) return
   emit('start', hours)
 }
 </script>

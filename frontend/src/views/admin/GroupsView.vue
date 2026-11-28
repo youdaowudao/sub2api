@@ -635,8 +635,8 @@
             <option value="">
               {{ t("admin.groups.copyAccounts.selectPlaceholder") }}
             </option>
-            <option
-              v-for="opt in copyAccountsGroupOptions"
+            <CategorizedGroupList native :groups="copyAccountsGroupOptions" #default="{ group: opt }">
+              <option
               :key="opt.value"
               :value="opt.value"
               :disabled="
@@ -645,6 +645,7 @@
             >
               {{ opt.label }}
             </option>
+            </CategorizedGroupList>
           </select>
           <p class="input-hint">{{ t("admin.groups.copyAccounts.hint") }}</p>
         </div>
@@ -2335,8 +2336,8 @@
             <option value="">
               {{ t("admin.groups.copyAccounts.selectPlaceholder") }}
             </option>
-            <option
-              v-for="opt in copyAccountsGroupOptionsForEdit"
+            <CategorizedGroupList native :groups="copyAccountsGroupOptionsForEdit" #default="{ group: opt }">
+              <option
               :key="opt.value"
               :value="opt.value"
               :disabled="
@@ -2345,6 +2346,7 @@
             >
               {{ opt.label }}
             </option>
+            </CategorizedGroupList>
           </select>
           <p class="input-hint">
             {{ t("admin.groups.copyAccounts.hintEdit") }}
@@ -4375,6 +4377,8 @@
 </template>
 
 <script setup lang="ts">
+import CategorizedGroupList from '@/components/common/CategorizedGroupList.vue'
+import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 import { groupByPlatformForDisplay, sortGroupsForDisplay, sortGroupIdsForDisplay } from '@/utils/groupDisplayOrder';
 import { GROUP_DISPLAY_CATEGORIES, GROUP_DISPLAY_ICON_PLATFORMS } from "@/utils/groupDisplay";
 import { GroupListChangedError } from '@/api/admin/groups';
@@ -4836,7 +4840,7 @@ const subscriptionTypeOptions = computed(() => [
 
 // 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
 const fallbackGroupOptions = computed(() => {
-  const options: { value: number | null; label: string }[] = [
+  const options: { value: number | string | null; label: string }[] = [
     { value: null, label: t("admin.groups.claudeCode.noFallback") },
   ];
   const eligibleGroups = sortGroupsForDisplay(formCandidateGroups.value).filter(
@@ -4845,15 +4849,13 @@ const fallbackGroupOptions = computed(() => {
       !g.claude_code_only &&
       g.status === "active",
   );
-  eligibleGroups.forEach((g) => {
-    options.push({ value: g.id, label: g.name });
-  });
+  options.push(...buildAdminGroupSelectOptions(eligibleGroups, g => ({ value: g.id, label: g.name }), t));
   return options;
 });
 
 // 降级分组选项（编辑时）- 排除自身
 const fallbackGroupOptionsForEdit = computed(() => {
-  const options: { value: number | null; label: string }[] = [
+  const options: { value: number | string | null; label: string }[] = [
     { value: null, label: t("admin.groups.claudeCode.noFallback") },
   ];
   const currentId = editingGroup.value?.id;
@@ -4864,15 +4866,13 @@ const fallbackGroupOptionsForEdit = computed(() => {
       g.status === "active" &&
       g.id !== currentId,
   );
-  eligibleGroups.forEach((g) => {
-    options.push({ value: g.id, label: g.name });
-  });
+  options.push(...buildAdminGroupSelectOptions(eligibleGroups, g => ({ value: g.id, label: g.name }), t));
   return options;
 });
 
 // 无效请求兜底分组选项（创建时）- 仅包含 anthropic 平台、非订阅且未配置兜底的分组
 const invalidRequestFallbackOptions = computed(() => {
-  const options: { value: number | null; label: string }[] = [
+  const options: { value: number | string | null; label: string }[] = [
     { value: null, label: t("admin.groups.invalidRequestFallback.noFallback") },
   ];
   const eligibleGroups = sortGroupsForDisplay(formCandidateGroups.value).filter(
@@ -4882,15 +4882,13 @@ const invalidRequestFallbackOptions = computed(() => {
       g.subscription_type !== "subscription" &&
       g.fallback_group_id_on_invalid_request === null,
   );
-  eligibleGroups.forEach((g) => {
-    options.push({ value: g.id, label: g.name });
-  });
+  options.push(...buildAdminGroupSelectOptions(eligibleGroups, g => ({ value: g.id, label: g.name }), t));
   return options;
 });
 
 // 无效请求兜底分组选项（编辑时）- 排除自身
 const invalidRequestFallbackOptionsForEdit = computed(() => {
-  const options: { value: number | null; label: string }[] = [
+  const options: { value: number | string | null; label: string }[] = [
     { value: null, label: t("admin.groups.invalidRequestFallback.noFallback") },
   ];
   const currentId = editingGroup.value?.id;
@@ -4902,9 +4900,7 @@ const invalidRequestFallbackOptionsForEdit = computed(() => {
       g.fallback_group_id_on_invalid_request === null &&
       g.id !== currentId,
   );
-  eligibleGroups.forEach((g) => {
-    options.push({ value: g.id, label: g.name });
-  });
+  options.push(...buildAdminGroupSelectOptions(eligibleGroups, g => ({ value: g.id, label: g.name }), t));
   return options;
 });
 
@@ -4925,7 +4921,7 @@ const copyAccountsGroupOptions = computed(() => {
       (g.account_count || 0) > 0,
   );
   return eligibleGroups.map((g) => ({
-    value: g.id,
+    value: g.id, id: g.id, platform: g.platform, display_category: g.display_category, sort_order: g.sort_order,
     label: copyAccountsGroupLabel(g),
   }));
 });
@@ -4940,7 +4936,7 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
       g.id !== currentId,
   );
   return eligibleGroups.map((g) => ({
-    value: g.id,
+    value: g.id, id: g.id, platform: g.platform, display_category: g.display_category, sort_order: g.sort_order,
     label: copyAccountsGroupLabel(g),
   }));
 });

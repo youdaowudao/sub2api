@@ -2,11 +2,13 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="flex flex-wrap-reverse items-start justify-between gap-3">
+        <div class="flex flex-wrap-reverse items-start justify-between gap-3" :inert="listPreparationPending" :aria-busy="listPreparationPending">
           <AccountTableFilters
             v-model:searchQuery="params.search"
             :filters="params"
             :groups="groups"
+            :default-group="defaultGroup" :located="!!locatedAccountID" :disabled="listPreparationPending"
+            @set-default-group="setDefaultGroup"
             @update:filters="(newFilters) => Object.assign(params, newFilters)"
             @change="debouncedReload"
             @update:searchQuery="debouncedReload"
@@ -175,8 +177,14 @@
         </div>
       </template>
       <template #table>
-        <AccountBulkActionsBar
+        <div v-if="locatedAccountID" class="mb-2 flex items-center gap-2 text-sm">
+          <span>{{ t('admin.accounts.locatedAccount', { id: locatedAccountID }) }}</span>
+          <button class="btn btn-secondary btn-sm" type="button" @click="clearLocatedAccount">{{ t('common.clear') }}</button>
+          <span v-if="locatedAccountMissing" class="text-gray-500">{{ t('admin.accounts.locateMissing') }}</span>
+        </div>
+        <AccountBulkActionsBar v-if="!bulkActionsUnavailable"
           :selected-ids="selIds"
+          :schedule-busy="selIds.some(isScheduleOperationPending)"
           :total-results="pagination.total"
           :selecting-all="selectingAllResults"
           :all-results-selected="allResultsSelected"
@@ -191,18 +199,19 @@
           @select-all-results="handleSelectAllResults"
           @toggle-schedulable="handleBulkToggleSchedulable"
         />
-        <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden" :aria-busy="loading" :inert="loading && accounts.length > 0">
+        <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden" :aria-busy="listPreparationPending || loading" :inert="listPreparationPending || loading && accounts.length > 0">
+        <p v-if="metricListError" role="alert" class="px-3 py-2 text-sm text-rose-600">{{ metricListError }}</p>
+        <p v-if="sortState.sort_by === 'cache_hit_rate' && cacheRangePending" class="px-3 py-2 text-xs text-amber-600">{{ t('admin.accounts.cacheSortRangePending', { range: appliedCacheRange }) }}</p>
         <DataTable
           ref="dataTableRef"
           :columns="cols"
           :data="accounts"
-          :loading="loading && accounts.length === 0"
+          :loading="listPreparationPending || loading && accounts.length === 0"
           row-key="id"
           :server-side-sort="true"
           @sort="handleSort"
-          default-sort-key="name"
-          default-sort-order="asc"
-          :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
+          :controlled-sort="{ key: sortState.sort_by, order: sortState.sort_order }"
+          top-horizontal-scroll
           :estimate-row-height="156"
           :overscan="5"
           :virtualize-threshold="50"
@@ -306,14 +315,24 @@
           </template>
           <template #cell-schedulable="{ row }">
             <div class="flex flex-wrap items-center gap-2">
-              <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+              <button @click="handleToggleSchedulable(row)" :disabled="isScheduleOperationPending(row.id)" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
                 <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
               </button>
-              <AccountScheduleTimer :account="row" :busy="pendingScheduleTimers.has(row.id)" :disabled="togglingSchedulable === row.id" @start="handleStartScheduleTimer(row, $event)" />
+              <AccountScheduleTimer :account="row" :busy="pendingScheduleTimers.has(row.id)" :disabled="isScheduleOperationPending(row.id)" @start="handleStartScheduleTimer(row, $event)" />
             </div>
           </template>
           <template #cell-cache_hit_rate="{ row }">
             <CacheHitRateCell :item="cacheHitRateByAccountId[row.id]" :loading="cacheHitRateLoading" :error="cacheHitRateError" />
+          </template>
+          <template #header-today_stats="{ column }">
+            <div class="flex flex-col gap-1" @click.stop>
+              <span>{{ column.label }}</span>
+              <select class="input py-1 text-xs" :aria-label="t('admin.accounts.todaySortMetric')" :value="isTodaySort(sortState.sort_by) ? sortState.sort_by : ''" @change="changeTodaySort(($event.target as HTMLSelectElement).value)">
+                <option value="" disabled>{{ t('admin.accounts.todaySortMetric') }}</option>
+                <option v-for="item in todaySortOptions" :key="item.key" :value="item.key">{{ item.label }}</option>
+              </select>
+              <button v-if="isTodaySort(sortState.sort_by)" class="text-xs text-primary-600" type="button" @click="handleSort(sortState.sort_by, sortState.sort_order === 'asc' ? 'desc' : 'asc')">{{ sortState.sort_order === 'asc' ? '↑' : '↓' }} {{ t('admin.accounts.reverseSort') }}</button>
+            </div>
           </template>
           <template #cell-today_stats="{ row }">
             <AccountTodayStatsCell
@@ -510,7 +529,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
-import { useIntervalFn } from '@vueuse/core'
+import { useRoute, useRouter } from 'vue-router'
+import { useDebounceFn, useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
@@ -561,14 +581,30 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
-import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
+import type { Account, AccountListItem, BasePaginationResponse, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
 
+const accountRoute = useRoute()
+const accountRouter = useRouter()
+const parseLocatedAccount = (value: unknown) => typeof value === 'string' && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : undefined
+const locatedAccountID = ref(parseLocatedAccount(accountRoute?.query.account_id))
+const accountTargetAllowed = (id: number) => !listPreparationPending.value && (!locatedAccountID.value || locatedAccountID.value === id)
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 
 const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
+let groupsRead: Promise<PromiseSettledResult<AdminGroup[]>[]> | undefined
+const validatedDefaultGroup = async () => {
+  const value = defaultGroup.value
+  if (value && value !== 'ungrouped' && groupsRead) {
+    const [result] = await groupsRead
+    if (result.status === 'fulfilled' && !result.value.some(group => String(group.id) === value)) {
+      return ''
+    }
+  }
+  return value
+}
 const groupsByID = computed(() => new Map(groups.value.map(group => [group.id, group])))
 const accountGroupsForRow = (account: Pick<AccountListItem, 'group_ids'>): AdminGroup[] => {
   const groupIDs = account.group_ids ?? []
@@ -642,8 +678,27 @@ const statsAcc = ref<Account | null>(null)
 const showSchedulePanel = ref(false)
 const scheduleAcc = ref<Account | null>(null)
 const scheduleModelOptions = ref<SelectOption[]>([])
-const togglingSchedulable = ref<number | null>(null)
 const pendingScheduleTimers = reactive(new Set<number>())
+const pendingScheduleSwitches = reactive(new Set<number>())
+const isScheduleOperationPending = (id: number) => pendingScheduleTimers.has(id) || pendingScheduleSwitches.has(id)
+let scheduleRevision = 0
+type ScheduleFields = Pick<Account, 'schedulable' | 'schedule_resume_at'>
+const scheduleRevisionByID = new Map<number, { revision: number; schedulable: boolean; timer?: { revision: number; value: string | null } }>()
+const markScheduleSaved = (ids: number[], fields: ScheduleFields) => {
+  scheduleRevision++
+  ids.forEach(id => scheduleRevisionByID.set(id, {
+    revision: scheduleRevision,
+    schedulable: fields.schedulable,
+    timer: fields.schedule_resume_at !== undefined
+      ? { revision: scheduleRevision, value: fields.schedule_resume_at }
+      : scheduleRevisionByID.get(id)?.timer
+  }))
+}
+const preserveSavedSchedule = <T extends AccountListItem>(row: T, revision: number): T => {
+  const saved = scheduleRevisionByID.get(row.id)
+  if (!saved || saved.revision <= revision) return row
+  return { ...row, schedulable: saved.schedulable, ...(saved.timer && saved.timer.revision > revision ? { schedule_resume_at: saved.timer.value } : {}) }
+}
 const menu = reactive<{show:boolean, acc:Account|null, anchorRect:DOMRect|null}>({ show: false, acc: null, anchorRect: null })
 const exportingData = ref(false)
 const probingUpstreamBilling = reactive(new Set<number>())
@@ -684,9 +739,10 @@ const ACCOUNT_FILTER_STORAGE_KEY = 'account-filter-values'
 type AccountFilterValues = {
   platform: string
   status: string
+  default_group: string
 }
 const loadInitialAccountFilterValues = (): AccountFilterValues => {
-  const fallback: AccountFilterValues = { platform: '', status: '' }
+  const fallback: AccountFilterValues = { platform: '', status: '', default_group: '' }
   try {
     const raw = localStorage.getItem(ACCOUNT_FILTER_STORAGE_KEY)
     if (!raw) return fallback
@@ -697,15 +753,30 @@ const loadInitialAccountFilterValues = (): AccountFilterValues => {
       platform: typeof values.platform === 'string' && CONCRETE_PLATFORM_OPTIONS.some(option => option.value === values.platform)
         ? values.platform : '',
       status: typeof values.status === 'string' && ['active', 'inactive', 'error', 'rate_limited', 'temp_unschedulable', 'unschedulable'].includes(values.status)
-        ? values.status : ''
+        ? values.status : '',
+      default_group: typeof values.default_group === 'string' && (values.default_group === 'ungrouped' || /^[1-9]\d*$/.test(values.default_group) && Number.isSafeInteger(Number(values.default_group))) ? values.default_group : ''
     }
   } catch {
     return fallback
   }
 }
 
+const initialFilters = loadInitialAccountFilterValues()
+const defaultGroup = ref(initialFilters.default_group)
+const setDefaultGroup = (value: string) => { if (listPreparationPending.value) return; defaultGroup.value = value === defaultGroup.value ? '' : value; saveAccountFilterValues() }
+
 // Sorting settings
-const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort'
+const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort-v2'
+const OLD_ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort'
+const isTodaySort = (key: string) => ['today_requests', 'today_tokens', 'today_account_cost', 'today_user_cost'].includes(key)
+const isMetricSort = (key: string) => key === 'cache_hit_rate' || isTodaySort(key)
+const todaySortOptions = computed(() => [
+  { key: 'today_requests', label: t('admin.accounts.stats.requests') },
+  { key: 'today_tokens', label: t('admin.accounts.stats.tokens') },
+  { key: 'today_account_cost', label: t('usage.accountBilled') },
+  { key: 'today_user_cost', label: t('usage.userBilled') }
+])
+const changeTodaySort = (key: string) => { if (isTodaySort(key)) handleSort(key, 'desc') }
 type AccountSortOrder = 'asc' | 'desc'
 type AccountSortState = {
   sort_by: string
@@ -721,16 +792,17 @@ const ACCOUNT_SORTABLE_KEYS = new Set([
   'upstream_billing_rate',
   'last_used_at',
   'created_at',
-  'expires_at'
+  'expires_at', 'cache_hit_rate', 'today_requests', 'today_tokens', 'today_account_cost', 'today_user_cost'
 ])
 const loadInitialAccountSortState = (): AccountSortState => {
-  const fallback: AccountSortState = { sort_by: 'name', sort_order: 'asc' }
+  const fallback: AccountSortState = { sort_by: 'cache_hit_rate', sort_order: 'desc' }
   try {
-    const raw = localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY)
+    const saved = localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY)
+    const raw = saved ?? localStorage.getItem(OLD_ACCOUNT_SORT_STORAGE_KEY)
     if (!raw) return fallback
     const parsed = JSON.parse(raw) as { key?: string; order?: string }
     const key = typeof parsed.key === 'string' ? parsed.key : ''
-    if (!ACCOUNT_SORTABLE_KEYS.has(key)) return fallback
+    if (!ACCOUNT_SORTABLE_KEYS.has(key) || !saved && key === 'name' && parsed.order !== 'desc') return fallback
     return {
       sort_by: key,
       sort_order: parsed.order === 'desc' ? 'desc' : 'asc'
@@ -740,6 +812,20 @@ const loadInitialAccountSortState = (): AccountSortState => {
   }
 }
 const sortState = reactive<AccountSortState>(loadInitialAccountSortState())
+const saveSortState = () => { try { localStorage.setItem(ACCOUNT_SORT_STORAGE_KEY, JSON.stringify({ key: sortState.sort_by, order: sortState.sort_order })) } catch { /* Browser storage unavailable. */ } }
+const sortColumnHidden = (key: string) => hiddenColumns.has(isTodaySort(key) ? 'today_stats' : key)
+const fallbackVisibleSort = (): AccountSortState => hiddenColumns.has('cache_hit_rate') ? { sort_by: 'name', sort_order: 'asc' } : { sort_by: 'cache_hit_rate', sort_order: 'desc' }
+const metricListError = ref('')
+const cacheRangePending = ref(false)
+const appliedCacheRange = ref('')
+const lastListKey = ref('')
+const initialListPending = ref(true)
+const restoringDefaultGroup = ref(false)
+const listPreparationPending = computed(() => initialListPending.value || restoringDefaultGroup.value)
+const bulkActionsUnavailable = computed(() => listPreparationPending.value || !!locatedAccountID.value)
+let locationRevision = 0
+let disposed = false
+let resolveRangeWait: (() => void) | undefined
 
 // Auto refresh settings
 const showAutoRefreshDropdown = ref(false)
@@ -924,9 +1010,32 @@ const cacheHitRateByAccountId = ref<Record<number, CacheHitRateItem>>({})
 const cacheHitRateLoading = ref(false)
 const cacheHitRateError = ref<string | null>(null)
 let cacheHitRateReqSeq = 0
-const { dates: cacheHitRateDates } = useCacheHitRateDefaultRange(() => { void refreshCacheHitRateBatch() })
+const { dates: cacheHitRateDates, loading: cacheSettingsLoading } = useCacheHitRateDefaultRange(() => {
+  if (sortState.sort_by === 'cache_hit_rate') { if (appliedCacheRange.value) cacheRangePending.value = true }
+  else void refreshCacheHitRateBatch()
+})
+const waitForCacheSettings = () => {
+  if (!cacheSettingsLoading?.value) return Promise.resolve()
+  return new Promise<void>(resolve => {
+    const stop = watch(cacheSettingsLoading, value => { if (!value) { stop(); resolveRangeWait = undefined; resolve() } })
+    resolveRangeWait = () => { stop(); resolve() }
+  })
+}
+const sortedMetricsFromRows = (rows: AccountListItem[], key: string, range?: string) => {
+  if (key === 'cache_hit_rate') {
+    cacheHitRateReqSeq++
+    cacheHitRateByAccountId.value = Object.fromEntries(rows.flatMap(row => row.cache_hit_rate_stats ? [[row.id, row.cache_hit_rate_stats]] : []))
+    cacheHitRateLoading.value = false; cacheHitRateError.value = null
+    if (range) { appliedCacheRange.value = range; cacheRangePending.value = range !== `${cacheHitRateDates.value.start} – ${cacheHitRateDates.value.end}` }
+  } else if (isTodaySort(key)) {
+    todayStatsReqSeq.value++
+    todayStatsByAccountId.value = Object.fromEntries(rows.map(row => [String(row.id), row.today_stats ?? buildDefaultTodayStats()]))
+    todayStatsLoading.value = false; todayStatsError.value = null
+  }
+}
 const refreshCacheHitRateBatch = async () => {
   const seq = ++cacheHitRateReqSeq
+  if (sortState.sort_by === 'cache_hit_rate') return
   if (hiddenColumns.has('cache_hit_rate')) { cacheHitRateLoading.value = false; return }
   const ids = accounts.value.map(account => account.id)
   cacheHitRateByAccountId.value = {}; cacheHitRateError.value = null
@@ -944,7 +1053,9 @@ const refreshCacheHitRateBatch = async () => {
 }
 
 const refreshTodayStatsBatch = async () => {
+  if (listPreparationPending.value || metricListError.value) return
   void refreshCacheHitRateBatch()
+  if (isTodaySort(sortState.sort_by)) { todayStatsReqSeq.value++; return }
   // Why this checks both columns:
   // - today_stats column shows dedicated today's metrics.
   // - usage column also embeds today's stats for Key/Bedrock rows.
@@ -1094,6 +1205,8 @@ const saveAutoRefreshToStorage = () => {
 
 if (typeof window !== 'undefined') {
   loadSavedColumns()
+  if (sortColumnHidden(sortState.sort_by)) Object.assign(sortState, fallbackVisibleSort())
+  saveSortState()
   loadSavedAutoRefresh()
 }
 
@@ -1125,6 +1238,7 @@ const toggleColumn = (key: string) => {
     hiddenColumns.add(key)
   }
   saveColumnsToStorage()
+  if (!wasHidden && sortColumnHidden(sortState.sort_by)) { const next = fallbackVisibleSort(); handleSort(next.sort_by, next.sort_order); return }
   if (key === 'cache_hit_rate') void refreshCacheHitRateBatch()
   if ((key === 'today_stats' || key === 'usage') && wasHidden) {
     refreshTodayStatsBatch().catch((error) => {
@@ -1146,6 +1260,14 @@ const syncAccountListDerivedParams = () => {
   // Keep every load path, including auto-refresh and sorting, aligned with the current column visibility.
   const requestParams = params as any
   requestParams.include_scheduler_score = shouldIncludeSchedulerScore() ? '1' : '0'
+  if (sortState.sort_by === 'cache_hit_rate') {
+    const dates = cacheHitRateDates.value
+    if (requestParams.start_date !== dates.start || requestParams.end_date !== dates.end) {
+      autoRefreshETag.value = null
+      requestParams.start_date = dates.start
+      requestParams.end_date = dates.end
+    }
+  } else { delete requestParams.start_date; delete requestParams.end_date }
 }
 
 const {
@@ -1155,16 +1277,49 @@ const {
   pagination,
   load: baseLoad,
   reload: baseReload,
-  debouncedReload: baseDebouncedReload,
   handlePageChange: baseHandlePageChange,
   handlePageSizeChange: baseHandlePageSizeChange
 } = useTableLoader<AccountListItem, any>({
-  fetchFn: adminAPI.accounts.list,
+  fetchFn: async (page, size, filters, options): Promise<BasePaginationResponse<AccountListItem>> => {
+    if (listPreparationPending.value) throw new DOMException('Aborted', 'AbortError')
+    const revision = scheduleRevision
+    const routeRevision = locationRevision
+    const request = { ...filters }
+    const key = JSON.stringify([page, size, request])
+    const stillCurrent = () => !listPreparationPending.value && routeRevision === locationRevision && !options?.signal?.aborted && key === JSON.stringify([pagination.page, pagination.page_size, toRaw(params)])
+    let result
+    try {
+      result = await adminAPI.accounts.list(page, size, request, options)
+    } catch (error) {
+      if (!stillCurrent()) throw new DOMException('Aborted', 'AbortError')
+      if (isMetricSort(request.sort_by)) {
+        const hasPreviousResult = key === lastListKey.value
+        metricListError.value = t(hasPreviousResult ? 'admin.accounts.metricSortFailedPrevious' : 'admin.accounts.metricSortFailed') + ' ' + extractApiErrorMessage(error)
+        if (hasPreviousResult) return {items: accounts.value, total: pagination.total, pages: pagination.pages, page, page_size: size}
+        lastListKey.value = ''
+        return {items: [], total: 0, pages: 0, page, page_size: size}
+      }
+      lastListKey.value = ''
+      throw error
+    }
+    if (!stillCurrent()) throw new DOMException('Aborted', 'AbortError')
+    lastListKey.value = key; metricListError.value = ''
+    sortedMetricsFromRows(result.items, request.sort_by, request.start_date ? `${request.start_date} – ${request.end_date}` : undefined)
+    if (revision === scheduleRevision) return result
+    // An already in-flight list must not put a successfully cancelled timer back.
+    const rows = result.items.flatMap(row => {
+      const saved = preserveSavedSchedule(row, revision)
+      return saved !== row && !accountMatchesCurrentFilters(saved) ? [] : [saved]
+    })
+    const total = Math.max(0, result.total - (result.items.length - rows.length))
+    return { ...result, items: rows, total, pages: Math.ceil(total / size) }
+  },
   initialParams: {
-    ...loadInitialAccountFilterValues(),
+    platform: initialFilters.platform, status: initialFilters.status,
+    ...(locatedAccountID.value ? { platform:'', status:'', account_id: locatedAccountID.value } : {}),
     type: '',
     privacy_mode: '',
-    group: '',
+    group: locatedAccountID.value ? '' : defaultGroup.value,
     search: '',
     lite: '1',
     include_scheduler_score: shouldIncludeSchedulerScore() ? '1' : '0',
@@ -1172,6 +1327,8 @@ const {
     sort_order: sortState.sort_order
   }
 })
+
+const locatedAccountMissing = computed(() => !!locatedAccountID.value && !listPreparationPending.value && !loading.value && accounts.value.length === 0 && !metricListError.value && lastListKey.value === JSON.stringify([pagination.page, pagination.page_size, toRaw(params)]))
 
 const {
   selectedSet,
@@ -1209,6 +1366,7 @@ const clearSelection = () => {
 }
 
 const selectPage = () => {
+  if (bulkActionsUnavailable.value) return
   selectCurrentPage()
 }
 
@@ -1225,7 +1383,9 @@ useSwipeSelect(accountTableRef, {
   batchUpdate
 }, swipeVirtualContext)
 
+let autoRefreshVersion = 0
 const resetAutoRefreshCache = () => {
+  autoRefreshVersion++
   autoRefreshETag.value = null
   upstreamBillingRateETag.value = null
 }
@@ -1235,6 +1395,7 @@ type AccountLoadOptions = {
 }
 
 const load = async (options: AccountLoadOptions = {}) => {
+  if (listPreparationPending.value) return
   const requestParams = params as any
   syncAccountListDerivedParams()
   hasPendingListSync.value = false
@@ -1246,6 +1407,7 @@ const load = async (options: AccountLoadOptions = {}) => {
 }
 
 const reload = async () => {
+  if (listPreparationPending.value) return
   syncAccountListDerivedParams()
   hasPendingListSync.value = false
   resetAutoRefreshCache()
@@ -1255,6 +1417,7 @@ const reload = async () => {
 }
 
 const buildUpstreamBillingRateFilters = () => {
+  if (isMetricSort(sortState.sort_by)) return { account_ids: accounts.value.map(row => row.id).join(',') }
   const rawParams = toRaw(params) as Record<string, unknown>
   return {
     platform: typeof rawParams.platform === 'string' ? rawParams.platform : '',
@@ -1285,7 +1448,7 @@ const applyUpstreamBillingRateSnapshots = async (
 
   // The compact response cannot fill a row that crossed a page boundary.
   // Only that case needs the expensive, full account-list request.
-  if (result.total !== pagination.total || !sameAccountIDOrder(nextIDs, currentIDs)) {
+  if (!isMetricSort(sortState.sort_by) && (result.total !== pagination.total || !sameAccountIDOrder(nextIDs, currentIDs))) {
     try {
       await load({ refreshTodayStats: false })
     } catch (error) {
@@ -1294,6 +1457,7 @@ const applyUpstreamBillingRateSnapshots = async (
     return
   }
 
+  if (isMetricSort(sortState.sort_by) && currentIDs.some(id => !nextIDs.includes(id))) hasPendingListSync.value = true
   const itemsByID = new Map(result.items.map(item => [item.account_id, item]))
   let changed = false
   const nextAccounts = accounts.value.map(account => {
@@ -1325,6 +1489,7 @@ const applyUpstreamBillingRateSnapshots = async (
 }
 
 const refreshUpstreamBillingRates = async (force = false) => {
+  if (locatedAccountID.value) return
   if (upstreamBillingRateRefreshing.value || loading.value || accounts.value.length === 0) return
   if (!force && (
     probingUpstreamBilling.size > 0 ||
@@ -1347,7 +1512,7 @@ const refreshUpstreamBillingRates = async (force = false) => {
       buildUpstreamBillingRateFilters(),
       { etag: force ? null : upstreamBillingRateETag.value, signal: controller.signal }
     )
-    if (loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
+    if (locatedAccountID.value || loading.value || requestContextKey !== upstreamBillingRateContextKey()) return
     if (result.etag) upstreamBillingRateETag.value = result.etag
     if (!result.notModified && result.data) await applyUpstreamBillingRateSnapshots(result.data)
   } catch (error) {
@@ -1369,24 +1534,29 @@ const refreshUpstreamBillingSortedList = async (force = false) => {
 useIntervalFn(() => { void refreshUpstreamBillingRates() }, 5 * 60_000, { immediate: false })
 
 const saveAccountFilterValues = () => {
+  if (bulkActionsUnavailable.value) return
   try {
     localStorage.setItem(ACCOUNT_FILTER_STORAGE_KEY, JSON.stringify({
       platform: params.platform,
-      status: params.status
+      status: params.status, default_group: defaultGroup.value
     }))
   } catch {
     // Filtering must remain available when browser storage is unavailable.
   }
 }
 
+const delayedListReload = useDebounceFn((revision: number) => {
+  if (!disposed && !listPreparationPending.value && revision === locationRevision) return baseReload()
+}, 300)
 const debouncedReload = () => {
+  if (listPreparationPending.value) return
   saveAccountFilterValues()
   clearSelection()
   syncAccountListDerivedParams()
   hasPendingListSync.value = false
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = true
-  baseDebouncedReload()
+  void delayedListReload(locationRevision)
 }
 
 const handlePageChange = (page: number) => {
@@ -1406,8 +1576,11 @@ const handlePageSizeChange = (size: number) => {
 }
 
 const handleSort = (key: string, order: AccountSortOrder) => {
+  if (key !== sortState.sort_by && isMetricSort(key)) order = 'desc'
   sortState.sort_by = key
+  if (key !== 'cache_hit_rate') cacheRangePending.value = false
   sortState.sort_order = order
+  saveSortState()
   const requestParams = params as any
   requestParams.sort_by = key
   requestParams.sort_order = order
@@ -1531,14 +1704,19 @@ const mergeAccountsIncrementally = (nextRows: Account[]) => {
 }
 
 const refreshAccountsIncrementally = async () => {
-  if (autoRefreshFetching.value) return
+  if (listPreparationPending.value || autoRefreshFetching.value) return
   syncAccountListDerivedParams()
   autoRefreshFetching.value = true
+  const version = autoRefreshVersion
+  const revision = scheduleRevision
+  const requestPage = pagination.page, requestSize = pagination.page_size
+  const requestFilters = { ...toRaw(params) }
+  const requestKey = JSON.stringify([requestPage, requestSize, requestFilters])
   try {
     const result = await adminAPI.accounts.listWithEtag(
-      pagination.page,
-      pagination.page_size,
-      toRaw(params) as {
+      requestPage,
+      requestSize,
+      requestFilters as {
         platform?: string
         type?: string
         status?: string
@@ -1552,19 +1730,28 @@ const refreshAccountsIncrementally = async () => {
       { etag: autoRefreshETag.value }
     )
 
+    if (version !== autoRefreshVersion || revision !== scheduleRevision || requestKey !== JSON.stringify([pagination.page,pagination.page_size,toRaw(params)])) return
+    lastListKey.value = requestKey
     if (result.etag) {
       autoRefreshETag.value = result.etag
     }
     if (!result.notModified && result.data) {
       pagination.total = result.data.total || 0
       pagination.pages = result.data.pages || 0
+      sortedMetricsFromRows(result.data.items || [], sortState.sort_by, requestFilters.start_date ? `${requestFilters.start_date} – ${requestFilters.end_date}` : undefined)
+      metricListError.value = ''
       mergeAccountsIncrementally(result.data.items || [])
       hasPendingListSync.value = false
     }
+    metricListError.value = ''
     upstreamBillingNow.value = Date.now()
 
     await refreshTodayStatsBatch()
   } catch (error) {
+    if (version === autoRefreshVersion && revision === scheduleRevision && requestKey === JSON.stringify([pagination.page,pagination.page_size,toRaw(params)])) {
+      if (isMetricSort(requestFilters.sort_by)) metricListError.value = t(requestKey === lastListKey.value ? 'admin.accounts.metricSortFailedPrevious' : 'admin.accounts.metricSortFailed') + ' ' + extractApiErrorMessage(error)
+      else lastListKey.value = ''
+    }
     console.error('Auto refresh failed:', error)
   } finally {
     autoRefreshFetching.value = false
@@ -1883,7 +2070,7 @@ const allColumns = computed(() => {
     { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false },
-    { key: 'cache_hit_rate', label: t('admin.accounts.columns.cacheHitRate'), sortable: false }
+    { key: 'cache_hit_rate', label: t('admin.accounts.columns.cacheHitRate'), sortable: true }
   ]
   if (!authStore.isSimpleMode) {
     c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
@@ -1912,16 +2099,17 @@ const toggleableColumns = computed(() =>
 // Filtered columns based on visibility
 const cols = computed(() =>
   allColumns.value.filter(col =>
-    col.key === 'select' || col.key === 'name' || col.key === 'actions' || !hiddenColumns.has(col.key)
+    (col.key !== 'select' || !locatedAccountID.value) && (col.key === 'select' || col.key === 'name' || col.key === 'actions' || !hiddenColumns.has(col.key))
   )
 )
 
 const accountDetailLoading = new Set<number>()
 const loadAccountDetails = async (account: Pick<AccountListItem, 'id'>): Promise<Account | null> => {
-  if (accountDetailLoading.has(account.id)) return null
+  if (!accountTargetAllowed(account.id) || accountDetailLoading.has(account.id)) return null
   accountDetailLoading.add(account.id)
   try {
-    return await adminAPI.accounts.getById(account.id)
+    const result = await adminAPI.accounts.getById(account.id)
+    return accountTargetAllowed(result.id) ? result : null
   } catch (error) {
     console.error('Failed to load account details:', error)
     appStore.showError(extractApiErrorMessage(error, t('common.error')))
@@ -1938,16 +2126,19 @@ const handleEdit = async (a: AccountListItem) => {
   showEdit.value = true
 }
 const openMenu = (a: Account, e: MouseEvent) => {
+  if (!accountTargetAllowed(a.id)) return
   menu.acc = a
   const target = e.currentTarget as HTMLElement
   menu.anchorRect = target.getBoundingClientRect()
   menu.show = true
 }
 const toggleSelectAllVisible = (event: Event) => {
+  if (bulkActionsUnavailable.value) return
   const target = event.target as HTMLInputElement
   toggleVisible(target.checked)
 }
 const handleBulkDelete = async () => {
+  if (bulkActionsUnavailable.value) return
   const accountIds = [...selIds.value]
   if (!confirm(t('admin.accounts.bulkActions.confirmDelete', { count: accountIds.length }))) return
   try {
@@ -1969,6 +2160,7 @@ const handleBulkDelete = async () => {
   }
 }
 const handleBulkResetStatus = async () => {
+  if (bulkActionsUnavailable.value) return
   if (!confirm(t('common.confirm'))) return
   try {
     const result = await adminAPI.accounts.batchClearError(selIds.value)
@@ -1985,6 +2177,7 @@ const handleBulkResetStatus = async () => {
   }
 }
 const handleBulkRefreshToken = async () => {
+  if (bulkActionsUnavailable.value) return
   if (!confirm(t('common.confirm'))) return
   const accountIds = [...selIds.value]
   try {
@@ -2004,6 +2197,7 @@ const handleBulkRefreshToken = async () => {
   }
 }
 const handleBulkProbeUpstreamBilling = async () => {
+  if (bulkActionsUnavailable.value) return
   const accountIDs = [...selIds.value]
   if (accountIDs.length === 0) {
     appStore.showError(t('admin.accounts.upstreamBilling.noEligibleAccounts'))
@@ -2040,7 +2234,7 @@ const handleBulkProbeUpstreamBilling = async () => {
 const updateSchedulableInList = (accountIds: number[], schedulable: boolean) => {
   if (accountIds.length === 0) return
   const idSet = new Set(accountIds)
-  accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable } : account))
+  accounts.value = accounts.value.map((account) => (idSet.has(account.id) ? { ...account, schedulable, ...(schedulable ? { schedule_resume_at: null } : {}) } : account))
 }
 const normalizeBulkSchedulableResult = (
   result: {
@@ -2103,7 +2297,13 @@ const normalizeBulkSchedulableResult = (
   }
 }
 const handleBulkToggleSchedulable = async (schedulable: boolean) => {
+  if (bulkActionsUnavailable.value) return
   const accountIds = [...selIds.value]
+  if (accountIds.some(isScheduleOperationPending)) {
+    appStore.showError(t('admin.accounts.scheduleTimer.busyAccounts'))
+    return
+  }
+  accountIds.forEach(id => pendingScheduleSwitches.add(id))
   try {
     const result = await adminAPI.accounts.bulkUpdate(accountIds, { schedulable })
     const { successIds, failedIds, successCount, failedCount, hasIds, hasCounts } = normalizeBulkSchedulableResult(result, accountIds)
@@ -2117,6 +2317,8 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
     }
     if (successIds.length > 0) {
       updateSchedulableInList(successIds, schedulable)
+      markScheduleSaved(successIds, { schedulable, ...(schedulable ? { schedule_resume_at: null } : {}) })
+      enterAutoRefreshSilentWindow()
     }
     if (successCount > 0 && failedCount === 0) {
       const message = schedulable
@@ -2136,7 +2338,9 @@ const handleBulkToggleSchedulable = async (schedulable: boolean) => {
     }
   } catch (error) {
     console.error('Failed to bulk toggle schedulable:', error)
-    appStore.showError(t('common.error'))
+    appStore.showError(t('admin.accounts.scheduleTimer.switchUnknown'))
+  } finally {
+    accountIds.forEach(id => pendingScheduleSwitches.delete(id))
   }
 }
 const buildBulkEditFilterSnapshot = () => {
@@ -2149,12 +2353,13 @@ const buildBulkEditFilterSnapshot = () => {
     group: typeof rawParams.group === 'string' ? rawParams.group : '',
     search: typeof rawParams.search === 'string' ? rawParams.search : '',
     privacy_mode: typeof rawParams.privacy_mode === 'string' ? rawParams.privacy_mode : '',
-    sort_by: typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
-    sort_order: sortOrder
+    sort_by: isMetricSort(sortState.sort_by) ? 'id' : typeof rawParams.sort_by === 'string' ? rawParams.sort_by : '',
+    sort_order: isMetricSort(sortState.sort_by) ? 'asc' : sortOrder
   }
 }
 
 const handleSelectAllResults = async () => {
+  if (bulkActionsUnavailable.value) return
   if (selectingAllResults.value || pagination.total === 0) return
 
   const requestVersion = ++selectionRequestVersion.value
@@ -2187,6 +2392,7 @@ const collectSelectionMetadata = (rows: Account[]) => {
 }
 
 const openBulkEditSelected = () => {
+  if (bulkActionsUnavailable.value) return
   bulkEditTarget.value = {
     mode: 'selected',
     accountIds: [...selIds.value],
@@ -2197,8 +2403,11 @@ const openBulkEditSelected = () => {
 }
 
 const openBulkEditFiltered = async () => {
+  if (bulkActionsUnavailable.value) return
+  const selectionVersion = selectionRequestVersion.value
   const filters = buildBulkEditFilterSnapshot()
   const preview = await adminAPI.accounts.list(1, 100, filters)
+  if (bulkActionsUnavailable.value || selectionVersion !== selectionRequestVersion.value) return
   const { selectedPlatforms, selectedTypes } = collectSelectionMetadata(preview.items)
   bulkEditTarget.value = {
     mode: 'filtered',
@@ -2220,6 +2429,7 @@ const handleDataImported = () => { showImportData.value = false; reload() }
 const ACCOUNT_UNGROUPED_GROUP_QUERY_VALUE = 'ungrouped'
 const ACCOUNT_PRIVACY_MODE_UNSET_QUERY_VALUE = '__unset__'
 const buildAccountQueryFilters = () => ({
+  account_id: locatedAccountID.value,
   platform: params.platform || '',
   type: params.type || '',
   status: params.status || '',
@@ -2231,6 +2441,7 @@ const buildAccountQueryFilters = () => ({
 })
 const accountMatchesCurrentFilters = (account: Account) => {
   const filters = buildAccountQueryFilters()
+  if (filters.account_id && account.id !== filters.account_id) return false
   if (filters.platform && account.platform !== filters.platform) return false
   if (filters.type && account.type !== filters.type) return false
   if (filters.status) {
@@ -2293,10 +2504,11 @@ const syncPaginationAfterLocalRemoval = () => {
   hasPendingListSync.value = nextTotal > 0
 }
 
-const patchAccountInList = (updatedAccount: Account) => {
+const patchAccountInList = (updatedAccount: Account, revision = scheduleRevision) => {
+  if (!accountTargetAllowed(updatedAccount.id)) return
   const index = accounts.value.findIndex(account => account.id === updatedAccount.id)
   if (index === -1) return
-  const mergedAccount = mergeRuntimeFields(accounts.value[index], updatedAccount)
+  const mergedAccount = mergeRuntimeFields(accounts.value[index], preserveSavedSchedule(updatedAccount, revision))
   if (!accountMatchesCurrentFilters(mergedAccount)) {
     accounts.value = accounts.value.filter(account => account.id !== mergedAccount.id)
     syncPaginationAfterLocalRemoval()
@@ -2328,7 +2540,7 @@ const refreshAccountsAfterUpstreamBillingProbe = async () => {
   await refreshUpstreamBillingSortedList(true)
 }
 const handleProbeUpstreamBilling = async (account: Account) => {
-  if (probingUpstreamBilling.has(account.id)) return
+  if (!accountTargetAllowed(account.id) || probingUpstreamBilling.has(account.id)) return
   probingUpstreamBilling.add(account.id)
   try {
     const result = await adminAPI.accounts.probeUpstreamBilling(account.id)
@@ -2343,13 +2555,19 @@ const handleProbeUpstreamBilling = async (account: Account) => {
     probingUpstreamBilling.delete(account.id)
   }
 }
-const handleAccountUpdated = (updatedAccount: Account) => {
-  patchAccountInList(updatedAccount)
+const handleAccountUpdated = (updatedAccount?: Account) => {
+  if (!updatedAccount) return
+  const current = accounts.value.find(row => row.id === updatedAccount.id)
+  if (!current) return
+  // Priority, quota and ordinary edit callbacks do not own scheduling. Keep
+  // the current switch/deadline instead of accepting their stale snapshot.
+  patchAccountInList({ ...updatedAccount, schedulable: current.schedulable, schedule_resume_at: current.schedule_resume_at })
   enterAutoRefreshSilentWindow()
 }
 const syncUpstreamGroup = async (account: AccountListItem) => {
-  if (syncingUpstreamGroup.has(account.id)) return
+  if (!accountTargetAllowed(account.id) || syncingUpstreamGroup.has(account.id)) return
   syncingUpstreamGroup.add(account.id)
+  const revision = scheduleRevision
   try {
     const fields = await adminAPI.accounts.previewUpstreamGroup({ account_id: account.id })
     if (!fields.name && !fields.notes) {
@@ -2359,7 +2577,9 @@ const syncUpstreamGroup = async (account: AccountListItem) => {
     if (fields.name === account.name) delete fields.name
     if (fields.notes === account.notes) delete fields.notes
     if (fields.name || fields.notes) {
-      handleAccountUpdated(await adminAPI.accounts.update(account.id, fields))
+      if (!accountTargetAllowed(account.id)) return
+      patchAccountInList(await adminAPI.accounts.update(account.id, fields), revision)
+      enterAutoRefreshSilentWindow()
     }
     appStore.showSuccess(t('admin.accounts.upstreamBilling.groupSynced'))
   } catch (error) {
@@ -2374,21 +2594,18 @@ const formatExportTimestamp = () => {
   return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`
 }
 const openExportDataDialog = () => {
+  if (listPreparationPending.value) return
   includeProxyOnExport.value = true
   showExportDataDialog.value = true
 }
 const handleExportData = async () => {
-  if (exportingData.value) return
+  if (listPreparationPending.value || exportingData.value) return
   exportingData.value = true
+  const request = selIds.value.length > 0
+    ? { ids: [...selIds.value], includeProxies: includeProxyOnExport.value }
+    : { includeProxies: includeProxyOnExport.value, filters: buildAccountQueryFilters() }
   try {
-    const dataPayload = await accountExportStepUp.run(() => adminAPI.accounts.exportData(
-      selIds.value.length > 0
-        ? { ids: selIds.value, includeProxies: includeProxyOnExport.value }
-        : {
-            includeProxies: includeProxyOnExport.value,
-            filters: buildAccountQueryFilters()
-          }
-    ))
+    const dataPayload = await accountExportStepUp.run(() => adminAPI.accounts.exportData(request))
     const timestamp = formatExportTimestamp()
     const filename = `sub2api-account-${timestamp}.json`
     const blob = new Blob([JSON.stringify(dataPayload, null, 2)], { type: 'application/json' })
@@ -2439,6 +2656,7 @@ const handleViewStats = async (a: AccountListItem) => {
   showStats.value = true
 }
 const handleSchedule = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
   scheduleAcc.value = a
   scheduleModelOptions.value = []
   showSchedulePanel.value = true
@@ -2450,10 +2668,10 @@ const handleSchedule = async (a: Account) => {
   }
 }
 const closeSchedulePanel = () => { showSchedulePanel.value = false; scheduleAcc.value = null; scheduleModelOptions.value = [] }
-const handleReAuth = (a: Account) => { reAuthAcc.value = a; showReAuth.value = true }
+const handleReAuth = (a: Account) => { if (accountTargetAllowed(a.id)) { reAuthAcc.value = a; showReAuth.value = true } }
 const duplicatingAccountIDs = new Set<number>()
 const handleDuplicateAccount = async (a: Account) => {
-  if (duplicatingAccountIDs.has(a.id)) return
+  if (!accountTargetAllowed(a.id) || duplicatingAccountIDs.has(a.id)) return
   duplicatingAccountIDs.add(a.id)
   try {
     const duplicate = await adminAPI.accounts.duplicate(a.id)
@@ -2470,6 +2688,8 @@ const lastManualRefreshAt = new Map<number, number>()
 const MANUAL_REFRESH_WARN_INTERVAL_MS = 60_000
 
 const handleRefresh = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
+  const revision = scheduleRevision
   // 只提醒不阻拦：短时间内反复手动刷新可能与后台自动刷新竞争同一份轮换令牌
   const lastAt = lastManualRefreshAt.get(a.id) ?? 0
   if (Date.now() - lastAt < MANUAL_REFRESH_WARN_INTERVAL_MS) {
@@ -2478,7 +2698,7 @@ const handleRefresh = async (a: Account) => {
   lastManualRefreshAt.set(a.id, Date.now())
   try {
     const result = await adminAPI.accounts.refreshCredentials(a.id)
-    patchAccountInList(result.account)
+    patchAccountInList(result.account, revision)
     enterAutoRefreshSilentWindow()
     if (result.warning) appStore.showWarning(result.message)
   } catch (error) {
@@ -2486,9 +2706,11 @@ const handleRefresh = async (a: Account) => {
   }
 }
 const handleRecoverState = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
+  const revision = scheduleRevision
   try {
     const updated = await adminAPI.accounts.recoverState(a.id)
-    patchAccountInList(updated)
+    patchAccountInList(updated, revision)
     enterAutoRefreshSilentWindow()
     appStore.showSuccess(t('admin.accounts.recoverStateSuccess'))
   } catch (error: any) {
@@ -2497,9 +2719,11 @@ const handleRecoverState = async (a: Account) => {
   }
 }
 const handleResetQuota = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
+  const revision = scheduleRevision
   try {
     const updated = await adminAPI.accounts.resetAccountQuota(a.id)
-    patchAccountInList(updated)
+    patchAccountInList(updated, revision)
     enterAutoRefreshSilentWindow()
     appStore.showSuccess(t('common.success'))
   } catch (error) {
@@ -2529,9 +2753,11 @@ const privacyResultMessageKey = (account: Account): { type: 'success' | 'error';
 }
 
 const handleSetPrivacy = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
+  const revision = scheduleRevision
   try {
     const updated = await adminAPI.accounts.setPrivacy(a.id)
-    patchAccountInList(updated)
+    patchAccountInList(updated, revision)
     enterAutoRefreshSilentWindow()
     const result = privacyResultMessageKey(updated)
     if (result.type === 'success') {
@@ -2545,6 +2771,7 @@ const handleSetPrivacy = async (a: Account) => {
   }
 }
 const onRevertFallback = async (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
   try {
     await adminAPI.accounts.revertProxyFallback(a.id)
     appStore.showSuccess(t('admin.accounts.revertProxySuccess'))
@@ -2555,12 +2782,13 @@ const onRevertFallback = async (a: Account) => {
   }
 }
 const handleCreateSparkShadow = (a: Account) => {
+  if (!accountTargetAllowed(a.id)) return
   creatingShadowAcc.value = a
   showCreateShadowDialog.value = true
 }
 const confirmCreateSparkShadow = async () => {
   const a = creatingShadowAcc.value
-  if (!a) return
+  if (!a || !accountTargetAllowed(a.id)) return
   try {
     await adminAPI.accounts.createSparkShadow(a.id, { name: `${a.name} (Spark)` })
     showCreateShadowDialog.value = false
@@ -2572,15 +2800,16 @@ const confirmCreateSparkShadow = async () => {
     appStore.showError(error?.response?.data?.message || t('admin.accounts.createSparkShadowFailed'))
   }
 }
-const handleDelete = (a: Account) => { deletingAcc.value = a; showDeleteDialog.value = true }
-const confirmDelete = async () => { if(!deletingAcc.value) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
+const handleDelete = (a: Account) => { if(accountTargetAllowed(a.id)) { deletingAcc.value = a; showDeleteDialog.value = true } }
+const confirmDelete = async () => { if(!deletingAcc.value || !accountTargetAllowed(deletingAcc.value.id)) return; try { await adminAPI.accounts.delete(deletingAcc.value.id); showDeleteDialog.value = false; deletingAcc.value = null; reload() } catch (error) { console.error('Failed to delete account:', error) } }
 const handleStartScheduleTimer = async (account: Account, hours: number) => {
-  if (pendingScheduleTimers.has(account.id)) return
+  if (!accountTargetAllowed(account.id) || isScheduleOperationPending(account.id)) return
   pendingScheduleTimers.add(account.id)
   try {
     const result = await adminAPI.accounts.startScheduleTimer(account.id, hours)
     const current = accounts.value.find(row => row.id === result.id)
     if (current) patchAccountInList({ ...current, ...result })
+    markScheduleSaved([result.id], { schedulable: result.schedulable, schedule_resume_at: result.schedule_resume_at ?? null })
     enterAutoRefreshSilentWindow()
     appStore.showSuccess(t('admin.accounts.scheduleTimer.saved', {
       time: result.schedule_resume_at ? formatDateTime(result.schedule_resume_at) : ''
@@ -2598,17 +2827,23 @@ const handleStartScheduleTimer = async (account: Account, hours: number) => {
   }
 }
 const handleToggleSchedulable = async (a: Account) => {
+  if (!accountTargetAllowed(a.id) || isScheduleOperationPending(a.id)) return
   const nextSchedulable = !a.schedulable
-  togglingSchedulable.value = a.id
+  pendingScheduleSwitches.add(a.id)
   try {
     const updated = await adminAPI.accounts.setSchedulable(a.id, nextSchedulable)
-    updateSchedulableInList([a.id], updated?.schedulable ?? nextSchedulable)
+    if (updated) {
+      accounts.value = accounts.value.map(row => row.id === a.id ? {
+        ...row, schedulable: updated.schedulable, schedule_resume_at: updated.schedule_resume_at ?? null
+      } : row)
+      markScheduleSaved([a.id], { schedulable: updated.schedulable, schedule_resume_at: updated.schedule_resume_at ?? null })
+    }
     enterAutoRefreshSilentWindow()
   } catch (error) {
     console.error('Failed to toggle schedulable:', error)
-    appStore.showError(t('admin.accounts.failedToToggleSchedulable'))
+    appStore.showError(t('admin.accounts.scheduleTimer.switchUnknown'))
   } finally {
-    togglingSchedulable.value = null
+    pendingScheduleSwitches.delete(a.id)
   }
 }
 const handleShowTempUnsched = (a: Account) => { tempUnschedAcc.value = a; showTempUnsched.value = true }
@@ -2666,6 +2901,48 @@ const handleClickOutside = (event: MouseEvent) => {
   }
 }
 
+const clearLocatedAccount = () => {
+  if (!accountRouter) return
+  const query = { ...accountRoute.query }
+  delete query.account_id
+  void accountRouter.replace({ query })
+}
+watch(() => accountRoute?.query.account_id, async value => {
+  const next = parseLocatedAccount(value)
+  if (next === locatedAccountID.value) return
+  const revision = ++locationRevision
+  locatedAccountID.value = next
+  restoringDefaultGroup.value = false
+  hasPendingListSync.value = false
+  resetAutoRefreshCache()
+  closeAccountToolsDropdown(); showAutoRefreshDropdown.value = false; showExportDataDialog.value = false
+  clearSelection()
+  accounts.value = []
+  lastListKey.value = ''; metricListError.value = ''
+  pagination.total = 0; pagination.pages = 0
+  showBulkEdit.value = false; bulkEditTarget.value = null
+  menu.show = false; menu.acc = null
+  showEdit.value = false; edAcc.value = null
+  showReAuth.value = false; reAuthAcc.value = null
+  showDeleteDialog.value = false; deletingAcc.value = null
+  showCreateShadowDialog.value = false; creatingShadowAcc.value = null
+  showTempUnsched.value = false; tempUnschedAcc.value = null
+  closeTestModal(); closeStatsModal(); closeSchedulePanel()
+  params.account_id = next
+  if (next) Object.assign(params, { platform:'', type:'', status:'', group:'', search:'', privacy_mode:'' })
+  else {
+    const saved = defaultGroup.value
+    restoringDefaultGroup.value = !initialListPending.value
+    const restored = initialListPending.value ? saved : await validatedDefaultGroup()
+    // A newer location transition owns the preparation state and the next load.
+    if (disposed || revision !== locationRevision) return
+    if (saved && !restored) appStore.showWarning(t('admin.accounts.defaultGroupUnavailable'))
+    Object.assign(params, { platform: initialFilters.platform, status: initialFilters.status, group: restored, type:'', search:'', privacy_mode:'' })
+    restoringDefaultGroup.value = false
+  }
+  if (!initialListPending.value) void reload()
+})
+
 onMounted(async () => {
   if (typeof window !== 'undefined') {
     desktopViewportMediaQuery = window.matchMedia(desktopViewportQuery)
@@ -2680,12 +2957,26 @@ onMounted(async () => {
     }
   }
 
-  load()
   loadUpstreamBillingProbeGlobalState()
-  const [proxiesResult, groupsResult] = await Promise.allSettled([
-    adminAPI.proxies.getAll(),
-    adminAPI.groups.getAll()
-  ])
+  const proxiesPromise = adminAPI.proxies.getAll()
+  const groupsPromise = adminAPI.groups.getAll()
+  const groupsSettled = groupsRead = Promise.allSettled([groupsPromise])
+  const proxiesSettled = Promise.allSettled([proxiesPromise])
+  if (sortState.sort_by === 'cache_hit_rate') await waitForCacheSettings()
+  if (!locatedAccountID.value && defaultGroup.value && defaultGroup.value !== 'ungrouped') {
+    const saved = defaultGroup.value
+    const restored = await validatedDefaultGroup()
+    if (!disposed && !locatedAccountID.value) {
+      params.group = restored
+      if (saved && !restored) appStore.showWarning(t('admin.accounts.defaultGroupUnavailable'))
+    }
+  }
+  if (disposed) return
+  initialListPending.value = false
+  void load().catch(() => {})
+  const [proxiesResult] = await proxiesSettled
+  const [groupsResult] = await groupsSettled
+  if (disposed) return
   if (proxiesResult.status === 'fulfilled') {
     proxies.value = proxiesResult.value
   } else {
@@ -2709,6 +3000,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true; resolveRangeWait?.()
   cacheHitRateReqSeq++
   upstreamBillingRateAbortController?.abort()
   if (usageBatchFlushTimer !== null) {

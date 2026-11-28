@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
+import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 
 import { computed, onMounted, ref } from 'vue'
 import { useMediaQuery } from '@vueuse/core'
@@ -80,7 +80,7 @@ const groupOptionsBase = ref<SelectOption[]>([])
 async function loadGroups() {
   try {
     const list = await adminAPI.groups.getAll()
-    groupOptionsBase.value = sortGroupsForDisplay(list).map((g) => ({ value: g.id, label: g.name }))
+    groupOptionsBase.value = buildAdminGroupSelectOptions(list, (g) => ({ value: g.id, label: g.name }), t)
   } catch (err) {
     console.error('[OpsAlertRulesCard] Failed to load groups', err)
     groupOptionsBase.value = []

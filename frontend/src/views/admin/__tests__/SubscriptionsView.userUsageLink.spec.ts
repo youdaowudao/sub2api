@@ -126,10 +126,10 @@ describe('admin subscription users', () => {
     ]
     getAllGroups.mockResolvedValueOnce(rows)
     const wrapper = mountView(); await flushPromises()
-    expect((wrapper.vm as any).groupOptions.map((o: { value: string }) => o.value)).toEqual(['', '3', '4', '1', '2'])
+    expect((wrapper.vm as any).groupOptions.map((o: { value: string }) => o.value)).toEqual(['', '__group_category:openai', '3', '__group_category:anthropic', '4', '1', '2'])
     await wrapper.findAll('button').find(b => b.text() === 'admin.subscriptions.assignSubscription')!.trigger('click')
     const choices = wrapper.findAllComponents({ name: 'Select' }).find(c => c.props('options').some((o: { value: unknown }) => o.value === 1))!
-    expect(choices.props('options').map((o: { value: number }) => o.value)).toEqual([3, 1, 2])
+    expect(choices.props('options').map((o: { value: number }) => o.value)).toEqual(['__group_category:openai', 3, '__group_category:anthropic', 1, 2])
     expect((wrapper.vm as any).assignForm.group_id).toBeNull()
     expect(rows.map(g => g.id)).toEqual([3, 2, 1, 4])
     wrapper.unmount()

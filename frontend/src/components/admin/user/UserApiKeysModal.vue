@@ -76,8 +76,8 @@
           ><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
         </button>
         <!-- Group options -->
-        <button
-          v-for="group in displayGroups"
+        <CategorizedGroupList :groups="displayGroups" #default="{ group }">
+          <button
           :key="group.id"
           @click="changeGroup(selectedKeyForGroup!, group.id)"
           :class="[
@@ -100,12 +100,14 @@
             :selected="selectedKeyForGroup?.group_id === group.id"
           />
         </button>
+        </CategorizedGroupList>
       </div>
     </div>
   </Teleport>
 </template>
 
 <script setup lang="ts">
+import CategorizedGroupList from '@/components/common/CategorizedGroupList.vue'
 import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 
 import { ref, computed, watch, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'

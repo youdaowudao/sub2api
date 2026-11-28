@@ -1430,7 +1430,7 @@ export interface Account {
 
 // The admin account list may return this compact shape when lite=1. Detail
 // operations still use Account from /admin/accounts/:id.
-export type AccountListItem = Omit<Account, 'groups'>
+export type AccountListItem = Omit<Account, 'groups'> & { cache_hit_rate_stats?: CacheHitRateItem; today_stats?: WindowStats }
 
 export interface AccountSchedulerGroupScore {
   group_id?: number | null
@@ -2614,10 +2614,19 @@ export interface CacheHitRateItem {
   cache_creation_tokens: number
   cache_read_tokens: number
   cache_hit_rate: number | null
+  average_duration_ms?: number | null
+  upstream_error_count?: number | null
+  rate_limit_count?: number | null
+  schedulable?: boolean | null
+  account_exists?: boolean
 }
 
 export interface CacheHitRateResult {
   start_date: string
   end_date: string
+  window_start?: string
+  window_end?: string
+  error_state?: 'available' | 'monitoring_disabled' | 'unsupported_filters'
+  generated_at?: string
   items: CacheHitRateItem[]
 }

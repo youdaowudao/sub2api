@@ -25,9 +25,11 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -206,9 +208,11 @@ type AccountWithConcurrency struct {
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
 	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
-	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
-	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
-	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+	CurrentWindowCost *float64                     `json:"current_window_cost,omitempty"` // 当前窗口费用
+	ActiveSessions    *int                         `json:"active_sessions,omitempty"`     // 当前活跃会话数
+	CurrentRPM        *int                         `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+	CacheHitRateStats *usagestats.CacheHitRateItem `json:"cache_hit_rate_stats,omitempty"`
+	TodayStats        *service.WindowStats         `json:"today_stats,omitempty"`
 }
 
 // AccountListItemWithConcurrency is the compact account-list envelope used
@@ -222,6 +226,8 @@ type AccountListItemWithConcurrency struct {
 	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
 	ActiveSessions     *int                         `json:"active_sessions,omitempty"`
 	CurrentRPM         *int                         `json:"current_rpm,omitempty"`
+	CacheHitRateStats  *usagestats.CacheHitRateItem `json:"cache_hit_rate_stats,omitempty"`
+	TodayStats         *service.WindowStats         `json:"today_stats,omitempty"`
 }
 
 type simpleModeGroupReference struct {
@@ -678,7 +684,38 @@ func (h *AccountHandler) List(c *gin.Context) {
 		}
 	}
 
-	accounts, total, err := h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder)
+	var locateID int64
+	if raw, present := c.GetQuery("account_id"); present {
+		id, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || id <= 0 {
+			response.BadRequest(c, "invalid account_id")
+			return
+		}
+		locateID = id
+	}
+	var accounts []service.Account
+	var total int64
+	var err error
+	var metric service.AccountMetricSortResult
+	if service.IsAccountMetricSort(sortBy) {
+		reader, ok := h.adminService.(service.AccountMetricListService)
+		if !ok {
+			response.Error(c, http.StatusServiceUnavailable, "account metric ordering is unavailable")
+			return
+		}
+		var start, end time.Time
+		if sortBy == service.AccountSortCacheHitRate {
+			start, end, err = service.ResolveCacheHitRateWindow(c.Query("start_date"), c.Query("end_date"), c.Query("timezone"), time.Now())
+			if err != nil {
+				response.BadRequest(c, err.Error())
+				return
+			}
+		}
+		metric, err = reader.ListAccountsByMetric(c.Request.Context(), pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}, platform, accountType, status, search, groupID, privacyMode, locateID, start, end)
+		accounts, total = metric.Accounts, metric.Total
+	} else {
+		accounts, total, err = h.adminService.ListAccounts(c.Request.Context(), page, pageSize, platform, accountType, status, search, groupID, privacyMode, sortBy, sortOrder, locateID)
+	}
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -839,6 +876,12 @@ func (h *AccountHandler) List(c *gin.Context) {
 			}
 		}
 
+		if cache, ok := metric.CacheStats[acc.ID]; ok {
+			item.CacheHitRateStats = &cache
+		}
+		if metric.TodayStats != nil {
+			item.TodayStats = service.AccountWindowStatsForList(metric.TodayStats[acc.ID])
+		}
 		result[i] = item
 	}
 
@@ -856,9 +899,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 				CurrentWindowCost:  item.CurrentWindowCost,
 				ActiveSessions:     item.ActiveSessions,
 				CurrentRPM:         item.CurrentRPM,
+				CacheHitRateStats:  item.CacheHitRateStats,
+				TodayStats:         item.TodayStats,
 			}
 		}
-		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, true)
+		etag := buildAccountsListETag(compact, total, page, pageSize, platform, accountType, status, search, true, locateID)
 		if etag != "" {
 			c.Header("ETag", etag)
 			c.Header("Vary", "If-None-Match")
@@ -871,7 +916,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 		return
 	}
 
-	etag := buildAccountsListETag(result, total, page, pageSize, platform, accountType, status, search, false)
+	etag := buildAccountsListETag(result, total, page, pageSize, platform, accountType, status, search, false, locateID)
 	if etag != "" {
 		c.Header("ETag", etag)
 		c.Header("Vary", "If-None-Match")
@@ -890,7 +935,12 @@ func buildAccountsListETag[T any](
 	page, pageSize int,
 	platform, accountType, status, search string,
 	lite bool,
+	locateIDs ...int64,
 ) string {
+	var locateID int64
+	if len(locateIDs) > 0 {
+		locateID = locateIDs[0]
+	}
 	payload := struct {
 		Total       int64  `json:"total"`
 		Page        int    `json:"page"`
@@ -901,6 +951,7 @@ func buildAccountsListETag[T any](
 		Search      string `json:"search"`
 		Lite        bool   `json:"lite"`
 		Items       []T    `json:"items"`
+		AccountID   int64  `json:"account_id,omitempty"`
 	}{
 		Total:       total,
 		Page:        page,
@@ -911,6 +962,7 @@ func buildAccountsListETag[T any](
 		Search:      search,
 		Lite:        lite,
 		Items:       items,
+		AccountID:   locateID,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

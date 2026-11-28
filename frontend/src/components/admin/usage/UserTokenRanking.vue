@@ -89,8 +89,8 @@ import Select from '@/components/common/Select.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
 const props = defineProps<{
-  startDate: string
-  endDate: string
+  startDate?: string
+  endDate?: string
   filters: Record<string, unknown>
   model?: string
 }>()

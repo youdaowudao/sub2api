@@ -21,14 +21,14 @@ import (
 )
 
 // Account management implementations
-func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]Account, int64, error) {
+func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string, accountIDs ...int64) ([]Account, int64, error) {
 	if groupID > 0 {
 		if err := s.ValidateAccountGroupBindings(ctx, []int64{groupID}); err != nil {
 			return nil, 0, err
 		}
 	}
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
-	accounts, result, err := s.accountRepo.ListWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode)
+	accounts, result, err := s.accountRepo.ListWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode, accountIDs...)
 	if err != nil {
 		return nil, 0, err
 	}

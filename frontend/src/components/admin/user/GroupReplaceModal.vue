@@ -21,8 +21,8 @@
 
       <!-- 可选分组列表 -->
       <div v-if="availableGroups.length > 0" class="max-h-64 space-y-2 overflow-y-auto">
-        <label
-          v-for="group in availableGroups"
+        <CategorizedGroupList :groups="availableGroups" #default="{ group }">
+          <label
           :key="group.id"
           class="flex cursor-pointer items-center gap-3 rounded-lg border-2 p-3 transition-all"
           :class="selectedGroupId === group.id
@@ -48,6 +48,7 @@
             <span class="ml-2 text-xs text-gray-400">{{ group.platform }}</span>
           </div>
         </label>
+        </CategorizedGroupList>
       </div>
 
       <!-- 无可选分组 -->
@@ -76,6 +77,7 @@
 </template>
 
 <script setup lang="ts">
+import CategorizedGroupList from '@/components/common/CategorizedGroupList.vue'
 import { sortGroupsForDisplay } from '@/utils/groupDisplayOrder'
 
 import { ref, watch, computed } from 'vue'

@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-full min-h-0 flex-col">
+  <div class="flex h-full min-h-0 flex-col" :class="{ 'ops-records-table': recordMeta }">
     <div class="flex min-h-0 flex-1 flex-col overflow-hidden" :class="flat ? '' : 'card'">
       <IpGeoBatchToolbar :ips="rows.map((r) => r.client_ip)" @failed="emit('ipGeoBatchFailed')" />
 
@@ -12,6 +12,8 @@
         server-side-sort
         :default-sort-key="sortBy === 'status_code' ? 'status' : (sortBy || 'created_at')"
         :default-sort-order="sortOrder || 'desc'"
+        :controlled-sort="sortBy ? { key: sortBy === 'status_code' ? 'status' : sortBy, order: sortOrder || 'desc' } : undefined"
+        :top-horizontal-scroll="topHorizontalScroll || !!recordMeta"
         @sort="onSort"
         @rowClick="(row) => emit('openErrorDetail', row.id)"
       >
@@ -57,6 +59,7 @@
           </div>
           <span v-else-if="displayModel(row)" class="text-sm font-medium text-gray-900 dark:text-white">{{ displayModel(row) }}</span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        <UsageQuickFilterButton v-if="quickFilters && (row.requested_model || row.model)" :label="t('admin.usage.filterThisModel')" @click="emit('quickFilter', { field: 'model', value: row.requested_model || row.model })" />
         </template>
 
         <template #cell-group="{ row }">
@@ -68,10 +71,11 @@
             {{ row.group_name || '#' + row.group_id }}
           </span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        <UsageQuickFilterButton v-if="quickFilters && row.group_id" :label="t('admin.usage.filterThisGroup')" @click="emit('quickFilter', { field: 'group_id', value: row.group_id, label: row.group_name })" />
         </template>
 
         <template #cell-user="{ row }">
-          <button v-if="(recordOf(row)?.user_count ?? 0) > 1" type="button" class="text-sm text-primary-600 dark:text-primary-400" @click.stop="emit('openErrorDetail', row.id)">{{ t('admin.ops.records.users', { count: recordOf(row)?.user_count }) }}</button>
+          <button v-if="!uniqueErrorUser(recordOf(row))" type="button" class="text-sm text-primary-600 dark:text-primary-400" @click.stop="emit('openErrorDetail', row.id)">{{ t('admin.ops.records.users', { count: recordOf(row)?.user_count }) }}</button>
           <div v-else-if="row.user_id" class="text-sm">
             <button
               v-if="userClickable && row.user_email"
@@ -95,7 +99,7 @@
         </template>
 
         <template #cell-api_key="{ row }">
-          <button v-if="(recordOf(row)?.api_key_count ?? 0) > 1" type="button" class="text-sm text-primary-600 dark:text-primary-400" @click.stop="emit('openErrorDetail', row.id)">{{ t('admin.ops.records.keys', { count: recordOf(row)?.api_key_count }) }}</button>
+          <button v-if="!uniqueErrorKey(recordOf(row))" type="button" class="text-sm text-primary-600 dark:text-primary-400" @click.stop="emit('openErrorDetail', row.id)">{{ t('admin.ops.records.keys', { count: recordOf(row)?.api_key_count }) }}</button>
           <div v-else-if="row.api_key_id || row.api_key_name" class="text-sm">
             <span class="text-gray-900 dark:text-white">{{ row.api_key_name || '#' + row.api_key_id }}</span>
             <span
@@ -105,6 +109,7 @@
           </div>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
           <div v-if="recordOf(row)?.has_unknown_api_key" class="text-xs text-gray-400">{{ t('admin.ops.records.unknownKey') }}</div>
+        <UsageQuickFilterButton v-if="quickFilters && row.api_key_id && row.user_id && uniqueErrorKey(recordOf(row))" :label="t('admin.usage.filterThisKey')" @click="emit('quickFilter', { field: 'api_key_id', value: row.api_key_id, label: row.api_key_name, userId: row.user_id, userLabel: row.user_email })" />
         </template>
 
         <template #cell-account="{ row }">
@@ -115,6 +120,7 @@
             :title="(row.account_name || '') + ' · ' + t('admin.ops.errorLog.accountId') + ' ' + row.account_id"
           >{{ row.account_name || '#' + row.account_id }}</span>
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        <UsageQuickFilterButton v-if="quickFilters && row.account_id" :label="t('admin.usage.filterThisAccount')" @click="emit('quickFilter', { field: 'account_id', value: row.account_id, label: row.account_name })" />
         </template>
 
         <template #cell-category="{ row }">
@@ -186,7 +192,7 @@
               <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
             </button>
             <button
-              v-if="row.user_id && row.account_id"
+              v-if="row.user_id && row.account_id && uniqueErrorUser(recordOf(row))"
               type="button"
               class="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/30 dark:hover:text-red-400"
               :title="blockAccountLabel(row)"
@@ -222,6 +228,9 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DataTable from '@/components/common/DataTable.vue'
+import UsageQuickFilterButton from '@/components/admin/usage/UsageQuickFilterButton.vue'
+import { uniqueErrorUser, uniqueErrorKey } from '../errorRecordPresentation'
+import type { UsageQuickFilter } from '@/utils/usageQuickFilter'
 import Icon from '@/components/icons/Icon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import Pagination from '@/components/common/Pagination.vue'
@@ -249,7 +258,7 @@ function blockAccountLabel(row: OpsErrorLog) {
 }
 
 async function blockAccount(row: OpsErrorLog) {
-  if (blocking.value || !row.user_id || !row.account_id) return
+  if (blocking.value || !row.user_id || !row.account_id || !uniqueErrorUser(recordOf(row))) return
   blocking.value = true
   try {
     const item = await createUserAccountBlock(row.user_id, row.account_id)
@@ -357,6 +366,8 @@ function getTypeBadge(log: OpsErrorLog): { label: string; className: string } {
 
 interface Props {
   recordMeta?: Record<number, OpsErrorRecord>
+  topHorizontalScroll?: boolean
+  quickFilters?: boolean
   columnOrder?: string[]
   pageSizeOptions?: number[]
   columnWidthStorageKey?: string
@@ -385,6 +396,7 @@ interface Emits {
   (e: 'ipGeoBatchFailed'): void
   (e: 'sort', sortBy: string, sortOrder: 'asc' | 'desc'): void
   (e: 'userClick', userId: number, email?: string): void
+  (e: 'quickFilter', filter: UsageQuickFilter): void
 }
 
 const props = defineProps<Props>()
@@ -429,6 +441,11 @@ function formatSmartMessage(msg: string): string {
 </script>
 
 <style scoped>
+.ops-records-table :deep(th), .ops-records-table :deep(td) {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
 /* Auto layout stays compact; explicit column widths control the full cell. */
 :deep(table[style*="table-layout: fixed"] .ops-record-identity),
 :deep(table[style*="table-layout: fixed"] .ops-record-message) {

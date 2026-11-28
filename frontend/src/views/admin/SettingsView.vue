@@ -9029,6 +9029,7 @@
 </template>
 
 <script setup lang="ts">
+import { buildAdminGroupSelectOptions } from '@/utils/groupDisplay'
 import { normalizeCacheHitRateRange } from '@/utils/dateRange';
 import { sortGroupsForDisplay } from "@/utils/groupDisplayOrder";
 import GuideSettingsCard from '@/features/guide/components/GuideSettingsCard.vue';
@@ -10555,7 +10556,7 @@ const quickImportImageGroupUnavailable = computed(() => {
 const quickImportImageGroupOptions = computed(() => [
   { value: 0, label: t("admin.settings.site.quickImportImageGroupUnset") },
   { value: -1, label: t("admin.settings.site.quickImportImageGroupNone") },
-  ...quickImportImageGroups.value.map((group) => ({ value: group.id, label: group.name })),
+  ...buildAdminGroupSelectOptions(quickImportImageGroups.value, (group) => ({ value: group.id, label: group.name }), t),
   ...(quickImportImageGroupUnavailable.value ? [{
     value: form.quick_import_image_group_id ?? 0,
     label: t("admin.settings.site.quickImportImageGroupUnavailable"),
@@ -10563,17 +10564,15 @@ const quickImportImageGroupOptions = computed(() => [
   }] : []),
 ]);
 
-const defaultSubscriptionGroupOptions = computed<
-  DefaultSubscriptionGroupOption[]
->(() =>
-  sortGroupsForDisplay(subscriptionGroups.value).map((group) => ({
+const defaultSubscriptionGroupOptions = computed(() =>
+  buildAdminGroupSelectOptions(subscriptionGroups.value, (group) => ({
     value: group.id,
     label: group.name,
     description: group.description,
     platform: group.platform,
     subscriptionType: group.subscription_type,
     rate: group.rate_multiplier,
-  })),
+  }), t),
 );
 
 const registrationEmailSuffixWhitelistSeparatorKeys = new Set([

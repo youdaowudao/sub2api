@@ -232,6 +232,7 @@ export interface PromptDeletePreview {
 }
 
 export interface PromptAuditGroup {
+  display_category?: string
   sort_order?: number
   id: number
   name: string

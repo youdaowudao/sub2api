@@ -78,3 +78,13 @@ func ParseCacheHitRateDefaultRange(value string) string {
 		return "today"
 	}
 }
+
+func (s *UsageService) GetAccountPerformanceStats(ctx context.Context, filters usagestats.UsageLogFilters, ids []int64, platform string, includeErrors bool) ([]usagestats.AccountPerformanceItem, error) {
+	reader, ok := s.usageRepo.(interface {
+		GetAccountPerformanceStats(context.Context, usagestats.UsageLogFilters, []int64, string, bool) ([]usagestats.AccountPerformanceItem, error)
+	})
+	if !ok {
+		return nil, errors.New("account performance statistics reader is unavailable")
+	}
+	return reader.GetAccountPerformanceStats(ctx, filters, ids, platform, includeErrors)
+}

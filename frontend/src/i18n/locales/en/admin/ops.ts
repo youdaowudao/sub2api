@@ -218,6 +218,7 @@ export default {
         '1h': 'Last 1 hour',
         '1d': 'Last 1 day',
         '15d': 'Last 15 days',
+        '3h': 'Last 3 hours',
         '6h': 'Last 6 hours',
         '24h': 'Last 24 hours',
         '7d': 'Last 7 days',

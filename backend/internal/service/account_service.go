@@ -14,7 +14,7 @@ var (
 	ErrAccountNotFound       = infraerrors.NotFound("ACCOUNT_NOT_FOUND", "account not found")
 	ErrAccountNilInput       = infraerrors.BadRequest("ACCOUNT_NIL_INPUT", "account input cannot be nil")
 	ErrAccountNotInFallback  = infraerrors.BadRequest("ACCOUNT_NOT_IN_FALLBACK", "account is not in proxy fallback state")
-	ErrScheduleTimerDuration = infraerrors.BadRequest("ACCOUNT_SCHEDULE_TIMER_DURATION", "请选择 6、12 或 24 小时；本次没有更改调度")
+	ErrScheduleTimerDuration = infraerrors.BadRequest("ACCOUNT_SCHEDULE_TIMER_DURATION", "请选择 1、2、3、6、12 或 24 小时；本次没有更改调度")
 	ErrScheduleTimerDisabled = infraerrors.Conflict("ACCOUNT_SCHEDULE_TIMER_DISABLED", "账号已关闭调度；本次没有设置计时，可开启后重新操作")
 )
 
@@ -70,7 +70,7 @@ type AccountRepository interface {
 	Delete(ctx context.Context, id int64) error
 
 	List(ctx context.Context, params pagination.PaginationParams) ([]Account, *pagination.PaginationResult, error)
-	ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, *pagination.PaginationResult, error)
+	ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, accountIDs ...int64) ([]Account, *pagination.PaginationResult, error)
 	// ListAllWithFilters 返回符合过滤条件的全部账号（不分页），用于账号列表页
 	// 计算 OpenAI 调度分数的过滤范围池。
 	ListAllWithFilters(ctx context.Context, platform, accountType, status, search string, groupID int64, privacyMode string) ([]Account, error)

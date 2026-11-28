@@ -2,6 +2,9 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
 import UsageFilters from '../UsageFilters.vue'
+import { createPinia } from 'pinia'
+import { useAuthStore } from '@/stores/auth'
+import type { User } from '@/types'
 
 // --- i18n messages (only what UsageFilters needs) ---
 const messages: Record<string, string> = {
@@ -128,6 +131,166 @@ describe('UsageFilters — user search dropdown', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('opens ranked account choices without a lookup and supports keyboard selection', async () => {
+    mockAccountsList.mockClear()
+    const filters = defaultFilters()
+    const wrapper = mount(UsageFilters,{props:{modelValue:filters,exporting:false,startDate:'2026-05-01',endDate:'2026-05-28',accountCandidates:[{id:5,name:'Popular',requests:20},{id:2,name:'Other',requests:3}]},global:{stubs:{Select:true,Teleport:true}}})
+    const input = wrapper.findAll('input[type="text"]')[2]
+    await input.trigger('focus')
+    expect(wrapper.text()).toContain('Popular')
+    expect(mockAccountsList).not.toHaveBeenCalled()
+    await input.trigger('keydown',{key:'ArrowDown'})
+    await input.trigger('keydown',{key:'Enter'})
+    expect(filters.account_id).toBe(5)
+    expect(wrapper.emitted('change')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('clears stale user and key choices while typing, and ignores replies after Escape', async () => {
+    const userPending = deferred<Array<{ id:number; email:string; deleted:boolean }>>()
+    const keyPending = deferred<Array<{ id:number; name:string; user_id:number }>>()
+    mockSearchUsers.mockResolvedValueOnce([{id:1,email:'old@example.test',deleted:false}]).mockReturnValueOnce(userPending.promise)
+    mockSearchApiKeys.mockReset().mockResolvedValueOnce([{id:1,name:'old-key',user_id:1}]).mockReturnValueOnce(keyPending.promise)
+    const w = mount(UsageFilters,{props:{modelValue:defaultFilters(),showActions:true,exporting:false,startDate:'2026-05-01',endDate:'2026-05-28'},global:{stubs:{Select:true,Teleport:true}}})
+    try {
+      const [user,key] = w.findAll('input[type="text"]')
+      await user.setValue('old'); await vi.advanceTimersByTimeAsync(300)
+      expect(w.text()).toContain('old@example.test')
+      await user.setValue('new')
+      expect(w.text()).not.toContain('old@example.test')
+      await vi.advanceTimersByTimeAsync(300)
+      await user.trigger('keydown',{key:'Escape'})
+      userPending.resolve([{id:2,email:'late@example.test',deleted:false}]); await flushPromises()
+      expect((w.vm as any).userResults).toEqual([])
+      await key.setValue('old'); await vi.advanceTimersByTimeAsync(300)
+      expect(w.text()).toContain('old-key')
+      await key.setValue('new')
+      expect(w.text()).not.toContain('old-key')
+      await vi.advanceTimersByTimeAsync(300)
+      await key.trigger('keydown',{key:'Escape'})
+      keyPending.resolve([{id:2,name:'late-key',user_id:1}]); await flushPromises()
+      expect((w.vm as any).apiKeyResults).toEqual([])
+    } finally {w.unmount()}
+  })
+
+  it('reuses a completed identical user search after Escape and cancels a pending search on Tab away', async () => {
+    const pending = deferred<Array<{id:number;email:string;deleted:boolean}>>()
+    mockSearchUsers.mockResolvedValueOnce([{id:1,email:'same@example.test',deleted:false}]).mockReturnValueOnce(pending.promise)
+    const w=mount(UsageFilters,{props:{modelValue:defaultFilters(),showActions:true,exporting:false,startDate:'2026-05-01',endDate:'2026-05-28'},global:{stubs:{Select:true,Teleport:true}}})
+    try {
+      const [user,key]=w.findAll('input[type="text"]')
+      await user.setValue('same');await vi.advanceTimersByTimeAsync(300)
+      expect(w.text()).toContain('same@example.test')
+      await user.trigger('keydown',{key:'Escape'})
+      await user.trigger('focus');await vi.advanceTimersByTimeAsync(300)
+      expect(w.text()).toContain('same@example.test')
+      expect(mockSearchUsers).toHaveBeenCalledTimes(1)
+      await user.setValue('pending');await vi.advanceTimersByTimeAsync(300)
+      await user.trigger('focusout',{relatedTarget:key.element})
+      pending.resolve([{id:2,email:'late@example.test',deleted:false}]);await flushPromises()
+      expect((w.vm as any).userResults).toEqual([])
+      expect(w.text()).not.toContain('late@example.test')
+    } finally {w.unmount()}
+  })
+
+  it('keeps a missing historical group label and leaves cleanup account search unchanged', async () => {
+    const filters = {...defaultFilters(),group_id:42}
+    const w = mount(UsageFilters,{props:{modelValue:filters,showActions:true,exporting:false,startDate:'2026-05-01',endDate:'2026-05-28'},global:{stubs:{Select:true,Teleport:true}}})
+    try {
+      (w.vm as any).setGroupLabel('Old group')
+      await flushPromises()
+      expect((w.vm as any).groupOptions).toContainEqual({value:42,label:'Old group'})
+      await w.setProps({showActions:false})
+      await w.findAll('input[type="text"]')[2].trigger('focus')
+      expect(w.text()).not.toContain('admin.usage.noAccountRanking')
+      expect(w.findAll('[data-filter-choice]')).toHaveLength(0)
+    } finally {w.unmount()}
+  })
+
+  it('selects a saved user without a user search and rejects an old key result', async () => {
+    const pinia = createPinia()
+    const auth = useAuthStore(pinia)
+    auth.user = { id:919019,role:'admin' } as User
+    const historyKey = 'admin-user-query-history:919019'
+    localStorage.setItem(historyKey, JSON.stringify([{ id:2,email:'saved@example.test',lastQueriedAt:1,pinned:true }]))
+    const old = deferred<Array<{ id:number; name:string; user_id:number }>>()
+    mockSearchApiKeys.mockImplementation((uid:number|undefined) => uid === 2 ? Promise.resolve([{id:22,name:'new-key',user_id:2}]) : old.promise)
+    const filters = { ...defaultFilters(), user_id: 1 as number|undefined, api_key_id: 11 as number|undefined }
+    const wrapper = mount(UsageFilters, { props:{modelValue:filters,exporting:false,startDate:'2026-05-01',endDate:'2026-05-28',showActions:true},global:{plugins:[pinia],stubs:{Select:true,Teleport:true}} })
+    try {
+      const [userInput,keyInput] = wrapper.findAll('input[type="text"]')
+      await keyInput.setValue('old')
+      await vi.advanceTimersByTimeAsync(300)
+      await userInput.trigger('focus')
+      const saved = wrapper.findAll('button').find(b=>b.text().includes('saved@example.test'))
+      expect(saved).toBeDefined();await saved!.trigger('click');await flushPromises()
+      expect(filters.user_id).toBe(2);expect(filters.api_key_id).toBeUndefined()
+      expect(mockSearchUsers).not.toHaveBeenCalled()
+      expect(mockSearchApiKeys).not.toHaveBeenCalledWith(2, '')
+      await keyInput.trigger('focus'); await vi.advanceTimersByTimeAsync(300)
+      old.resolve([{id:11,name:'old-key',user_id:1}]);await flushPromises()
+      expect((wrapper.vm as any).apiKeyResults).toEqual([{id:22,name:'new-key',user_id:2}])
+      expect(wrapper.emitted('change')?.length).toBe(1)
+    } finally {wrapper.unmount();localStorage.removeItem(historyKey)}
+  })
+
+  it.each(['success','failure'])('ignores a previous user key-search reply after selecting history (%s)', async outcome => {
+    const pinia=createPinia(), auth=useAuthStore(pinia)
+    auth.user={id:919020,role:'admin'} as User
+    const historyKey='admin-user-query-history:919020'
+    localStorage.setItem(historyKey,JSON.stringify([{id:2,email:'saved@example.test',lastQueriedAt:1,pinned:true}]))
+    const old=deferred<Array<{id:number;name:string;user_id:number}>>()
+    mockSearchUsers.mockResolvedValue([{id:1,email:'first@example.test',deleted:false}])
+    mockSearchApiKeys.mockImplementation((uid:number|undefined)=>uid===2?Promise.resolve([{id:22,name:'new-key',user_id:2}]):old.promise)
+    const filters={...defaultFilters(),user_id:undefined as number|undefined,api_key_id:undefined as number|undefined}
+    const w=mount(UsageFilters,{props:{modelValue:filters,exporting:false,startDate:'2026-05-01',endDate:'2026-05-28',showActions:true},global:{plugins:[pinia],stubs:{Select:true,Teleport:true}}})
+    try {
+      const input=w.find('input[type="text"]')
+      await input.trigger('focus');await input.setValue('first');await vi.advanceTimersByTimeAsync(300)
+      await w.findAll('button').find(b=>b.text().includes('first@example.test'))!.trigger('click')
+      expect(filters.user_id).toBe(1)
+      const keyInput = w.findAll('input[type="text"]')[1]
+      await keyInput.trigger('focus'); await vi.advanceTimersByTimeAsync(300)
+      await input.setValue('');await input.trigger('focus')
+      await w.findAll('button').find(b=>b.text().includes('saved@example.test'))!.trigger('click');await flushPromises()
+      const count=w.emitted('change')?.length
+      await keyInput.trigger('focus'); await vi.advanceTimersByTimeAsync(300)
+      if(outcome==='success') old.resolve([{id:11,name:'old-key',user_id:1}]);else old.reject(new Error('old query failed'))
+      await flushPromises()
+      expect(filters.user_id).toBe(2)
+      expect((w.vm as any).apiKeyResults).toEqual([{id:22,name:'new-key',user_id:2}])
+      expect(w.emitted('change')?.length).toBe(count)
+      await w.setProps({showActions:false});await input.setValue('');await input.trigger('focus')
+      expect(w.findAll('button').some(b=>b.text().includes('saved@example.test'))).toBe(false)
+    } finally {w.unmount();localStorage.removeItem(historyKey)}
+  })
+
+  it('cancels a queued key search on parent filter reset', async () => {
+    mockSearchApiKeys.mockClear()
+    const w=mount(UsageFilters,{props:{modelValue:{...defaultFilters(),user_id:1},exporting:false,startDate:'2026-05-01',endDate:'2026-05-28',showActions:false},global:{stubs:{Select:true,Teleport:true}}})
+    try {
+      await w.findAll('input[type="text"]')[1].setValue('old')
+      await w.setProps({modelValue:defaultFilters()})
+      await vi.advanceTimersByTimeAsync(350)
+      expect(mockSearchApiKeys).not.toHaveBeenCalled()
+    } finally {w.unmount()}
+  })
+
+  it('resets a global key search which has no selected user or key', async () => {
+    mockSearchApiKeys.mockClear()
+    const w=mountFilters()
+    try {
+      await w.setProps({showActions:true})
+      const keyInput=w.findAll('input[type="text"]')[1]
+      await keyInput.setValue('old global key')
+      await w.findAll('button').find(b=>b.text()==='Reset')!.trigger('click')
+      await vi.advanceTimersByTimeAsync(350)
+      expect(mockSearchApiKeys).not.toHaveBeenCalled()
+      expect((keyInput.element as HTMLInputElement).value).toBe('')
+      expect(w.emitted('reset')?.length).toBe(1)
+    } finally {w.unmount()}
   })
 
   it('(a) labels deleted users with the i18n badge and (b) sorts active users before deleted ones, (c) selection sets user_id', async () => {

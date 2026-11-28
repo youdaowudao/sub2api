@@ -1166,8 +1166,11 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 	return q
 }
 
-func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
+func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string, accountIDs ...int64) ([]service.Account, *pagination.PaginationResult, error) {
 	q := r.accountListFilteredQuery(platform, accountType, status, search, groupID, privacyMode)
+	if len(accountIDs) > 0 && accountIDs[0] > 0 {
+		q.Where(dbaccount.IDEQ(accountIDs[0]))
+	}
 	// Clone before Count so interceptor-appended predicates (SoftDeleteMixin's
 	// deleted_at IS NULL) don't accumulate on the shared builder and pollute the
 	// subsequent list query. Same pattern used in group_repo/promo_code_repo/user_repo
@@ -2862,10 +2865,13 @@ func (r *accountRepository) SetSchedulable(ctx context.Context, id int64, schedu
 	if scoped := r.accountTransactionScope(ctx); scoped != r {
 		return scoped.SetSchedulable(ctx, id, schedulable)
 	}
-	_, err := r.client.Account.Update().
+	update := r.client.Account.Update().
 		Where(dbaccount.IDEQ(id)).
-		SetSchedulable(schedulable).
-		Save(ctx)
+		SetSchedulable(schedulable)
+	if schedulable {
+		update.ClearScheduleResumeAt()
+	}
+	_, err := update.Save(ctx)
 	if err != nil {
 		return err
 	}
@@ -3265,6 +3271,9 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		setClauses = append(setClauses, "schedulable = $"+itoa(idx))
 		args = append(args, *updates.Schedulable)
 		idx++
+		if *updates.Schedulable {
+			setClauses = append(setClauses, "schedule_resume_at = NULL")
+		}
 	}
 	if updates.ProbeEnabled != nil {
 		if updates.Extra == nil {

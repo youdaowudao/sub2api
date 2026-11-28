@@ -15,10 +15,10 @@ func (h *AccountHandler) StartScheduleTimer(c *gin.Context) {
 		return
 	}
 	var request struct {
-		DurationHours int `json:"duration_hours" binding:"required,oneof=6 12 24"`
+		DurationHours int `json:"duration_hours" binding:"required,oneof=1 2 3 6 12 24"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
-		response.BadRequest(c, "请选择 6、12 或 24 小时；本次没有更改调度")
+		response.BadRequest(c, "请选择 1、2、3、6、12 或 24 小时；本次没有更改调度")
 		return
 	}
 	result, err := h.adminService.StartAccountScheduleTimer(c.Request.Context(), id, request.DurationHours)
