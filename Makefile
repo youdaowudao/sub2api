@@ -55,6 +55,7 @@ FRONTEND_CRITICAL_VITEST := \
 	src/views/admin/__tests__/GroupsView.displayOrder.spec.ts \
 	src/api/__tests__/admin.groups.displayOrder.spec.ts \
 	src/components/common/__tests__/Select.keyboard.spec.ts \
+	src/utils/__tests__/adminRecentRange.spec.ts \
 	src/views/admin/__tests__/UsageView.spec.ts \
 	src/views/admin/__tests__/AccountsView.lite.spec.ts \
 	src/views/admin/__tests__/AccountsView.cacheHitRate.spec.ts \

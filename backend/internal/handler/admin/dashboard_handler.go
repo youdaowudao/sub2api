@@ -582,11 +582,28 @@ func parseRankingLimit(raw string) int {
 	return limit
 }
 
+// A long exact ranking is only for a local today/yesterday-to-time comparison.
+// Other precise consumers retain maxAdminRecentRange and historical date mode
+// keeps its existing cache and semantics.
+func isDashboardRankingDayWindow(c *gin.Context, start, end, now time.Time) bool {
+	if c.Request.URL.Query().Has("start_date") || c.Request.URL.Query().Has("end_date") || end.After(now) {
+		return false
+	}
+	localNow := now.In(start.Location())
+	today := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.UTC)
+	date := start.Format("2006-01-02")
+	if date != today.Format("2006-01-02") && date != today.AddDate(0, 0, -1).Format("2006-01-02") {
+		return false
+	}
+	dayStart, dayEnd, err := service.ResolveCacheHitRateWindow(date, date, c.Query("timezone"), now)
+	return err == nil && start.Equal(dayStart) && !end.After(dayEnd)
+}
+
 // GetUserSpendingRanking handles getting user spending ranking data.
 // GET /api/v1/admin/dashboard/users-ranking
 func (h *DashboardHandler) GetUserSpendingRanking(c *gin.Context) {
 	startTime, endTime, precise, err := parseDashboardRange(c)
-	if err != nil || (precise && endTime.Sub(startTime) > maxAdminRecentRange) {
+	if err != nil || (precise && endTime.Sub(startTime) > maxAdminRecentRange && !isDashboardRankingDayWindow(c, startTime, endTime, time.Now())) {
 		response.BadRequest(c, "invalid start_time/end_time")
 		return
 	}

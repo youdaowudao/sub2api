@@ -5,9 +5,25 @@
         {{ t('admin.dashboard.userUsageRanking') }}
       </h3>
       <span v-if="!loading && !error" class="text-xs text-gray-500 dark:text-gray-400">
-        {{ t('admin.dashboard.totalUsersInRange', { count: totalUsers }) }}
+        {{ t('admin.dashboard.totalUsersInRange', { count: isMetricValue(totalUsers) ? totalUsers : '—' }) }}
       </span>
     </div>
+    <section v-if="showCompare && !loading && !error" data-testid="site-totals" class="mb-4 rounded-lg bg-gray-50 p-3 dark:bg-dark-700/40">
+      <div class="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h4 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('admin.dashboard.siteTotals') }}</h4>
+        <span v-if="currentWindow" class="text-xs text-gray-500 dark:text-gray-400">{{ currentWindow }}</span>
+      </div>
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div v-for="metric in siteMetrics" :key="metric.key" :data-testid="`site-total-${metric.key}`" class="min-w-0">
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ metric.label }}</p>
+          <p class="break-words text-sm font-semibold text-gray-900 dark:text-white">{{ metric.value }}</p>
+          <p class="text-xs" :class="comparisonClass(metric.comparison)">{{ metric.comparison === 'new' ? t('admin.dashboard.yesterdayZero') : formatComparison(metric.comparison) }}</p>
+        </div>
+      </div>
+      <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+        {{ comparisonHeading }}<template v-if="previousWindow || compare?.window"> · {{ previousWindow || compare?.window }}</template>
+      </p>
+    </section>
     <div v-if="loading" class="flex h-48 items-center justify-center">
       <LoadingSpinner />
     </div>
@@ -27,7 +43,7 @@
             <th class="pb-2 pl-3 text-right">{{ t('admin.dashboard.spendingRankingTokens') }}</th>
             <th class="pb-2 pl-3 text-right">{{ t('admin.dashboard.spendingRankingSpend') }}</th>
             <th class="pb-2 pl-3 text-right">{{ t('admin.dashboard.share') }}</th>
-            <th v-if="showCompare" class="pb-2 pl-3 text-right">{{ t('admin.dashboard.vsYesterday') }}<span v-if="compare?.window" class="block text-xs font-normal">{{ compare.window }}</span></th>
+            <th v-if="showCompare" class="pb-2 pl-3 text-right">{{ comparisonHeading }}<span v-if="previousWindow || compare?.window" class="block text-xs font-normal">{{ previousWindow || compare?.window }}</span></th>
           </tr>
         </thead>
         <tbody>
@@ -85,6 +101,9 @@ import type { UserSpendingRankingItem } from '@/types'
 interface RankingComparison {
   items: UserSpendingRankingItem[]
   totalUsers: number
+  totalRequests?: number
+  totalTokens?: number
+  totalActualCost?: number
   window?: string
 }
 
@@ -120,6 +139,9 @@ const props = defineProps<{
   totalUsers: number
   compare: RankingComparison | null
   showCompare: boolean
+  currentWindow?: string
+  previousWindow?: string
+  differentDuration?: boolean
   loading: boolean
   error: boolean
 }>()
@@ -138,10 +160,29 @@ const toFiniteNumber = (value: unknown): number => {
   const numberValue = Number(value)
   return Number.isFinite(numberValue) ? numberValue : 0
 }
+const isMetricValue = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+const totalComparison = (current: unknown, previous: unknown): ComparisonValue => {
+  if (!isMetricValue(current) || !isMetricValue(previous)) return null
+  if (previous === 0) return current === 0 ? 0 : 'new'
+  const change = (current - previous) / previous * 100
+  return Number.isFinite(change) ? change : null
+}
+const comparisonHeading = computed(() => t(props.differentDuration ? 'admin.dashboard.vsYesterdayDifferentDuration' : 'admin.dashboard.vsYesterday'))
+const siteMetrics = computed(() => [
+  { key: 'users', label: t('admin.dashboard.siteActiveUsers'), current: props.totalUsers, previous: props.compare?.totalUsers, format: (n: number) => n.toLocaleString() },
+  { key: 'requests', label: t('admin.dashboard.spendingRankingRequests'), current: props.totalRequests, previous: props.compare?.totalRequests, format: (n: number) => n.toLocaleString() },
+  { key: 'tokens', label: t('admin.dashboard.spendingRankingTokens'), current: props.totalTokens, previous: props.compare?.totalTokens, format: formatTokens },
+  { key: 'cost', label: t('admin.dashboard.spendingRankingSpend'), current: props.totalActualCost, previous: props.compare?.totalActualCost, format: (n: number) => `¥${formatCost(n)}` },
+].map(metric => ({
+  key: metric.key, label: metric.label,
+  value: isMetricValue(metric.current) ? metric.format(metric.current) : '—',
+  comparison: totalComparison(metric.current, metric.previous),
+})))
 
 // Preserve the previous ranking's remainder calculation, but only when there are other users.
 const otherRankingItem = computed<UserSpendingRankingItem | null>(() => {
-  if (!props.items.length || props.totalUsers <= props.items.length) return null
+  if (!props.items.length || !isMetricValue(props.totalUsers) || props.totalUsers <= props.items.length ||
+      !isMetricValue(props.totalActualCost) || !isMetricValue(props.totalRequests) || !isMetricValue(props.totalTokens)) return null
 
   const rankedActualCost = props.items.reduce((sum, item) => sum + toFiniteNumber(item.actual_cost), 0)
   const rankedRequests = props.items.reduce((sum, item) => sum + toFiniteNumber(item.requests), 0)
@@ -197,7 +238,7 @@ const formatCost = (value: number): string => {
 }
 
 const formatShare = (value: number): string => {
-  return props.totalActualCost === 0 ? '—' : `${(value / props.totalActualCost * 100).toFixed(1)}%`
+  return !isMetricValue(props.totalActualCost) || props.totalActualCost === 0 ? '—' : `${(value / props.totalActualCost * 100).toFixed(1)}%`
 }
 
 const formatComparison = (value: ComparisonValue): string => {

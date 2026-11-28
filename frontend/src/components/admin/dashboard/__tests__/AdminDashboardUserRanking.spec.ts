@@ -154,6 +154,26 @@ describe('AdminDashboardUserRanking', () => {
     expect(wrapper.findAll('tbody tr')[12].findAll('td').map(td => td.text())).toEqual(['Σ', '其他用户', '0', '2', '¥0.0000', '0.0%', '—'])
   })
 
+  it('shows true zero totals, incomplete comparisons and zero baselines independently of ranking rows', async () => {
+    const wrapper = mount(AdminDashboardUserRanking, {
+      props: { items: [], totalActualCost: 0, totalRequests: 0, totalTokens: 0, totalUsers: 0,
+        compare: { items: [], totalUsers: 4, totalActualCost: 2, totalRequests: 0, totalTokens: 100 },
+        showCompare: true, loading: false, error: false }, global,
+    })
+    expect(wrapper.get('[data-testid="site-total-users"]').text()).toContain('↓ 100.0%')
+    expect(wrapper.get('[data-testid="site-total-requests"]').text()).toContain('0%')
+    expect(wrapper.get('[data-testid="site-total-cost"]').text()).toContain('↓ 100.0%')
+    await wrapper.setProps({ totalRequests: 5, totalTokens: Number.NaN })
+    expect(wrapper.get('[data-testid="site-total-requests"]').text()).toContain('admin.dashboard.yesterdayZero')
+    expect(wrapper.get('[data-testid="site-total-tokens"]').text()).toContain('—')
+    expect(wrapper.get('[data-testid="site-total-tokens"]').text()).not.toContain('100.0%')
+    await wrapper.setProps({ compare: null })
+    expect(wrapper.get('[data-testid="site-total-cost"]').text()).toContain('—')
+    await wrapper.setProps({ showCompare: false })
+    expect(wrapper.find('[data-testid="site-totals"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('does not display stale rows while loading or after failure', async () => {
     const wrapper = mount(AdminDashboardUserRanking, {
       props: {

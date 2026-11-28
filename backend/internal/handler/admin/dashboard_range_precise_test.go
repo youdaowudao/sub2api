@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -354,7 +355,7 @@ func TestGetUserBreakdownPreciseWindow(t *testing.T) {
 func TestDashboardRangePreciseRankingAndBreakdownRejectInvalidWindow(t *testing.T) {
 	for _, path := range []string{"/ranking", "/breakdown"} {
 		for _, tc := range []struct{ name, query string }{
-			{"too long", "start_time=2026-11-27T00:00:00Z&end_time=2026-11-27T03:01:00Z"},
+			{"too long outside day start", "timezone=UTC&start_time=2026-11-27T00:01:00Z&end_time=2026-11-27T03:02:00Z"},
 			{"start only", "start_time=2026-11-27T00:00:00Z"},
 			{"end only", "end_time=2026-11-27T01:00:00Z"},
 			{"invalid minute", "start_time=2026-11-27T00:00:01Z&end_time=2026-11-27T01:00:00Z"},
@@ -369,6 +370,52 @@ func TestDashboardRangePreciseRankingAndBreakdownRejectInvalidWindow(t *testing.
 				assert.Empty(t, dashboardUsersRankingCache.items)
 			})
 		}
+	}
+}
+
+func TestDashboardRankingTodayYesterdayLongWindows(t *testing.T) {
+	for _, tz := range []string{"Asia/Tokyo", "America/New_York"} {
+		t.Run(tz, func(t *testing.T) {
+			loc, err := time.LoadLocation(tz)
+			require.NoError(t, err)
+			now := time.Now().In(loc)
+			today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+			yesterday := time.Date(now.Year(), now.Month(), now.Day()-1, 0, 0, 0, 0, loc)
+			router, repo := newPreciseDashboardRouter(t)
+			path := func(endpoint string, start, end time.Time, extra string) string {
+				q := url.Values{"timezone": {tz}, "start_time": {start.Format(time.RFC3339)}, "end_time": {end.Format(time.RFC3339)}, "limit": {"50"}}
+				return endpoint + "?" + q.Encode() + extra
+			}
+			end := yesterday.Add(5 * time.Hour)
+			payload := preciseDashboardPayload(t, preciseDashboardRequest(router, path("/ranking", yesterday, end, "")))
+			assert.Equal(t, yesterday.Format("2006-01-02"), payload["start_date"])
+			assert.Equal(t, 1, repo.rankingCalls)
+			assert.True(t, yesterday.Equal(repo.rankingStart))
+			assert.True(t, end.Equal(repo.rankingEnd))
+			assert.Equal(t, 50, repo.rankingLimit)
+			assert.Empty(t, dashboardUsersRankingCache.items)
+			if now.Sub(today) > 4*time.Hour {
+				preciseDashboardPayload(t, preciseDashboardRequest(router, path("/ranking", today, today.Add(4*time.Hour), "")))
+				assert.True(t, today.Equal(repo.rankingStart))
+			}
+			calls := repo.rankingCalls
+			prior := time.Date(now.Year(), now.Month(), now.Day()-2, 0, 0, 0, 0, loc)
+			for _, query := range []string{
+				path("/ranking", yesterday.Add(time.Minute), end, ""),
+				path("/ranking", yesterday, today.Add(time.Minute), ""),
+				path("/ranking", prior, prior.Add(5*time.Hour), ""),
+				path("/ranking", today, today.AddDate(0, 0, 1), ""),
+				path("/ranking", yesterday, end, "&start_date="+yesterday.Format("2006-01-02")),
+				path("/ranking", yesterday, end.Add(time.Second), ""),
+				path("/snapshot", yesterday, end, ""),
+				path("/breakdown", yesterday, end, ""),
+			} {
+				assert.Equal(t, http.StatusBadRequest, preciseDashboardRequest(router, query).Code, query)
+			}
+			assert.Equal(t, calls, repo.rankingCalls)
+			assert.Zero(t, repo.breakdownCalls)
+			assert.Zero(t, repo.minuteCalls)
+		})
 	}
 }
 

@@ -154,7 +154,10 @@
             :total-tokens="rankingTotalTokens"
             :total-users="rankingTotalUsers"
             :compare="compare"
-            :show-compare="recentMode !== null"
+            :show-compare="showRankingComparison"
+            :current-window="rankingWindowLabel"
+            :previous-window="yesterdayWindowLabel"
+            :different-duration="rankingDifferentDuration"
             :loading="rankingLoading"
             :error="rankingError"
             @row-click="goToUserUsage"
@@ -185,7 +188,7 @@ import ModelDistributionChart from '@/components/charts/ModelDistributionChart.v
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import AdminDashboardUserRanking from '@/components/admin/dashboard/AdminDashboardUserRanking.vue'
 import AccountPerformancePanel from '@/components/admin/usage/AccountPerformancePanel.vue'
-import { recentMinutes, makeRecentRange, displayAdminWindow, type RecentMinutes } from '@/utils/adminRecentRange'
+import { recentMinutes, makeRecentRange, makeTodayRankingWindows, displayAdminWindow, type RecentMinutes } from '@/utils/adminRecentRange'
 import AdminDashboardGroupCacheRate from '@/components/admin/dashboard/AdminDashboardGroupCacheRate.vue'
 
 const { t } = useI18n()
@@ -211,7 +214,11 @@ const rankingTotalActualCost = ref(0)
 const rankingTotalRequests = ref(0)
 const rankingTotalTokens = ref(0)
 const rankingTotalUsers = ref(0)
-const compare = ref<{ items: UserSpendingRankingItem[]; totalUsers: number; window?: string } | null>(null)
+const compare = ref<{ items: UserSpendingRankingItem[]; totalUsers: number; totalRequests: number; totalTokens: number; totalActualCost: number; window?: string } | null>(null)
+const showRankingComparison = ref(true)
+const rankingWindowLabel = ref('')
+const yesterdayWindowLabel = ref('')
+const rankingDifferentDuration = ref(false)
 let chartLoadSeq = 0
 let rankingLoadSeq = 0
 let compareLoadSeq = 0
@@ -231,7 +238,8 @@ const granularityOptions = computed(() => [
   { value: 'hour', label: t('admin.dashboard.hour') }
 ])
 const modelFilters = computed(() => recentMode.value !== null ? (preciseWindow.value ?? {}) : {})
-const isToday = computed(() => { const today = getTodayRangeDates(); return startDate.value === today.start && endDate.value === today.end })
+const loadedTodayDate = ref(defaultRange.start)
+const isToday = computed(() => startDate.value === loadedTodayDate.value && endDate.value === loadedTodayDate.value)
 const performanceRange = computed(() => recentMode.value !== null ? preciseWindow.value : isToday.value ? { start_date: startDate.value, end_date: endDate.value } : null)
 const rangeKey = computed(() => recentMode.value !== null
   ? `lastHour:${preciseWindow.value?.start_time}:${preciseWindow.value?.end_time}`
@@ -316,7 +324,8 @@ const loadDashboardSnapshot = async (range: DashboardRange, includeStats: boolea
   }
 }
 
-const loadUserSpendingRanking = async (range: DashboardRange) => {
+const validTotal = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : Number.NaN
+const loadUserSpendingRanking = async (range: DashboardRange | null) => {
   const currentSeq = ++rankingLoadSeq
   rankingLoading.value = true
   rankingError.value = false
@@ -325,14 +334,15 @@ const loadUserSpendingRanking = async (range: DashboardRange) => {
   rankingTotalRequests.value = 0
   rankingTotalTokens.value = 0
   rankingTotalUsers.value = 0
+  if (!range) { rankingLoading.value = false; return }
   try {
     const response = await adminAPI.dashboard.getUserSpendingRanking({ ...range, limit: 12 })
     if (currentSeq !== rankingLoadSeq) return
     rankingItems.value = response.ranking || []
-    rankingTotalActualCost.value = response.total_actual_cost || 0
-    rankingTotalRequests.value = response.total_requests || 0
-    rankingTotalTokens.value = response.total_tokens || 0
-    rankingTotalUsers.value = response.total_users || 0
+    rankingTotalActualCost.value = validTotal(response.total_actual_cost)
+    rankingTotalRequests.value = validTotal(response.total_requests)
+    rankingTotalTokens.value = validTotal(response.total_tokens)
+    rankingTotalUsers.value = validTotal(response.total_users)
   } catch (error) {
     if (currentSeq !== rankingLoadSeq) return
     console.error('Error loading user spending ranking:', error)
@@ -342,35 +352,58 @@ const loadUserSpendingRanking = async (range: DashboardRange) => {
   }
 }
 
-const loadYesterdayRanking = async (range: DashboardRange) => {
+const loadYesterdayRanking = async (range: PreciseRange | null) => {
   const currentSeq = ++compareLoadSeq
   compare.value = null
-  if (!('start_time' in range)) return
-  const yesterday = (value: string) => new Date(new Date(value).getTime() - 24 * 60 * 60 * 1000).toISOString()
-  const previousStart = yesterday(range.start_time), previousEnd = yesterday(range.end_time)
+  if (!range) return
   try {
-    const response = await adminAPI.dashboard.getUserSpendingRanking({
-      start_time: previousStart,
-      end_time: previousEnd,
-      limit: 50
-    })
+    const response = await adminAPI.dashboard.getUserSpendingRanking({ ...range, limit: 50 })
     if (currentSeq !== compareLoadSeq) return
-    compare.value = { items: response.ranking || [], totalUsers: response.total_users, window: displayAdminWindow(previousStart, previousEnd) }
+    compare.value = {
+      items: response.ranking || [],
+      totalUsers: validTotal(response.total_users),
+      totalRequests: validTotal(response.total_requests),
+      totalTokens: validTotal(response.total_tokens),
+      totalActualCost: validTotal(response.total_actual_cost),
+      window: displayAdminWindow(range.start_time, range.end_time)
+    }
   } catch (error) {
     if (currentSeq !== compareLoadSeq) return
     console.error('Error loading yesterday ranking:', error)
   }
 }
 
+const durationMinutes = (range: PreciseRange) => (Date.parse(range.end_time) - Date.parse(range.start_time)) / 60000
 const load = async (includeStats: boolean) => {
+  const now = new Date()
+  loadedTodayDate.value = getTodayRangeDates(now).start
   let range: DashboardRange
+  let rankingRange: DashboardRange | null
+  let currentWindow: PreciseRange | null = null
+  let previousWindow: PreciseRange | null = null
   if (recentMode.value !== null) {
-    preciseWindow.value = makeRecentRange(recentMode.value)
-    range = preciseWindow.value
+    preciseWindow.value = makeRecentRange(recentMode.value, now.getTime())
+    range = rankingRange = currentWindow = preciseWindow.value
+    const yesterday = (value: string) => new Date(Date.parse(value) - 24 * 60 * 60 * 1000).toISOString()
+    previousWindow = { start_time: yesterday(currentWindow.start_time), end_time: yesterday(currentWindow.end_time) }
   } else {
-    range = { start_date: startDate.value, end_date: endDate.value }
+    range = rankingRange = { start_date: startDate.value, end_date: endDate.value }
+    if (isToday.value) {
+      const windows = makeTodayRankingWindows(now)
+      currentWindow = windows.current
+      rankingRange = durationMinutes(currentWindow) > 0 ? currentWindow : null
+      previousWindow = windows.previous
+    }
   }
-  await Promise.all([loadDashboardSnapshot(range, includeStats), loadUserSpendingRanking(range), loadYesterdayRanking(range)])
+  showRankingComparison.value = recentMode.value !== null || isToday.value
+  rankingDifferentDuration.value = !!(currentWindow && previousWindow && durationMinutes(currentWindow) !== durationMinutes(previousWindow))
+  const label = (window: PreciseRange | null) => window
+    ? displayAdminWindow(window.start_time, window.end_time) + (rankingDifferentDuration.value
+      ? ` (${t('admin.dashboard.windowMinutes', { minutes: durationMinutes(window) })})` : '')
+    : ''
+  rankingWindowLabel.value = label(currentWindow)
+  yesterdayWindowLabel.value = label(previousWindow)
+  await Promise.all([loadDashboardSnapshot(range, includeStats), loadUserSpendingRanking(rankingRange), loadYesterdayRanking(previousWindow)])
 }
 const loadDashboardStats = () => { performanceRefresh.value++; return load(true) }
 const loadChartData = () => load(false)

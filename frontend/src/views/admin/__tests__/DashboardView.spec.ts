@@ -247,7 +247,7 @@ describe('admin DashboardView', () => {
       expect(wrapper.findComponent({ name: 'Select' }).exists()).toBe(false)
 
       for (const [start, end, grain] of [
-        ['2026-11-27', '2026-11-27', 'hour'], ['2026-11-21', '2026-11-27', 'day']
+        ['2026-11-25', '2026-11-25', 'hour'], ['2026-11-21', '2026-11-27', 'day']
       ]) {
         const calls = getUserSpendingRanking.mock.calls.length
         await applyRange(wrapper, start, end)
@@ -272,6 +272,65 @@ describe('admin DashboardView', () => {
       expect(getSnapshotV2.mock.lastCall?.[0]).not.toHaveProperty('start_date')
       expect(ranking(wrapper).props('showCompare')).toBe(true)
       expect(wrapper.findComponent({ name: 'Select' }).exists()).toBe(false)
+    } finally { wrapper.unmount() }
+  })
+
+  it('keeps exactly two ranking reads for each recent preset and compares site totals', async () => {
+    const wrapper = mountDashboard()
+    try {
+      await flushPromises()
+      const current = { ...rankingResponse(rankingItem(1, 'alice')), total_users: 10, total_requests: 100, total_tokens: 500, total_actual_cost: 20 }
+      const previous = { ...rankingResponse(rankingItem(1, 'alice')), total_users: 5, total_requests: 80, total_tokens: 1000, total_actual_cost: 10 }
+      for (const [key, minutes] of [['admin.usage.recentRange.30',30], ['admin.dashboard.lastHour',60], ['admin.usage.recentRange.180',180]] as const) {
+        const before = getUserSpendingRanking.mock.calls.length
+        getUserSpendingRanking.mockResolvedValueOnce(current).mockResolvedValueOnce(previous)
+        await button(wrapper, key).trigger('click'); await flushPromises()
+        const calls = getUserSpendingRanking.mock.calls.slice(before)
+        expect(calls).toHaveLength(2)
+        expect(Date.parse(calls[0]![0].end_time) - Date.parse(calls[0]![0].start_time)).toBe(minutes*60000)
+        expect(Date.parse(calls[0]![0].start_time) - Date.parse(calls[1]![0].start_time)).toBe(86400000)
+        expect(wrapper.get('[data-testid="site-total-users"]').text()).toContain('100.0%')
+        expect(wrapper.get('[data-testid="site-total-requests"]').text()).toContain('25.0%')
+      }
+    } finally { wrapper.unmount() }
+  })
+  it('compares today and yesterday at the same local clock and uses full site totals', async () => {
+    const now = new Date(2026, 10, 27, 15, 30, 25)
+    vi.setSystemTime(now)
+    const current = { ...rankingResponse(rankingItem(1, 'alice')), total_users: 128, total_requests: 12580, total_tokens: 8000000, total_actual_cost: 36 }
+    const previous = { ...rankingResponse(rankingItem(1, 'alice')), total_users: 100, total_requests: 10000, total_tokens: 10000000, total_actual_cost: 30 }
+    const wrapper = mountDashboard()
+    try {
+      await flushPromises()
+      const count = getUserSpendingRanking.mock.calls.length
+      getUserSpendingRanking.mockResolvedValueOnce(current).mockResolvedValueOnce(previous)
+      await button(wrapper, 'dates.today').trigger('click'); await flushPromises()
+      expect(getUserSpendingRanking.mock.calls.slice(count)).toEqual([
+        [{ start_time: new Date(2026, 10, 27).toISOString(), end_time: new Date(2026, 10, 27, 15, 30).toISOString(), limit: 12 }],
+        [{ start_time: new Date(2026, 10, 26).toISOString(), end_time: new Date(2026, 10, 26, 15, 30).toISOString(), limit: 50 }],
+      ])
+      expect(getSnapshotV2.mock.lastCall?.[0]).toMatchObject({ start_date: '2026-11-27', end_date: '2026-11-27', granularity: 'hour' })
+      expect(getSnapshotV2.mock.lastCall?.[0]).not.toHaveProperty('start_time')
+      expect(ranking(wrapper).props('showCompare')).toBe(true)
+      expect(wrapper.get('[data-testid="site-total-requests"]').text()).toContain('25.8%')
+      expect(wrapper.get('[data-testid="site-total-tokens"]').text()).toContain('20.0%')
+      expect(wrapper.get('[data-testid="site-total-cost"]').text()).toContain('20.0%')
+      expect(wrapper.get('[data-testid="site-total-users"]').text()).toContain('28.0%')
+      await ranking(wrapper).get('tbody tr').trigger('click')
+      expect(push).toHaveBeenLastCalledWith({ path: '/admin/usage', query: { user_id: '1', start_date: '2026-11-27', end_date: '2026-11-27' } })
+      getUserSpendingRanking.mockResolvedValueOnce({ ...current, total_requests: undefined }).mockResolvedValueOnce(previous)
+      await applyRange(wrapper, '2026-11-27', '2026-11-27')
+      expect(wrapper.get('[data-testid="site-total-requests"]').text()).toContain('—')
+      expect(wrapper.get('[data-testid="site-total-requests"]').text()).not.toContain('100%')
+      vi.setSystemTime(new Date(2026, 10, 28, 0, 0, 25))
+      await button(wrapper, 'common.refresh').trigger('click'); await flushPromises()
+      expect(ranking(wrapper).props('showCompare')).toBe(false)
+      expect(button(wrapper, 'dates.today').classes()).not.toContain('btn-primary')
+      const beforeMidnight = getUserSpendingRanking.mock.calls.length
+      await button(wrapper, 'dates.today').trigger('click'); await flushPromises()
+      expect(getUserSpendingRanking).toHaveBeenCalledTimes(beforeMidnight)
+      expect(ranking(wrapper).props('showCompare')).toBe(true)
+      expect(wrapper.get('[data-testid="site-total-users"]').text()).toContain('0')
     } finally { wrapper.unmount() }
   })
 
@@ -449,7 +508,7 @@ describe('admin DashboardView', () => {
     try {
       await flushPromises()
       const comparisonCell = () => ranking(wrapper).get('tbody tr').findAll('td').at(-1)!.text()
-      expect(ranking(wrapper).props('compare')).toEqual({ items: [initialYesterday], totalUsers: 1, window: expect.any(String) })
+      expect(ranking(wrapper).props('compare')).toEqual({ items: [initialYesterday], totalUsers: 1, totalRequests: 4, totalTokens: 50, totalActualCost: 2, window: expect.any(String) })
       expect(comparisonCell()).toBe('↑ 100.0%')
       expect(getSnapshotV2.mock.lastCall?.[0]).toMatchObject({ start_time: windowStart, end_time: windowEnd })
 
@@ -490,11 +549,11 @@ describe('admin DashboardView', () => {
       await button(wrapper, 'common.refresh').trigger('click')
       await flushPromises()
       expect(getSnapshotV2.mock.lastCall?.[0]).toMatchObject({ start_time: '2026-11-27T00:41:00.000Z', end_time: '2026-11-27T01:41:00.000Z' })
-      expect(ranking(wrapper).props('compare')).toEqual({ items: [currentYesterday], totalUsers: 1, window: expect.any(String) })
+      expect(ranking(wrapper).props('compare')).toEqual({ items: [currentYesterday], totalUsers: 1, totalRequests: 4, totalTokens: 50, totalActualCost: 2, window: expect.any(String) })
       expect(comparisonCell()).toBe('↓ 50.0%')
       staleYesterday.resolve(rankingResponse(initialYesterday))
       await flushPromises()
-      expect(ranking(wrapper).props('compare')).toEqual({ items: [currentYesterday], totalUsers: 1, window: expect.any(String) })
+      expect(ranking(wrapper).props('compare')).toEqual({ items: [currentYesterday], totalUsers: 1, totalRequests: 4, totalTokens: 50, totalActualCost: 2, window: expect.any(String) })
       expect(comparisonCell()).toBe('↓ 50.0%')
     } finally { wrapper.unmount() }
   })

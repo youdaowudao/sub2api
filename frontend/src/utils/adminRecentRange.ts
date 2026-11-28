@@ -5,6 +5,25 @@ export function makeRecentRange(minutes: RecentMinutes, now = Date.now()): Preci
   const end = Math.floor(now / 60000) * 60000
   return { start_time: new Date(end - minutes * 60000).toISOString(), end_time: new Date(end).toISOString() }
 }
+
+/** Use the local civil day rather than subtracting 24h across clock changes.
+ * Date's compatible disambiguation moves skipped wall times forward and uses
+ * the earlier instant of repeated wall times. Each day starts independently.
+ */
+export function makeTodayRankingWindows(now = new Date()): { current: PreciseAdminRange; previous: PreciseAdminRange | null } {
+  const cutoff = new Date(Math.floor(now.getTime() / 60000) * 60000)
+  const year = cutoff.getFullYear(), month = cutoff.getMonth(), day = cutoff.getDate()
+  const start = new Date(year, month, day)
+  const previousStart = new Date(year, month, day - 1)
+  const previousCutoff = new Date(year, month, day - 1, cutoff.getHours(), cutoff.getMinutes())
+  const previousEnd = new Date(Math.min(previousCutoff.getTime(), start.getTime()))
+  return {
+    current: { start_time: start.toISOString(), end_time: cutoff.toISOString() },
+    previous: cutoff > start && previousEnd > previousStart
+      ? { start_time: previousStart.toISOString(), end_time: previousEnd.toISOString() }
+      : null
+  }
+}
 export function restoreRecentRange(start: unknown, end: unknown): { minutes: RecentMinutes; range: PreciseAdminRange } | null {
   if (typeof start !== 'string' || typeof end !== 'string') return null
   const a = new Date(start).getTime(), b = new Date(end).getTime()
