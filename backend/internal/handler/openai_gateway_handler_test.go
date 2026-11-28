@@ -1984,6 +1984,11 @@ type openAIResponsesWSUsageLogCase struct {
 	firstFrameCloseExpected    bool
 	bridgeReferenceProbe       bool // Test-only: capture the response and close before assertions.
 	bridgeStream               string
+	bridgeServe                func(http.ResponseWriter, *http.Request, int32)
+	bridgeIdleSeconds          int
+	bridgeProbeFollowup        bool
+	bridgeGuardHeader          http.Header
+	bridgeConcurrency          *concurrencyCacheMock
 	bridgeErrorProbe           bool
 	bridgeExpectedLogs         int
 	directBridgeReferenceProbe bool
@@ -3028,7 +3033,11 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	if tc.standardBridgeRetryAt > 0 {
 		attemptCount++
 	}
-	upstreamPayloadCh := make(chan []byte, attemptCount)
+	upstreamPayloadCapacity := attemptCount
+	if tc.bridgeServe != nil {
+		upstreamPayloadCapacity += 2
+	}
+	upstreamPayloadCh := make(chan []byte, upstreamPayloadCapacity)
 	upstreamErrCh := make(chan error, 1)
 	var channelSvc *service.ChannelService
 	var bridgeTurns atomic.Int32
@@ -3039,7 +3048,11 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 				upstreamErrCh <- err
 				return
 			}
-			upstreamPayloadCh <- payload
+			select {
+			case upstreamPayloadCh <- payload:
+			case <-r.Context().Done():
+				return
+			}
 			attempt := bridgeTurns.Add(1)
 			if tc.standardBridgeRetryAt > 0 && attempt == int32(tc.standardBridgeRetryAt) {
 				w.Header().Set("Content-Type", "application/json")
@@ -3060,6 +3073,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 				}
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
+			if tc.bridgeServe != nil {
+				tc.bridgeServe(w, r, attempt)
+				return
+			}
 			if tc.bridgeStream != "" {
 				_, _ = io.WriteString(w, tc.bridgeStream)
 				return
@@ -3164,6 +3181,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
 	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+	cfg.Gateway.StreamDataIntervalTimeout = tc.bridgeIdleSeconds
+	if tc.bridgeConcurrency != nil {
+		cfg.Gateway.OpenAIWS.MaxIngressConnectionsPerAPIKey = 2
+	}
 
 	var httpUpstream service.HTTPUpstream = &compositeWSHTTPUpstream{}
 	if tc.standardBridgeSameAccount {
@@ -3247,6 +3268,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			return true, nil
 		},
 	}
+	if tc.bridgeConcurrency != nil {
+		cache = tc.bridgeConcurrency
+	}
 	h := &OpenAIGatewayHandler{
 		cfg:                   cfg,
 		usageRecordWorkerPool: tc.standardWorker,
@@ -3326,7 +3350,10 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	handlerServer := httptest.NewServer(router)
 	defer handlerServer.Close()
 
-	headers := http.Header{}
+	headers := tc.bridgeGuardHeader.Clone()
+	if headers == nil {
+		headers = http.Header{}
+	}
 	if tc.standardMode {
 		headers.Set("Authorization", "Bearer "+tc.apiKeyCredential)
 	}
@@ -3356,6 +3383,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		probe := openAIResponsesWSUsageLogResult{}
 		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancelRead()
+		followupSent := false
 		for {
 			_, event, readErr := clientConn.Read(readCtx)
 			if readErr != nil {
@@ -3365,6 +3393,18 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 				break
 			}
 			probe.clientEvents = append(probe.clientEvents, append([]byte(nil), event...))
+			if tc.bridgeServe != nil && gjson.GetBytes(event, "type").String() == "response.completed" {
+				if tc.bridgeProbeFollowup && !followupSent {
+					followupSent = true
+					require.NoError(t, clientConn.Write(readCtx, coderws.MessageText, []byte(tc.secondPayload)))
+				} else {
+					// The old implementation can finish on the late terminal. Close normally
+					// and let the caller's business assertion report that difference.
+					probe.closeStatus = coderws.StatusNormalClosure
+					_ = clientConn.Close(coderws.StatusNormalClosure, "fixture complete")
+					break
+				}
+			}
 		}
 		select {
 		case <-handlerDone:

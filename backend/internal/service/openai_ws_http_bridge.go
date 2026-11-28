@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -644,9 +644,14 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		return nil, fmt.Errorf("upstream http bridge error: status=%d message=%s", resp.StatusCode, upstreamMsg)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	stopCancelBody := context.AfterFunc(ctx, func() { _ = resp.Body.Close() })
-	defer stopCancelBody()
+	var activity *openAIWSBridgeActivity
+	defer func() {
+		if activity != nil {
+			activity.close()
+		} else {
+			_ = resp.Body.Close()
+		}
+	}()
 	if account.Platform == PlatformGrok {
 		s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, resolveGrokWSUpstreamModel(account, body, originalModel)), account, resp.Header, resp.StatusCode)
 	}
@@ -671,7 +676,6 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	pendingClientMessages := make([][]byte, 0, 4)
 	pendingClientMessageBytes := int64(0)
 	capacityFailoverSuppressedLogged := false
-	clientDisconnected := false
 	officialOpenAIResponses := account != nil && account.Platform == PlatformOpenAI
 	bareErrorPending := false
 	var bareErrorPayload []byte
@@ -688,6 +692,15 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 	}
 
+	reasoningEffort := ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(body, mappedModel, originalModel), body, mappedModel)
+	firstOutputTimeout := time.Duration(0)
+	if officialOpenAIResponses {
+		effort := ""
+		if reasoningEffort != nil {
+			effort = *reasoningEffort
+		}
+		firstOutputTimeout = s.openAIFirstOutputTimeout(effort)
+	}
 	resultWithUsage := func(isError bool) *OpenAIForwardResult {
 		imageCount := imageCounter.Count()
 		result := &OpenAIForwardResult{
@@ -700,7 +713,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			UpstreamResponseModelConflict: responseModelObserver.Conflict(),
 			UpstreamResponseServiceTier:   responseModelObserver.ServiceTier(),
 			ServiceTier:                   resolvedOpenAIUpstreamServiceTierFromObserver(responseModelObserver, extractOpenAIServiceTierFromBody(body)),
-			ReasoningEffort:               ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(body, mappedModel, originalModel), body, mappedModel),
+			ReasoningEffort:               reasoningEffort,
 			Stream:                        reqStream,
 			OpenAIWSMode:                  true,
 			UpstreamTerminalEvent:         upstreamTerminalEvent,
@@ -740,11 +753,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if hasResponsesClientToolMapping(clientToolMapping) {
 		resp.Body = newResponsesClientToolStreamBody(resp.Body, clientToolMapping, maxLineSize, s.cfg)
 	}
-	scanner := bufio.NewScanner(resp.Body)
-	scanBuf := getSSEScannerBuf64K()
-	scanner.Buffer(scanBuf[:0], maxLineSize)
-	scanner.Split(newBoundedSSESplit(s.cfg, maxLineSize, nil))
-	defer putSSEScannerBuf64K(scanBuf)
+	activity = newOpenAIWSBridgeActivity(ctx, resp.Body, s.cfg, maxLineSize, account.Platform, turnStart, firstOutputTimeout)
+	writeActive := func(message []byte) error { return activity.write(message, writeClientMessage) }
 
 	pendingSSEEventType := ""
 	finalizeBareError := func() error {
@@ -755,7 +765,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			failureAccountSideEffectsApplied = s.handleOpenAIWSFailureAccountSideEffects(ctx, account, mappedModel, resp.Header, bareErrorPayload)
 		}
 		upstreamTerminalEvent = "response.failed"
-		if clientDisconnected {
+		if activity.disconnected {
 			return nil
 		}
 		clientMessage := buildOpenAIWSHTTPBridgeFailedEvent(responseID, originalModel, createdAtStamper.Value(), bareErrorPayload, bareErrorMessage)
@@ -766,9 +776,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		pendingClientMessages = nil
 		pendingClientMessageBytes = 0
 		for _, message := range messages {
-			if err := writeClientMessage(message); err != nil {
-				if isOpenAIWSClientDisconnectError(err) {
-					clientDisconnected = true
+			if err := writeActive(message); err != nil {
+				if controlErr := activity.observeControl(); controlErr != nil {
+					return controlErr
+				}
+				if activity.disconnected {
 					return nil
 				}
 				return fmt.Errorf("write synthesized websocket response.failed: %w", err)
@@ -778,8 +790,86 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		markOpenAIWSClientVisibleFailure(c, "response.failed", clientMessage)
 		return nil
 	}
-	for scanner.Scan() {
-		line := scanner.Text()
+	disconnectedResult := func(cause error) (*OpenAIForwardResult, error) {
+		return resultWithUsage(true), NewOpenAIWSClientCloseError(coderws.StatusNormalClosure, "client disconnected", errors.Join(context.Canceled, cause))
+	}
+	finishDisconnected := func(cause error) (*OpenAIForwardResult, error) {
+		activity.close()
+		if controlErr := activity.observeControl(); controlErr != nil {
+			return resultWithUsage(true), controlErr
+		}
+		if bareErrorPending {
+			if err := finalizeBareError(); err != nil {
+				cause = errors.Join(cause, err)
+			}
+		}
+		if controlErr := activity.observeControl(); controlErr != nil {
+			return resultWithUsage(true), controlErr
+		}
+		return disconnectedResult(cause)
+	}
+	finishBoundary := func(reason openAIWSBridgeStreamEnd, cause error) (*OpenAIForwardResult, error) {
+		// Stop the upstream before attempting a final bounded client write.
+		activity.close()
+		if reason == openAIWSBridgeStreamControl {
+			return resultWithUsage(true), cause
+		}
+		if controlErr := activity.observeControl(); controlErr != nil {
+			return resultWithUsage(true), controlErr
+		}
+		if activity.disconnected {
+			return finishDisconnected(errors.New("upstream usage incomplete after stream deadline"))
+		}
+		message := "Upstream response stream timed out (no upstream data); request was not replayed"
+		closeReason := "upstream stream timed out"
+		if reason == openAIWSBridgeStreamFirstOutput {
+			message = "Upstream produced no model output before the deadline; request was not replayed"
+			closeReason = "upstream first output timed out"
+		}
+		cause = errors.New(message)
+		if bareErrorPending {
+			cause = errors.New(bareErrorMessage)
+			if err := finalizeBareError(); err != nil {
+				cause = err
+			}
+		} else {
+			pendingClientMessages = nil
+			pendingClientMessageBytes = 0
+			clientError := buildOpenAIWSHTTPBridgeErrorEvent(http.StatusGatewayTimeout, message)
+			if err := writeActive(clientError); err == nil {
+				markOpenAIWSClientVisibleFailure(c, "error", clientError)
+			}
+		}
+		if controlErr := activity.observeControl(); controlErr != nil {
+			return resultWithUsage(true), controlErr
+		}
+		if activity.disconnected {
+			return disconnectedResult(cause)
+		}
+		return resultWithUsage(true), NewOpenAIWSClientCloseError(coderws.StatusInternalError, closeReason, cause)
+	}
+	var scanErr error
+	for {
+		event, reason, cause := activity.next()
+		if reason != openAIWSBridgeStreamContinue {
+			return finishBoundary(reason, cause)
+		}
+		if event.keepalive {
+			if err := writeActive([]byte(`{"type":"keepalive"}`)); err != nil {
+				if controlErr := activity.observeControl(); controlErr != nil {
+					return resultWithUsage(true), controlErr
+				}
+				if !activity.disconnected {
+					return resultWithUsage(true), wrapOpenAIWSIngressTurnError("write_client", fmt.Errorf("write client websocket keepalive: %w", err), wroteDownstream)
+				}
+			}
+			continue
+		}
+		if event.eof {
+			scanErr = event.err
+			break
+		}
+		line := event.line
 		if eventType, ok := extractOpenAISSEEventLine(line); ok {
 			pendingSSEEventType = eventType
 			continue
@@ -909,7 +999,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			}
 			// A disconnected client needs this attempt drained for usage, not replayed,
 			// even when only non-semantic heartbeats were delivered.
-			if !clientDisconnected && !wroteDownstream && shouldFailover && (turn == 1 || statusCode == http.StatusTooManyRequests) {
+			if controlErr := activity.observeControl(); controlErr != nil {
+				return resultWithUsage(true), controlErr
+			}
+			if !activity.disconnected && !wroteDownstream && shouldFailover && (turn == 1 || statusCode == http.StatusTooManyRequests) {
 				if account.Platform == PlatformGrok {
 					return nil, newOpenAIUpstreamFailoverError(statusCode, resp.Header, upstreamMessage, errMessage, false)
 				}
@@ -946,11 +1039,20 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				clientMessage = rewritten
 			}
 		}
-		if !clientDisconnected && !suppressClientMessage {
+		stageBeforeSemanticOutput := turn == 1 && officialOpenAIResponses && !wroteDownstream
+		startsClientOutput := false
+		if activity.firstTimer != nil || (stageBeforeSemanticOutput && !activity.disconnected && !suppressClientMessage) {
+			semanticData := string(clientMessage)
+			startsClientOutput = openAIStreamDataStartsClientOutput(semanticData, eventType) &&
+				!isOpenAIHTTPRelayReadyMetadata(account, semanticData, eventType, pendingSSEEventType)
+			if startsClientOutput {
+				activity.stopFirstOutput()
+			}
+		}
+		if !activity.disconnected && !suppressClientMessage {
 			isKeepalive := eventType == "keepalive"
-			stageBeforeSemanticOutput := turn == 1 && account.Platform == PlatformOpenAI && !wroteDownstream
 			commitStagedMessages := !stageBeforeSemanticOutput ||
-				openAIStreamDataStartsClientOutput(string(clientMessage), eventType) ||
+				startsClientOutput ||
 				isOpenAIWSTerminalEvent(eventType)
 			if stageBeforeSemanticOutput && !commitStagedMessages && !isKeepalive {
 				if pendingClientMessageBytes+int64(len(clientMessage)) > openAIFirstOutputStageMaxBytes {
@@ -977,9 +1079,11 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				}
 				messages = append(messages, clientMessage)
 				for _, message := range messages {
-					if err := writeClientMessage(message); err != nil {
-						if isOpenAIWSClientDisconnectError(err) {
-							clientDisconnected = true
+					if err := writeActive(message); err != nil {
+						if controlErr := activity.observeControl(); controlErr != nil {
+							return resultWithUsage(true), controlErr
+						}
+						if activity.disconnected {
 							closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
 							logOpenAIWSModeInfo(
 								"ingress_ws_http_bridge_client_disconnected_drain account_id=%d turn=%d close_status=%s close_reason=%s",
@@ -1002,7 +1106,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				}
 			}
 		}
-		if !clientDisconnected && !suppressClientMessage {
+		if !activity.disconnected && !suppressClientMessage {
 			markOpenAIWSClientVisibleFailure(c, eventType, upstreamMessage)
 		}
 
@@ -1039,23 +1143,36 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				truncateOpenAIWSLogValue(firstEventType, openAIWSLogValueMaxLen),
 				truncateOpenAIWSLogValue(lastEventType, openAIWSLogValueMaxLen),
 				firstTokenMsValue,
-				clientDisconnected,
+				activity.disconnected,
 			)
 			return resultWithUsage(false), nil
 		}
 	}
+	if controlErr := activity.observeControl(); controlErr != nil {
+		return resultWithUsage(true), controlErr
+	}
+	if activity.disconnected {
+		return finishDisconnected(scanErr)
+	}
 	if bareErrorPending {
-		if finalizeErr := finalizeBareError(); finalizeErr != nil {
+		finalizeErr := finalizeBareError()
+		if controlErr := activity.observeControl(); controlErr != nil {
+			return resultWithUsage(true), controlErr
+		}
+		if activity.disconnected {
+			return disconnectedResult(errors.Join(errors.New(bareErrorMessage), scanErr, finalizeErr))
+		}
+		if finalizeErr != nil {
 			return resultWithUsage(true), finalizeErr
 		}
-		if scanErr := scanner.Err(); scanErr != nil {
+		if scanErr != nil {
 			return resultWithUsage(true), fmt.Errorf("read upstream http bridge stream after error event: %w", scanErr)
 		}
 		return resultWithUsage(true), errors.New(bareErrorMessage)
 	}
-	if err := scanner.Err(); err != nil {
-		streamErr := fmt.Errorf("read upstream http bridge stream: %w", err)
-		if turn == 1 && !clientDisconnected && !wroteDownstream {
+	if scanErr != nil {
+		streamErr := fmt.Errorf("read upstream http bridge stream: %w", scanErr)
+		if turn == 1 && !activity.disconnected && !wroteDownstream {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, streamErr, true)
 		}
 		return resultWithUsage(true), streamErr
@@ -1064,7 +1181,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if sawDone {
 		terminalErr = errors.New("upstream http bridge stream sent [DONE] before terminal event")
 	}
-	if turn == 1 && !clientDisconnected && !wroteDownstream {
+	if turn == 1 && !activity.disconnected && !wroteDownstream {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, terminalErr, true)
 	}
 	return resultWithUsage(true), terminalErr
